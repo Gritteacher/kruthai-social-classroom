@@ -1,4 +1,3 @@
-.html,
 html {
   font-family: "Prompt", "Noto Sans Thai", "Sarabun", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -280,6 +279,56 @@ textarea {
   .control-row button {
     flex: 1 1 140px;
     justify-content: center;
+  }
+
+  .student-preview {
+    overflow-x: visible;
+  }
+
+  .student-preview-head {
+    display: none;
+  }
+
+  .student-preview-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    align-items: start;
+    gap: 10px 14px;
+    padding: 12px;
+  }
+
+  .student-preview-row > * {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+    overflow-wrap: anywhere;
+  }
+
+  .student-preview-row > *::before {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1.2;
+  }
+
+  .student-preview-row > span:nth-child(1)::before {
+    content: "เลขที่";
+  }
+
+  .student-preview-row > span:nth-child(2)::before {
+    content: "รหัสนักเรียน";
+  }
+
+  .student-preview-row > strong:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  .student-preview-row > strong:nth-child(3)::before {
+    content: "ชื่อ-นามสกุล";
+  }
+
+  .student-preview-row > span:nth-child(4)::before {
+    content: "เพศ";
   }
 }
 
