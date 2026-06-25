@@ -1,3 +1,105 @@
+.html,
+html {
+  font-family: "Prompt", "Noto Sans Thai", "Sarabun", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: "Prompt", "Noto Sans Thai", "Sarabun", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+.brand-mark {
+  width: clamp(128px, 18vw, 176px);
+  height: clamp(120px, 17vw, 164px);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(8, 37, 17, 0.18);
+}
+
+.brand-logo,
+.side-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.side-logo {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  padding: 5px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.side-brand {
+  min-width: 0;
+}
+
+.side-brand > div,
+.top-bar > div:first-child {
+  min-width: 0;
+}
+
+.side-brand strong,
+.side-brand small,
+.top-bar h2,
+.top-bar .eyebrow {
+  overflow-wrap: anywhere;
+}
+
+.content-area,
+.workspace,
+.panel,
+.material-card,
+.score-card,
+.submission-card,
+.profile-panel {
+  min-width: 0;
+}
+
+.page-header,
+.section-heading,
+.top-bar,
+.score-hero,
+.profile-panel {
+  flex-wrap: wrap;
+}
+
+.material-body h2,
+.page-header h1,
+.hero-strip h1,
+.auth-card h2,
+.section-heading h2 {
+  overflow-wrap: anywhere;
+}
+
+.bottom-nav {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.bottom-nav button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .material-tools {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -45,7 +147,124 @@
   font-size: 12px;
 }
 
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: 236px minmax(0, 1fr);
+  }
+
+  .side-nav {
+    padding: 20px 14px;
+  }
+
+  .content-area {
+    padding-inline: 22px;
+  }
+}
+
+@media (max-width: 980px) {
+  .auth-page {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-panel {
+    min-height: 320px;
+    padding: 34px 18px 44px;
+  }
+
+  .brand-panel span {
+    left: 18px;
+  }
+
+  .auth-card {
+    width: min(100%, 560px);
+  }
+
+  .top-actions {
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .content-area {
+    padding-inline: 14px;
+  }
+
+  .hero-strip,
+  .score-hero,
+  .panel,
+  .upload-panel,
+  .profile-panel {
+    padding: 16px;
+  }
+
+  .stat-grid,
+  .lesson-strip,
+  .action-grid,
+  .quick-grid,
+  .material-grid,
+  .two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .material-card img,
+  .material-icon,
+  .lesson-card img {
+    height: clamp(150px, 42vw, 210px);
+  }
+
+  .score-table,
+  .score-list,
+  .submission-list {
+    gap: 10px;
+  }
+}
+
 @media (max-width: 620px) {
+  .auth-panel {
+    padding: 16px;
+  }
+
+  .auth-card {
+    padding: 18px;
+  }
+
+  .brand-mark {
+    width: 128px;
+    height: 120px;
+  }
+
+  .top-bar {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .top-actions {
+    margin-left: auto;
+  }
+
+  .hero-strip h1,
+  .page-header h1 {
+    font-size: 25px;
+  }
+
+  .score-hero strong {
+    font-size: 32px;
+  }
+
+  .score-hero b {
+    font-size: 40px;
+  }
+
+  .score-row,
+  .score-card,
+  .submission-card {
+    gap: 10px;
+  }
+
+  .submission-state {
+    align-items: flex-start;
+  }
+
   .material-tools,
   .form-grid {
     grid-template-columns: 1fr;
@@ -54,5 +273,40 @@
   .material-tools .select-button {
     width: 100%;
     justify-content: center;
+  }
+
+  .template-row button,
+  .filter-row button,
+  .control-row button {
+    flex: 1 1 140px;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand-panel h1 {
+    font-size: 24px;
+  }
+
+  .role-card {
+    grid-template-columns: 42px minmax(0, 1fr) 20px;
+    padding: 12px;
+  }
+
+  .role-card small,
+  .submission-card span,
+  .score-card span,
+  .lesson-card span,
+  .material-body p {
+    font-size: 12px;
+  }
+
+  .bottom-nav button {
+    font-size: 11px;
+  }
+
+  .toast {
+    right: 10px;
+    max-width: calc(100vw - 20px);
   }
 }

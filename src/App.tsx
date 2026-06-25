@@ -28,6 +28,7 @@ import type { AppSession, Material, MaterialType, NavItem, Role, ScoreRow, ViewK
 
 type MaterialUpload = { file: File | null; title: string; unit: string; level: string; type: MaterialType };
 
+const SCHOOL_LOGO = "/kruthai-logo.png";
 const sessions: Record<Role, AppSession> = {
   teacher: { role: "teacher", name: "คุณครูไต๋", room: "โรงเรียนวัดสามัคคีธรรม", school: "ห้องเรียนสังคมศึกษา" },
   student: { role: "student", name: "สมชาย ดีมาก", room: "ชั้นมัธยมศึกษาปีที่ 3/1", school: "โรงเรียนวัดสามัคคีธรรม" }
@@ -214,7 +215,7 @@ function App() {
     <div className="app-shell">
       <aside className="side-nav">
         <div className="side-brand">
-          <BookOpen aria-hidden />
+          <img className="side-logo" src={SCHOOL_LOGO} alt="โลโก้โรงเรียน" />
           <div>
             <strong>ห้องเรียนสังคมครูไต๋</strong>
             <small>{session.role === "teacher" ? "พื้นที่ครู" : "พื้นที่นักเรียน"}</small>
@@ -260,10 +261,10 @@ function Auth({ role, busy, toast, onRole, onLogin, onResetPassword }: { role: R
   return (
     <main className="auth-page">
       <section className="brand-panel">
-        <div className="brand-mark"><BookOpen aria-hidden /></div>
+        <div className="brand-mark"><img className="brand-logo" src={SCHOOL_LOGO} alt="โลโก้โรงเรียน" /></div>
         <h1>ห้องเรียนสังคมครูไต๋</h1>
         <p>ระบบห้องเรียนออนไลน์วิชาสังคมศึกษา</p>
-        <span>v1.2.1</span>
+        <span>v1.2.2</span>
       </section>
       <section className="auth-panel">
         <div className="auth-card">
