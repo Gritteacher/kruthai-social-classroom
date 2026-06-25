@@ -8,6 +8,8 @@ insert into storage.buckets (id, name, public) values ('classroom-files', 'class
 alter table public.profiles enable row level security; alter table public.materials enable row level security; alter table public.submissions enable row level security; alter table public.scores enable row level security; alter table public.student_roster_uploads enable row level security;
 create policy "profiles can read own profile" on public.profiles for select to authenticated using (auth.uid() = id);
 create policy "classroom materials readable" on public.materials for select to authenticated using (true);
+create policy "classroom materials insertable" on public.materials for insert to authenticated with check (true);
+create policy "classroom materials updateable" on public.materials for update to authenticated using (true) with check (true);
 create policy "submissions readable" on public.submissions for select to authenticated using (true);
 create policy "submissions insertable" on public.submissions for insert to authenticated with check (true);
 create policy "scores readable" on public.scores for select to authenticated using (true);
