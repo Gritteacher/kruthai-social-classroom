@@ -41,15 +41,21 @@ textarea {
 
 .side-logo {
   flex: 0 0 auto;
-  width: 52px;
-  height: 52px;
-  padding: 5px;
-  border-radius: 8px;
+  width: 56px;
+  height: 56px;
+  padding: 6px;
+  border-radius: 14px;
   background: #fff;
 }
 
 .side-brand {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
   min-width: 0;
+  padding: 8px 6px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .side-brand > div,
@@ -62,6 +68,60 @@ textarea {
 .top-bar h2,
 .top-bar .eyebrow {
   overflow-wrap: anywhere;
+}
+
+.side-nav {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 28%),
+    #10531f;
+}
+
+.side-nav nav {
+  gap: 10px;
+}
+
+.side-nav nav button,
+.logout-button {
+  position: relative;
+  min-height: 52px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  box-shadow: none;
+  outline: none;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.side-nav nav button:hover,
+.logout-button:hover {
+  transform: translateX(2px);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.side-nav nav button::before {
+  position: absolute;
+  inset: 12px auto 12px 0;
+  width: 3px;
+  border-radius: 999px;
+  background: transparent;
+  content: "";
+}
+
+.side-nav nav button.active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  box-shadow: none;
+}
+
+.side-nav nav button.active::before {
+  background: #fff;
+}
+
+.side-nav nav button svg,
+.logout-button svg {
+  flex: 0 0 auto;
 }
 
 .content-area,
@@ -281,7 +341,7 @@ textarea {
 
 .student-preview-head,
 .student-preview-row-action {
-  grid-template-columns: 64px 130px minmax(0, 1fr) 90px 42px;
+  grid-template-columns: 64px 130px minmax(0, 1fr) 112px 116px 42px;
 }
 
 .student-preview-row-action strong,
@@ -316,6 +376,40 @@ textarea {
 .review-grid .field select {
   min-height: 38px;
   padding: 0 10px;
+}
+
+.inline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.inline-link svg {
+  width: 15px;
+  height: 15px;
+}
+
+.account-toolbar {
+  margin: 14px 0;
+}
+
+.account-toolbar .field {
+  width: min(100%, 420px);
+}
+
+.account-button {
+  min-width: 104px;
+  justify-content: center;
+}
+
+.password-form {
+  align-items: end;
+}
+
+.password-form .field {
+  flex: 1 1 260px;
 }
 
 .mini-list > div {
@@ -578,7 +672,12 @@ textarea {
   }
 
   .student-preview-row > span:nth-child(4)::before {
-    content: "เพศ";
+    content: "บัญชี";
+  }
+
+  .student-preview-row-action .account-button {
+    width: 100%;
+    grid-column: 1 / -1;
   }
 
   .student-preview-row-action .icon-danger {
@@ -736,11 +835,16 @@ textarea {
 .filter-row button.active,
 .assignment-chip.active,
 .score-tabs button.active,
-.classroom-chip.active > button:first-child,
-.side-nav nav button.active {
+.classroom-chip.active > button:first-child {
   background: #17652a;
   color: #fff;
   box-shadow: 0 8px 18px rgba(23, 101, 42, 0.14);
+}
+
+.side-nav nav button.active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  box-shadow: none;
 }
 
 .danger-button,

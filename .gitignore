@@ -7,3 +7,5 @@ dist
 vite.config.js
 vite.config.d.ts
 .netlify/
+netlify/functions/*.zip
+netlify/functions/manifest.json

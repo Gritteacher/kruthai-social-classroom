@@ -8,10 +8,12 @@ import {
   ClipboardCheck,
   CloudUpload,
   Download,
+  ExternalLink,
   Eye,
   FileSpreadsheet,
   GraduationCap,
   Home,
+  KeyRound,
   Lock,
   LogOut,
   Mail,
@@ -23,6 +25,7 @@ import {
   Trash2,
   Upload,
   User,
+  UserPlus,
   Users
 } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -50,7 +53,9 @@ const SCHOOL_LOGO = "/kruthai-logo.png";
 const SCHOOL_NAME = "โรงเรียนเทพศิรินทร์ นนทบุรี";
 const NO_CLASS_LABEL = "ยังไม่ได้เลือกห้องเรียน";
 const STORAGE_BUCKET = "classroom-files";
-const filters: Array<"ทั้งหมด" | MaterialType | "ม.1" | "ม.2" | "ม.3"> = ["ทั้งหมด", "ม.1", "ม.2", "ม.3", "VIDEO", "PDF"];
+const STUDENT_EMAIL_DOMAIN = "students.kruthai.local";
+const gradeLevels = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"] as const;
+const filters: Array<"ทั้งหมด" | MaterialType | (typeof gradeLevels)[number]> = ["ทั้งหมด", ...gradeLevels, "VIDEO", "PDF"];
 const materialTypes: MaterialType[] = ["PDF", "VIDEO", "IMG"];
 const submissionStatuses: SubmissionStatus[] = ["ยังไม่ส่ง", "ส่งแล้ว", "รอตรวจ", "ตรวจแล้ว", "ให้แก้ไข", "ส่งช้า"];
 
@@ -98,9 +103,10 @@ async function resolveAppSession(user: any, fallbackRole: Role): Promise<AppSess
   const base = sessions[resolvedRole];
   const school = String(profile?.school_name || metadata.school_name || base.school);
   const name = String(profile?.full_name || metadata.full_name || metadata.name || base.name);
+  const studentCode = String(profile?.student_code || metadata.student_code || studentCodeFromEmail(user?.email) || "");
   const room = resolvedRole === "teacher" ? school : String(profile?.class_name || metadata.class_name || base.room);
 
-  return { role: resolvedRole, name, room, school };
+  return { role: resolvedRole, name, room, school, studentCode: studentCode || undefined };
 }
 
 function App() {
@@ -187,13 +193,14 @@ function App() {
     };
   }, []);
 
-  async function login(email: string, password: string) {
+  async function login(identifier: string, password: string) {
     if (!isSupabaseConfigured) {
       flash("ระบบยังไม่ได้เชื่อมต่อ Supabase กรุณาตรวจค่า Environment Variables");
       return;
     }
+    const email = normalizeLoginIdentifier(identifier, role);
     if (!email.includes("@")) {
-      flash("กรุณาเข้าสู่ระบบด้วยอีเมลที่ลงทะเบียนไว้");
+      flash(role === "student" ? "กรอกรหัสประจำตัวนักเรียน หรืออีเมลนักเรียน" : "กรุณาเข้าสู่ระบบด้วยอีเมลที่ลงทะเบียนไว้");
       return;
     }
     setBusy(true);
@@ -209,8 +216,9 @@ function App() {
     setView("home");
   }
 
-  async function requestPasswordReset(email: string) {
-    if (!email.includes("@")) return flash("กรอกอีเมลก่อน แล้วกดลืมรหัสผ่านอีกครั้ง");
+  async function requestPasswordReset(identifier: string) {
+    const email = normalizeLoginIdentifier(identifier, role);
+    if (!identifier.includes("@")) return flash(role === "student" ? "นักเรียนเข้าสู่ระบบแล้วเปลี่ยนรหัสผ่านได้ในหน้าโปรไฟล์ หรือให้ครูรีเซ็ตรหัสให้" : "กรอกอีเมลก่อน แล้วกดลืมรหัสผ่านอีกครั้ง");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     const { error } = await supabase!.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
@@ -225,6 +233,17 @@ function App() {
     setView("home");
   }
 
+  async function changePassword(newPassword: string) {
+    if (!newPassword.trim()) return flash("กรอกรหัสผ่านใหม่ก่อน");
+    if (newPassword.trim().length < 6) return flash("รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร");
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    setBusy(true);
+    const { error } = await supabase!.auth.updateUser({ password: newPassword.trim() });
+    setBusy(false);
+    if (error) return flash(error.message);
+    flash("เปลี่ยนรหัสผ่านเรียบร้อย");
+  }
+
   async function uploadMaterial({ file, title, unit, level, type }: MaterialUpload) {
     if (!title.trim()) return flashAndFail("กรุณาใส่ชื่อสื่อการสอน", flash);
     if (!file) return flashAndFail("กรุณาเลือกไฟล์สื่อการสอน", flash);
@@ -232,7 +251,10 @@ function App() {
     setBusy(true);
     const storagePath = `materials/${Date.now()}-${safeFileName(file.name)}`;
     const client = supabase as any;
-    const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file);
+    const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
+      contentType: file.type || mimeForMaterial(file.name, type),
+      upsert: false
+    });
     if (upload.error) {
       setBusy(false);
       flash(upload.error.message);
@@ -245,6 +267,7 @@ function App() {
       .single();
     setBusy(false);
     if (insert.error) {
+      await client.storage.from(STORAGE_BUCKET).remove([storagePath]);
       flash(insert.error.message);
       return false;
     }
@@ -275,6 +298,15 @@ function App() {
       return flash(`เปิดไฟล์ ${item.title} ในแท็บใหม่`);
     }
     flash("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเปิดไฟล์ไม่ได้");
+  }
+
+  async function openSubmissionFile(item: SubmissionRecord) {
+    if (!item.filePath) return flash("งานนี้ยังไม่มีไฟล์แนบ");
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเปิดไฟล์ไม่ได้");
+    const { data, error } = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
+    if (error || !data?.signedUrl) return flash(error?.message || "เปิดไฟล์งานไม่ได้");
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    flash(`เปิดไฟล์งาน ${item.assignmentTitle} ในแท็บใหม่`);
   }
 
   async function addClassroom(draft: ClassroomDraft) {
@@ -356,6 +388,34 @@ function App() {
     return true;
   }
 
+  async function createStudentAccount(student: StudentRecord, password: string) {
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    const initialPassword = password.trim() || defaultStudentPassword(student.studentId);
+    if (initialPassword.length < 6) return flash("รหัสผ่านเริ่มต้นต้องมีอย่างน้อย 6 ตัวอักษร");
+    const auth = await supabase!.auth.getSession();
+    const accessToken = auth.data.session?.access_token;
+    if (!accessToken) return flash("กรุณาเข้าสู่ระบบครูใหม่อีกครั้งก่อนสร้างบัญชีนักเรียน");
+    setBusy(true);
+    const response = await fetch("/.netlify/functions/create-student-account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        studentRecordId: student.id,
+        studentCode: student.studentId,
+        fullName: student.name,
+        className: student.className,
+        classroomId: student.classroomId,
+        password: initialPassword
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    setBusy(false);
+    if (!response.ok || !payload.ok) return flash(payload.message || "สร้างบัญชีนักเรียนไม่สำเร็จ");
+    const authEmail = payload.email || studentCodeToEmail(student.studentId);
+    setStudents((current) => current.map((item) => item.id === student.id ? { ...item, authEmail, accountCreatedAt: new Date().toISOString() } : item));
+    flash(`สร้างบัญชี ${student.studentId} แล้ว รหัสผ่านเริ่มต้น: ${initialPassword}`);
+  }
+
   async function deleteStudent(student: StudentRecord) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
@@ -375,7 +435,10 @@ function App() {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     const storagePath = `rosters/${Date.now()}-${safeFileName(file.name)}`;
-    const upload = await (supabase as any).storage.from(STORAGE_BUCKET).upload(storagePath, file);
+    const upload = await (supabase as any).storage.from(STORAGE_BUCKET).upload(storagePath, file, {
+      contentType: file.type || "application/octet-stream",
+      upsert: false
+    });
     if (upload.error) {
       setBusy(false);
       return flash(upload.error.message);
@@ -489,7 +552,7 @@ function App() {
     const record = {
       assignment_title: assignmentTitle.trim(),
       student_name: session?.name || "นักเรียน",
-      student_code: "student",
+      student_code: session?.studentCode || "student",
       classroom_id: selectedClassroom?.id,
       file_path: storagePath,
       status: "รอตรวจ",
@@ -499,7 +562,10 @@ function App() {
       final_max: 10
     };
     const client = supabase as any;
-    const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file);
+    const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
+      contentType: file.type || "application/octet-stream",
+      upsert: false
+    });
     if (upload.error) {
       setBusy(false);
       return flash(upload.error.message);
@@ -545,9 +611,9 @@ function App() {
           {view === "home" && <HomeView session={session} setView={setView} flash={flash} materials={materialItems} students={activeStudents} submissions={activeSubmissions} assignments={activeAssignments} activeClassName={activeClassName} />}
           {view === "materials" && <MaterialsView role={session.role} materials={materialItems} busy={busy} flash={flash} onOpen={openMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} />}
           {view === "scores" && <ScoresView role={session.role} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} />}
-          {view === "work" && <WorkView role={session.role} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} />}
-          {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} uploadRosterFile={uploadRosterFile} />}
-          {view === "profile" && <ProfileView session={session} />}
+          {view === "work" && <WorkView role={session.role} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} openSubmission={openSubmissionFile} />}
+          {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
+          {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
         </section>
       </main>
       <nav className="bottom-nav">{nav.map((item) => <NavButton key={item.key} item={item} active={view === item.key} onClick={() => setView(item.key)} />)}</nav>
@@ -557,19 +623,21 @@ function App() {
 }
 
 function Auth({ role, busy, toast, onRole, onLogin, onResetPassword }: { role: Role; busy: boolean; toast: string; onRole: (role: Role) => void; onLogin: (email: string, password: string) => void; onResetPassword: (email: string) => void }) {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    onLogin(email, password);
+    onLogin(identifier, password);
   };
+  const identifierLabel = role === "student" ? "รหัสประจำตัวนักเรียน / อีเมล" : "อีเมล";
+  const identifierPlaceholder = role === "student" ? "เช่น 65001" : "name@school.ac.th";
   return (
     <main className="auth-page">
       <section className="brand-panel">
         <div className="brand-mark"><img className="brand-logo" src={SCHOOL_LOGO} alt="โลโก้โรงเรียน" /></div>
         <h1>ห้องเรียนสังคมครูไต๋</h1>
         <p>{SCHOOL_NAME}</p>
-        <span>v1.4.0</span>
+        <span>v1.5.0</span>
       </section>
       <section className="auth-panel">
         <div className="auth-card">
@@ -580,11 +648,11 @@ function Auth({ role, busy, toast, onRole, onLogin, onResetPassword }: { role: R
             <RoleCard selected={role === "student"} icon={GraduationCap} title="นักเรียน" body="เรียนออนไลน์ ส่งงาน ดูคะแนน" onClick={() => onRole("student")} />
           </div>
           <form className="login-form" onSubmit={submit}>
-            <label>อีเมล<div className="input-shell"><Mail aria-hidden /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@school.ac.th" /></div></label>
+            <label>{identifierLabel}<div className="input-shell"><Mail aria-hidden /><input value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder={identifierPlaceholder} /></div></label>
             <label>รหัสผ่าน<div className="input-shell"><Lock aria-hidden /><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" /></div></label>
             <button className="primary-button" disabled={busy}><ShieldCheck aria-hidden />{busy ? "กำลังเข้าสู่ระบบ" : "เข้าสู่ระบบ"}</button>
           </form>
-          <button className="text-button" type="button" onClick={() => onResetPassword(email)}>ลืมรหัสผ่าน?</button>
+          <button className="text-button" type="button" onClick={() => onResetPassword(identifier)}>ลืมรหัสผ่าน?</button>
         </div>
         {toast && <div className="toast auth-toast">{toast}</div>}
       </section>
@@ -634,7 +702,7 @@ function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload, 
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [unit, setUnit] = useState("สื่อเสริม");
-  const [level, setLevel] = useState("ม.3");
+  const [level, setLevel] = useState("ม.1");
   const [type, setType] = useState<MaterialType>("PDF");
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -651,8 +719,15 @@ function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload, 
     setFile(null);
     setTitle("");
     setUnit("สื่อเสริม");
-    setLevel("ม.3");
+    setLevel("ม.1");
     setType("PDF");
+  }
+
+  function chooseMaterialFile(nextFile: File | null) {
+    setFile(nextFile);
+    if (!nextFile) return;
+    setType(materialTypeFromFile(nextFile.name, nextFile.type));
+    if (!title.trim()) setTitle(cleanFileTitle(nextFile.name));
   }
 
   return (
@@ -669,10 +744,10 @@ function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload, 
           <div className="form-grid">
             <label className="field">ชื่อสื่อ<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="เช่น ใบงานประชาธิปไตย" /></label>
             <label className="field">หน่วยการเรียน<input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="บทที่ 1" /></label>
-            <label className="field">ระดับชั้น<select value={level} onChange={(event) => setLevel(event.target.value)}><option>ม.1</option><option>ม.2</option><option>ม.3</option></select></label>
+            <label className="field">ระดับชั้น<select value={level} onChange={(event) => setLevel(event.target.value)}>{gradeLevels.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label className="field">ประเภท<select value={type} onChange={(event) => setType(event.target.value as MaterialType)}>{materialTypes.map((item) => <option key={item}>{item}</option>)}</select></label>
           </div>
-          <UploadPanel file={file} setFile={setFile} accept=".pdf,.mp4,.mov,.png,.jpg,.jpeg" label="เลือกไฟล์สื่อการสอน" help="รองรับ PDF, วิดีโอ, PNG, JPG" />
+          <UploadPanel file={file} setFile={chooseMaterialFile} accept=".pdf,application/pdf,.mp4,video/mp4,.mov,video/quicktime,.png,image/png,.jpg,.jpeg,image/jpeg" label="เลือกไฟล์สื่อการสอน" help="รองรับ PDF, วิดีโอ, PNG, JPG" />
           <button className="primary-button full-button" disabled={busy} onClick={saveMaterial}><Upload aria-hidden />{busy ? "กำลังอัปโหลด" : "อัปโหลดสื่อการสอน"}</button>
         </section>
       )}
@@ -682,7 +757,7 @@ function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload, 
 }
 
 function ScoresView({ role, students, assignments, entries, busy, activeClassName, addAssignment, deleteAssignment, updateScoreDraft, saveScoreSheet }: { role: Role; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void }) {
-  const [draft, setDraft] = useState<AssignmentDraft>({ title: "", rawMax: "10", finalMax: "10" });
+  const [draft, setDraft] = useState<AssignmentDraft>({ title: "", rawMax: "", finalMax: "" });
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
   const selected = assignments.find((assignment) => assignment.id === selectedId) || assignments[0];
@@ -691,7 +766,7 @@ function ScoresView({ role, students, assignments, entries, busy, activeClassNam
   async function createAssignment() {
     const ok = await addAssignment(draft);
     if (!ok) return;
-    setDraft({ title: "", rawMax: "10", finalMax: "10" });
+    setDraft({ title: "", rawMax: "", finalMax: "" });
   }
 
   if (role === "student") {
@@ -705,8 +780,8 @@ function ScoresView({ role, students, assignments, entries, busy, activeClassNam
         <SectionTitle title="เพิ่มงานคะแนน" note="คะแนนดิบ -> คะแนนที่หารแล้ว" />
         <div className="form-grid">
           <label className="field">ชื่องาน / แบบประเมิน<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น ใบงานที่ 1" /></label>
-          <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => setDraft({ ...draft, rawMax: event.target.value })} /></label>
-          <label className="field">คิดเป็นคะแนนเก็บ<input type="number" min="1" value={draft.finalMax} onChange={(event) => setDraft({ ...draft, finalMax: event.target.value })} /></label>
+          <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => setDraft({ ...draft, rawMax: event.target.value })} placeholder="เช่น 10" /></label>
+          <label className="field">คิดเป็นคะแนนเก็บ<input type="number" min="1" value={draft.finalMax} onChange={(event) => setDraft({ ...draft, finalMax: event.target.value })} placeholder="เช่น 5" /></label>
         </div>
         <button className="primary-button" disabled={busy} onClick={createAssignment}><Plus aria-hidden />เพิ่มงานคะแนน</button>
       </section>
@@ -725,7 +800,7 @@ function ScoresView({ role, students, assignments, entries, busy, activeClassNam
                   <div className="student-initial">{student.name.slice(0, 1) || student.studentId.slice(0, 1)}</div>
                   <div><strong>{student.name}</strong><span>ID: {student.studentId}</span></div>
                   <span className={`status-pill ${final >= selected.finalMax * 0.5 ? "pass" : "pending"}`}>{final >= selected.finalMax * 0.5 ? "ผ่าน" : "รอปรับ"}</span>
-                  {mode === "raw" ? <label className="score-input"><input type="number" min="0" max={selected.rawMax} value={rawScore} onChange={(event) => updateScoreDraft(selected, student, event.target.value)} /><span>/ {formatScore(selected.rawMax)}</span></label> : <div className="score-result"><strong>{formatScore(final)}</strong><span>/ {formatScore(selected.finalMax)}</span></div>}
+                  {mode === "raw" ? <label className="score-input"><input type="number" min="0" max={selected.rawMax} value={entry ? numericInputValue(rawScore) : ""} onChange={(event) => updateScoreDraft(selected, student, event.target.value)} placeholder="0" /><span>/ {formatScore(selected.rawMax)}</span></label> : <div className="score-result"><strong>{formatScore(final)}</strong><span>/ {formatScore(selected.finalMax)}</span></div>}
                 </article>
               );
             })}</div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
@@ -749,7 +824,7 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   })}</div></section> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
-function WorkView({ role, submissions, busy, activeClassName, submitWork, updateSubmission, saveSubmission }: { role: Role; submissions: SubmissionRecord[]; busy: boolean; activeClassName: string; submitWork: (file: File | null, assignmentTitle: string) => void; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void }) {
+function WorkView({ role, submissions, busy, activeClassName, submitWork, updateSubmission, saveSubmission, openSubmission }: { role: Role; submissions: SubmissionRecord[]; busy: boolean; activeClassName: string; submitWork: (file: File | null, assignmentTitle: string) => void; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [assignmentTitle, setAssignmentTitle] = useState("");
   if (role === "teacher") {
@@ -758,7 +833,7 @@ function WorkView({ role, submissions, busy, activeClassName, submitWork, update
         <PageHeader title="ตรวจงาน" eyebrow={activeClassName} />
         <section className="panel">
           <SectionTitle title="รายการงานส่ง" note={`${submissions.length} รายการ`} />
-          {submissions.length ? <div className="submission-list">{submissions.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} />)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงาน รายการจะปรากฏที่นี่" />}
+          {submissions.length ? <div className="submission-list">{submissions.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} openSubmission={openSubmission} />)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงาน รายการจะปรากฏที่นี่" />}
         </section>
       </div>
     );
@@ -766,17 +841,19 @@ function WorkView({ role, submissions, busy, activeClassName, submitWork, update
   return <div className="page-stack"><PageHeader title="ส่งงาน" eyebrow={activeClassName} /><section className="panel compact-form"><label className="field">ชื่องาน<input value={assignmentTitle} onChange={(event) => setAssignmentTitle(event.target.value)} placeholder="เช่น ใบงานที่ 1" /></label><UploadPanel file={file} setFile={setFile} accept=".pdf,.docx,.png,.jpg,.jpeg" label="เลือกไฟล์งานของคุณ" help="รองรับ PDF, DOCX, PNG, JPG ขนาดไม่เกิน 10MB" /><button className="primary-button full-button" disabled={busy} onClick={() => submitWork(file, assignmentTitle)}><CloudUpload aria-hidden />{busy ? "กำลังส่งงาน" : "ส่งงาน"}</button></section><section className="panel"><SectionTitle title="ประวัติการส่งงาน" note={`${submissions.length} รายการ`} />{submissions.length ? <SubmissionList items={submissions} compact /> : <EmptyState title="ยังไม่มีประวัติ" body="เมื่อส่งงานแล้วจะแสดงรายการที่นี่" />}</section></div>;
 }
 
-function ReviewCard({ item, busy, updateSubmission, saveSubmission }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void }) {
+function ReviewCard({ item, busy, updateSubmission, saveSubmission, openSubmission }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
   return (
     <article className="submission-card review-card">
       <div>
         <strong>{item.assignmentTitle}</strong>
         <span>{item.studentName} · ID: {item.studentId}</span>
         <small>{item.submittedAt}</small>
+        <small>{item.filePath ? `ไฟล์: ${fileNameFromPath(item.filePath)}` : "ยังไม่มีไฟล์แนบ"}</small>
+        <button className="text-button inline-link" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath}><ExternalLink aria-hidden />เปิดไฟล์งานนักเรียน</button>
       </div>
       <div className="review-grid">
         <label className="field">สถานะ<select value={item.status} onChange={(event) => updateSubmission(item.id, { status: event.target.value as SubmissionStatus })}>{submissionStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
-        <label className="field">คะแนนดิบ<input type="number" min="0" value={item.rawScore} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} /></label>
+        <label className="field">คะแนนดิบ<input type="number" min="0" value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="0" /></label>
         <label className="field">เต็มดิบ<input type="number" min="1" value={item.rawMax} onChange={(event) => updateSubmission(item.id, { rawMax: positiveNumber(event.target.value, item.rawMax) })} /></label>
         <label className="field">คะแนนเก็บเต็ม<input type="number" min="1" value={item.finalMax} onChange={(event) => updateSubmission(item.id, { finalMax: positiveNumber(event.target.value, item.finalMax) })} /></label>
         <div className="score-result"><strong>{formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}</strong><span>/ {formatScore(item.finalMax)}</span></div>
@@ -786,10 +863,11 @@ function ReviewCard({ item, busy, updateSubmission, saveSubmission }: { item: Su
   );
 }
 
-function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, students, busy, addClassroom, deleteClassroom, selectClassroom, addStudent, deleteStudent, uploadRosterFile }: { classrooms: Classroom[]; selectedClassroom?: Classroom; selectedClassroomId: string; students: StudentRecord[]; busy: boolean; addClassroom: (draft: ClassroomDraft) => Promise<boolean>; deleteClassroom: (classroom: Classroom) => void; selectClassroom: (id: string) => void; addStudent: (draft: StudentDraft) => Promise<boolean>; deleteStudent: (student: StudentRecord) => void; uploadRosterFile: (file: File | null) => void }) {
+function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, students, busy, addClassroom, deleteClassroom, selectClassroom, addStudent, deleteStudent, uploadRosterFile, createStudentAccount }: { classrooms: Classroom[]; selectedClassroom?: Classroom; selectedClassroomId: string; students: StudentRecord[]; busy: boolean; addClassroom: (draft: ClassroomDraft) => Promise<boolean>; deleteClassroom: (classroom: Classroom) => void; selectClassroom: (id: string) => void; addStudent: (draft: StudentDraft) => Promise<boolean>; deleteStudent: (student: StudentRecord) => void; uploadRosterFile: (file: File | null) => void; createStudentAccount: (student: StudentRecord, password: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [classDraft, setClassDraft] = useState<ClassroomDraft>({ academicYear: "2569", level: "ม.1", room: "", subject: "สังคมศึกษา" });
   const [draft, setDraft] = useState<StudentDraft>({ no: "", studentId: "", name: "", gender: "" });
+  const [accountPassword, setAccountPassword] = useState("");
   async function saveClassroom() {
     const ok = await addClassroom(classDraft);
     if (!ok) return;
@@ -807,7 +885,7 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
         <SectionTitle title="ตั้งค่าห้องเรียน" note="ปีการศึกษา / ระดับชั้น / ห้อง / รายวิชา" />
         <div className="form-grid classroom-form-grid">
           <label className="field">ปีการศึกษา<input value={classDraft.academicYear} onChange={(event) => setClassDraft({ ...classDraft, academicYear: event.target.value })} placeholder="2569" /></label>
-          <label className="field">ระดับชั้น<select value={classDraft.level} onChange={(event) => setClassDraft({ ...classDraft, level: event.target.value })}><option>ม.1</option><option>ม.2</option><option>ม.3</option><option>ม.4</option><option>ม.5</option><option>ม.6</option></select></label>
+          <label className="field">ระดับชั้น<select value={classDraft.level} onChange={(event) => setClassDraft({ ...classDraft, level: event.target.value })}>{gradeLevels.map((item) => <option key={item}>{item}</option>)}</select></label>
           <label className="field">ห้อง<input value={classDraft.room} onChange={(event) => setClassDraft({ ...classDraft, room: event.target.value })} placeholder="เช่น 1" /></label>
           <label className="field">รายวิชา<input value={classDraft.subject} onChange={(event) => setClassDraft({ ...classDraft, subject: event.target.value })} placeholder="สังคมศึกษา" /></label>
         </div>
@@ -828,7 +906,13 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
       </section>
       <section className="panel">
         <SectionTitle title="รายชื่อในห้องนี้" note={`${students.length} คน`} />
-        {students.length ? <div className="student-preview"><div className="student-preview-head"><span>เลขที่</span><span>รหัสนักเรียน</span><span>ชื่อ-นามสกุล</span><span>เพศ</span><span></span></div>{students.map((student) => <div className="student-preview-row student-preview-row-action" key={student.id}><span>{student.no}</span><span>{student.studentId}</span><strong>{student.name}</strong><span>{student.gender || "-"}</span><button className="icon-danger" disabled={busy} onClick={() => deleteStudent(student)} title="ลบรายชื่อ"><Trash2 aria-hidden /></button></div>)}</div> : <EmptyState title="ยังไม่มีรายชื่อ" body="เพิ่มรายชื่อด้วยฟอร์มด้านบน หรืออัปโหลดไฟล์เก็บไว้ก่อน" />}
+        <div className="account-toolbar">
+          <label className="field">รหัสผ่านเริ่มต้นสำหรับบัญชีใหม่<input type="text" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} placeholder="เว้นว่าง = รหัสนักเรียน@2569" /></label>
+        </div>
+        {students.length ? <div className="student-preview"><div className="student-preview-head"><span>เลขที่</span><span>รหัสนักเรียน</span><span>ชื่อ-นามสกุล</span><span>บัญชี</span><span></span><span></span></div>{students.map((student) => {
+          const hasAccount = Boolean(student.authEmail || student.accountCreatedAt);
+          return <div className="student-preview-row student-preview-row-action" key={student.id}><span>{student.no}</span><span>{student.studentId}</span><strong>{student.name}</strong><span className={`status-pill ${hasAccount ? "pass" : "pending"}`}>{hasAccount ? "มีบัญชีแล้ว" : "ยังไม่สร้าง"}</span><button className="small-primary account-button" disabled={busy} onClick={() => createStudentAccount(student, accountPassword)} title="สร้างหรือรีเซ็ตรหัสบัญชีนักเรียน"><UserPlus aria-hidden />บัญชี</button><button className="icon-danger" disabled={busy} onClick={() => deleteStudent(student)} title="ลบรายชื่อ"><Trash2 aria-hidden /></button></div>;
+        })}</div> : <EmptyState title="ยังไม่มีรายชื่อ" body="เพิ่มรายชื่อด้วยฟอร์มด้านบน หรืออัปโหลดไฟล์เก็บไว้ก่อน" />}
       </section>
     </div>
   );
@@ -838,8 +922,29 @@ function UploadPanel({ file, setFile, accept, label, help }: { file: File | null
   return <section className="upload-panel"><CloudUpload aria-hidden /><strong>{label}</strong><span>หรือ</span><label className="outline-file-button"><Upload aria-hidden /><input accept={accept} type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />{file ? file.name : "เลือกไฟล์จากเครื่อง"}</label><small>{help}</small></section>;
 }
 
-function ProfileView({ session }: { session: AppSession }) {
-  return <div className="page-stack"><PageHeader title="โปรไฟล์" eyebrow={session.room} /><section className="profile-panel"><div className="profile-avatar">{session.name.slice(0, 1)}</div><div><h2>{session.name}</h2><p>{session.school}</p></div></section></div>;
+function ProfileView({ session, busy, changePassword }: { session: AppSession; busy: boolean; changePassword: (newPassword: string) => void }) {
+  const [newPassword, setNewPassword] = useState("");
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    changePassword(newPassword);
+    setNewPassword("");
+  }
+  return (
+    <div className="page-stack">
+      <PageHeader title="โปรไฟล์" eyebrow={session.room} />
+      <section className="profile-panel">
+        <div className="profile-avatar">{session.name.slice(0, 1)}</div>
+        <div><h2>{session.name}</h2><p>{session.school}{session.studentCode ? ` · รหัส ${session.studentCode}` : ""}</p></div>
+      </section>
+      <section className="panel compact-form">
+        <SectionTitle title="เปลี่ยนรหัสผ่าน" note="ใช้สำหรับนักเรียนและครูที่เข้าสู่ระบบแล้ว" />
+        <form className="form-actions password-form" onSubmit={submit}>
+          <label className="field">รหัสผ่านใหม่<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="อย่างน้อย 6 ตัวอักษร" /></label>
+          <button className="primary-button" disabled={busy}><KeyRound aria-hidden />{busy ? "กำลังบันทึก" : "เปลี่ยนรหัสผ่าน"}</button>
+        </form>
+      </section>
+    </div>
+  );
 }
 
 function PageHeader({ title, eyebrow }: { title: string; eyebrow: string }) {
@@ -911,7 +1016,9 @@ function mapStudentRow(row: any): StudentRecord {
     name: row.full_name || row.name || "",
     gender: row.gender || "",
     className: row.class_name || row.className || NO_CLASS_LABEL,
-    classroomId: row.classroom_id || row.classroomId || undefined
+    classroomId: row.classroom_id || row.classroomId || undefined,
+    authEmail: row.auth_email || row.authEmail || undefined,
+    accountCreatedAt: row.account_created_at || row.accountCreatedAt || undefined
   };
 }
 
@@ -997,6 +1104,10 @@ function formatScore(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function numericInputValue(value: number) {
+  return value === 0 ? "" : formatScore(value);
+}
+
 function formatDate(input: string) {
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) return input;
@@ -1005,6 +1116,51 @@ function formatDate(input: string) {
 
 function safeFileName(name: string) {
   return name.replace(/[^\w.\-\u0E00-\u0E7F]+/g, "-");
+}
+
+function cleanFileTitle(name: string) {
+  return name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+}
+
+function fileNameFromPath(filePath: string) {
+  const raw = filePath.split("/").pop() || filePath;
+  return raw.replace(/^\d+-/, "");
+}
+
+function materialTypeFromFile(name: string, mimeType = ""): MaterialType {
+  const lower = name.toLowerCase();
+  if (mimeType.includes("video") || lower.endsWith(".mp4") || lower.endsWith(".mov")) return "VIDEO";
+  if (mimeType.includes("image") || /\.(png|jpe?g)$/i.test(name)) return "IMG";
+  return "PDF";
+}
+
+function mimeForMaterial(name: string, type: MaterialType) {
+  const lower = name.toLowerCase();
+  if (type === "PDF") return "application/pdf";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (type === "VIDEO") return "video/mp4";
+  if (lower.endsWith(".png")) return "image/png";
+  if (type === "IMG") return "image/jpeg";
+  return "application/octet-stream";
+}
+
+function normalizeLoginIdentifier(identifier: string, role: Role) {
+  const trimmed = identifier.trim();
+  if (role === "student" && trimmed && !trimmed.includes("@")) return studentCodeToEmail(trimmed);
+  return trimmed;
+}
+
+function studentCodeToEmail(studentCode: string) {
+  return `${studentCode.trim().toLowerCase()}@${STUDENT_EMAIL_DOMAIN}`;
+}
+
+function studentCodeFromEmail(email?: string) {
+  if (!email?.endsWith(`@${STUDENT_EMAIL_DOMAIN}`)) return "";
+  return email.slice(0, -(`@${STUDENT_EMAIL_DOMAIN}`).length);
+}
+
+function defaultStudentPassword(studentCode: string) {
+  return `${studentCode.trim()}@2569`;
 }
 
 function accentForType(type: MaterialType): Material["accent"] {

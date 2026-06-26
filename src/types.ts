@@ -10,6 +10,7 @@ export interface AppSession {
   name: string;
   room: string;
   school: string;
+  studentCode?: string;
 }
 
 export interface NavItem {
@@ -46,6 +47,8 @@ export interface StudentRecord {
   gender: string;
   className: string;
   classroomId?: string;
+  authEmail?: string;
+  accountCreatedAt?: string;
 }
 
 export interface ScoreAssignment {

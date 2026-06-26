@@ -41,6 +41,8 @@ create table if not exists public.students (
   gender text,
   class_name text not null default 'ยังไม่ได้เลือกห้องเรียน',
   classroom_id uuid references public.classrooms (id) on delete set null,
+  auth_email text,
+  account_created_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -105,6 +107,8 @@ create table if not exists public.student_roster_uploads (
 
 alter table public.profiles add column if not exists school_name text default 'โรงเรียนเทพศิรินทร์ นนทบุรี';
 alter table public.students add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
+alter table public.students add column if not exists auth_email text;
+alter table public.students add column if not exists account_created_at timestamptz;
 alter table public.students alter column class_name set default 'ยังไม่ได้เลือกห้องเรียน';
 alter table public.score_assignments add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
 alter table public.score_assignments alter column class_name set default 'ยังไม่ได้เลือกห้องเรียน';
