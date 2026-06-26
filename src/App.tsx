@@ -47,6 +47,7 @@ import type {
 type MaterialUpload = { file: File | null; title: string; unit: string; level: string; type: MaterialType };
 type ClassroomDraft = { academicYear: string; level: string; room: string; subject: string };
 type StudentDraft = { no: string; studentId: string; name: string; gender: string };
+type RosterStudent = { no: number; studentId: string; name: string; gender: string };
 type AssignmentDraft = { title: string; rawMax: string; finalMax: string };
 
 const SCHOOL_LOGO = "/kruthai-logo.png";
@@ -430,9 +431,31 @@ function App() {
   }
 
   async function uploadRosterFile(file: File | null) {
-    if (!selectedClassroom) return flash("เพิ่มหรือเลือกห้องเรียนก่อนบันทึกไฟล์รายชื่อ");
-    if (!file) return flash("กรุณาเลือกไฟล์รายชื่อนักเรียน");
-    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    if (!selectedClassroom) {
+      flash("เพิ่มหรือเลือกห้องเรียนก่อนบันทึกไฟล์รายชื่อ");
+      return false;
+    }
+    if (!file) {
+      flash("กรุณาเลือกไฟล์รายชื่อนักเรียน");
+      return false;
+    }
+    if (!isSupabaseConfigured) {
+      flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+      return false;
+    }
+
+    let rosterStudents: RosterStudent[];
+    try {
+      rosterStudents = await parseRosterFile(file);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "อ่านไฟล์รายชื่อนักเรียนไม่สำเร็จ");
+      return false;
+    }
+    if (!rosterStudents.length) {
+      flash("ไม่พบรายชื่อที่พร้อมใช้งานในไฟล์นี้");
+      return false;
+    }
+
     setBusy(true);
     const storagePath = `rosters/${Date.now()}-${safeFileName(file.name)}`;
     const upload = await (supabase as any).storage.from(STORAGE_BUCKET).upload(storagePath, file, {
@@ -441,12 +464,36 @@ function App() {
     });
     if (upload.error) {
       setBusy(false);
-      return flash(upload.error.message);
+      flash(upload.error.message);
+      return false;
     }
-    const result = await (supabase as any).from("student_roster_uploads").insert({ class_name: selectedClassroom.displayName, classroom_id: selectedClassroom.id, file_path: storagePath, file_name: file.name, file_size: file.size });
+
+    const payload = rosterStudents.map((student) => ({
+      student_no: student.no,
+      student_code: student.studentId,
+      full_name: student.name,
+      gender: student.gender,
+      class_name: selectedClassroom.displayName,
+      classroom_id: selectedClassroom.id
+    }));
+
+    const uploadRecord = await (supabase as any).from("student_roster_uploads").insert({ class_name: selectedClassroom.displayName, classroom_id: selectedClassroom.id, file_path: storagePath, file_name: file.name, file_size: file.size });
+    if (uploadRecord.error) {
+      setBusy(false);
+      await (supabase as any).storage.from(STORAGE_BUCKET).remove([storagePath]);
+      flash(uploadRecord.error.message);
+      return false;
+    }
+    const upsertStudents = await (supabase as any).from("students").upsert(payload, { onConflict: "student_code" });
     setBusy(false);
-    if (result.error) return flash(result.error.message);
-    flash(`เก็บไฟล์รายชื่อ ${file.name} แล้ว หากต้องการเพิ่มรายคนใช้ฟอร์มด้านล่าง`);
+    if (upsertStudents.error) {
+      flash(upsertStudents.error.message);
+      return false;
+    }
+
+    await loadClassroomData();
+    flash(`นำเข้ารายชื่อ ${rosterStudents.length} คนจาก ${file.name} แล้ว พร้อมใช้งาน`);
+    return true;
   }
 
   async function addAssignment(draft: AssignmentDraft) {
@@ -863,7 +910,7 @@ function ReviewCard({ item, busy, updateSubmission, saveSubmission, openSubmissi
   );
 }
 
-function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, students, busy, addClassroom, deleteClassroom, selectClassroom, addStudent, deleteStudent, uploadRosterFile, createStudentAccount }: { classrooms: Classroom[]; selectedClassroom?: Classroom; selectedClassroomId: string; students: StudentRecord[]; busy: boolean; addClassroom: (draft: ClassroomDraft) => Promise<boolean>; deleteClassroom: (classroom: Classroom) => void; selectClassroom: (id: string) => void; addStudent: (draft: StudentDraft) => Promise<boolean>; deleteStudent: (student: StudentRecord) => void; uploadRosterFile: (file: File | null) => void; createStudentAccount: (student: StudentRecord, password: string) => void }) {
+function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, students, busy, addClassroom, deleteClassroom, selectClassroom, addStudent, deleteStudent, uploadRosterFile, createStudentAccount }: { classrooms: Classroom[]; selectedClassroom?: Classroom; selectedClassroomId: string; students: StudentRecord[]; busy: boolean; addClassroom: (draft: ClassroomDraft) => Promise<boolean>; deleteClassroom: (classroom: Classroom) => void; selectClassroom: (id: string) => void; addStudent: (draft: StudentDraft) => Promise<boolean>; deleteStudent: (student: StudentRecord) => void; uploadRosterFile: (file: File | null) => Promise<boolean>; createStudentAccount: (student: StudentRecord, password: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [classDraft, setClassDraft] = useState<ClassroomDraft>({ academicYear: "2569", level: "ม.1", room: "", subject: "สังคมศึกษา" });
   const [draft, setDraft] = useState<StudentDraft>({ no: "", studentId: "", name: "", gender: "" });
@@ -877,6 +924,11 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
     const ok = await addStudent(draft);
     if (!ok) return;
     setDraft({ no: "", studentId: "", name: "", gender: "" });
+  }
+  async function saveRoster() {
+    const ok = await uploadRosterFile(file);
+    if (!ok) return;
+    setFile(null);
   }
   return (
     <div className="page-stack">
@@ -892,8 +944,8 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
         <button className="primary-button" disabled={busy} onClick={saveClassroom}><Plus aria-hidden />เพิ่มห้องเรียน</button>
         {classrooms.length ? <div className="classroom-list">{classrooms.map((classroom) => <div className={`classroom-chip ${selectedClassroomId === classroom.id ? "active" : ""}`} key={classroom.id}><button type="button" onClick={() => selectClassroom(classroom.id)}><strong>{classroom.displayName}</strong><span>ปีการศึกษา {classroom.academicYear}</span></button><button className="icon-danger" disabled={busy} onClick={() => deleteClassroom(classroom)} title="ลบห้องเรียน"><Trash2 aria-hidden /></button></div>)}</div> : <EmptyState title="ยังไม่มีห้องเรียน" body="เพิ่มห้องเรียนก่อน แล้วจึงเพิ่มรายชื่อหรือคะแนนของห้องนั้น" />}
       </section>
-      <UploadPanel file={file} setFile={setFile} accept=".xlsx,.csv,.xls" label="เก็บไฟล์รายชื่อนักเรียน" help="รองรับไฟล์ .xlsx, .csv, .xls ขนาดไม่เกิน 5MB" />
-      <button className="primary-button full-button" disabled={busy} onClick={() => uploadRosterFile(file)}><CheckCircle2 aria-hidden />{busy ? "กำลังบันทึกไฟล์" : "บันทึกไฟล์รายชื่อ"}</button>
+      <UploadPanel file={file} setFile={setFile} accept=".xlsx,.csv,.xls" label="อัปโหลดรายชื่อนักเรียน" help="รองรับไฟล์ .xlsx, .csv, .xls ขนาดไม่เกิน 5MB และจะแสดงรายชื่อทันทีหลังอัปโหลด" />
+      <button className="primary-button full-button" disabled={busy} onClick={saveRoster}><CheckCircle2 aria-hidden />{busy ? "กำลังนำเข้ารายชื่อ" : "นำเข้ารายชื่อจากไฟล์"}</button>
       <section className="panel compact-form">
         <SectionTitle title="เพิ่มรายชื่อนักเรียน" note={selectedClassroom?.displayName || "เลือกห้องเรียนก่อน"} />
         <div className="form-grid">
@@ -1116,6 +1168,81 @@ function formatDate(input: string) {
 
 function safeFileName(name: string) {
   return name.replace(/[^\w.\-\u0E00-\u0E7F]+/g, "-");
+}
+
+async function parseRosterFile(file: File): Promise<RosterStudent[]> {
+  const XLSX = await import("xlsx");
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const firstSheet = workbook.SheetNames[0];
+  if (!firstSheet) throw new Error("ไม่พบชีตข้อมูลในไฟล์รายชื่อ");
+  const sheet = workbook.Sheets[firstSheet];
+  const rows = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, { header: 1, raw: false, defval: "" });
+  return mapRosterRows(rows);
+}
+
+function mapRosterRows(rows: Array<Array<string | number | null>>): RosterStudent[] {
+  const normalizedRows = rows
+    .map((row) => row.map((cell) => String(cell ?? "").trim()))
+    .filter((row) => row.some((cell) => cell));
+  if (!normalizedRows.length) return [];
+
+  const hasHeader = looksLikeRosterHeader(normalizedRows[0]);
+  const columns = hasHeader ? resolveRosterColumns(normalizedRows[0]) : {};
+  const dataRows = hasHeader ? normalizedRows.slice(1) : normalizedRows;
+  const seen = new Set<string>();
+
+  return dataRows.flatMap((row, index) => {
+    const studentId = readRosterCell(row, columns.studentId, 1);
+    const name = readRosterCell(row, columns.name, 2);
+    if (!studentId || !name) return [];
+
+    const uniqueId = studentId.replace(/\s+/g, "");
+    if (!uniqueId || seen.has(uniqueId)) return [];
+    seen.add(uniqueId);
+
+    const noValue = readRosterCell(row, columns.no, 0);
+    const parsedNo = Number(noValue);
+    return [{
+      no: Number.isFinite(parsedNo) && parsedNo > 0 ? parsedNo : index + 1,
+      studentId: uniqueId,
+      name,
+      gender: readRosterCell(row, columns.gender, 3)
+    }];
+  }).sort((a, b) => a.no - b.no || a.studentId.localeCompare(b.studentId));
+}
+
+function looksLikeRosterHeader(row: string[]) {
+  return row.some((cell) => {
+    const normalized = normalizeRosterHeader(cell);
+    return normalized === "เลขที่" || normalized === "รหัสนักเรียน" || normalized === "ชื่อ-นามสกุล";
+  });
+}
+
+function resolveRosterColumns(headerRow: string[]) {
+  const columns: { no?: number; studentId?: number; name?: number; gender?: number } = {};
+  headerRow.forEach((cell, index) => {
+    const normalized = normalizeRosterHeader(cell);
+    if (normalized === "เลขที่" && columns.no == null) columns.no = index;
+    if (normalized === "รหัสนักเรียน" && columns.studentId == null) columns.studentId = index;
+    if (normalized === "ชื่อ-นามสกุล" && columns.name == null) columns.name = index;
+    if (normalized === "เพศ" && columns.gender == null) columns.gender = index;
+  });
+  return columns;
+}
+
+function normalizeRosterHeader(value: string) {
+  const compact = value.toLowerCase().replace(/[\s._:/()-]+/g, "");
+  if (["เลขที่", "เลข", "ลำดับ", "ลำดับที่", "no", "number"].includes(compact)) return "เลขที่";
+  if (["รหัสนักเรียน", "รหัส", "รหัสประจำตัวนักเรียน", "studentid", "studentcode", "studentnumber", "id"].includes(compact)) return "รหัสนักเรียน";
+  if (["ชื่อนามสกุล", "ชื่อ-นามสกุล", "ชื่อ", "fullname", "full name", "name"].includes(compact)) return "ชื่อ-นามสกุล";
+  if (["เพศ", "gender", "หมายเหตุ", "เพศหมายเหตุ"].includes(compact)) return "เพศ";
+  return compact;
+}
+
+function readRosterCell(row: string[], columnIndex: number | undefined, fallbackIndex: number) {
+  const value = columnIndex != null ? row[columnIndex] : row[fallbackIndex];
+  return String(value ?? "").trim();
 }
 
 function cleanFileTitle(name: string) {
