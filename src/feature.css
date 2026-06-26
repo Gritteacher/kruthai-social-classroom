@@ -1,5 +1,6 @@
 html {
-  font-family: "Prompt", "Noto Sans Thai", "Sarabun", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Noto Sans Thai", "Sarabun", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 400;
 }
 
 body,
@@ -7,11 +8,12 @@ button,
 input,
 select,
 textarea {
-  font-family: "Prompt", "Noto Sans Thai", "Sarabun", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Noto Sans Thai", "Sarabun", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 body {
   overflow-x: hidden;
+  font-weight: 400;
 }
 
 button,
@@ -125,7 +127,7 @@ textarea {
   gap: 8px;
   color: var(--muted);
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 600;
 }
 
 .field input,
@@ -186,7 +188,7 @@ textarea {
   background: var(--coral-soft);
   color: #b73514;
   font: inherit;
-  font-weight: 900;
+  font-weight: 600;
 }
 
 .small-danger {
@@ -224,7 +226,7 @@ textarea {
   background: #fff;
   color: var(--ink);
   font: inherit;
-  font-weight: 900;
+  font-weight: 600;
 }
 
 .assignment-chip {
@@ -269,7 +271,7 @@ textarea {
   justify-content: flex-end;
   gap: 6px;
   color: var(--green-700);
-  font-weight: 900;
+  font-weight: 600;
 }
 
 .score-result span {
@@ -353,7 +355,7 @@ textarea {
   background: #fff;
   color: var(--ink);
   font: inherit;
-  font-weight: 900;
+  font-weight: 600;
   text-align: left;
 }
 
@@ -555,7 +557,7 @@ textarea {
   .student-preview-row > *::before {
     color: var(--muted);
     font-size: 11px;
-    font-weight: 900;
+    font-weight: 500;
     line-height: 1.2;
   }
 
@@ -611,4 +613,147 @@ textarea {
     right: 10px;
     max-width: calc(100vw - 20px);
   }
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font-weight: 400;
+}
+
+.login-form label,
+.field,
+.eyebrow,
+.section-heading span,
+.stat-card span,
+.material-meta,
+.type-pill,
+.status-pill,
+.role-card small,
+.side-brand small,
+.bottom-nav button,
+.side-nav nav button,
+.logout-button,
+.student-preview-head,
+.student-preview-row > *::before {
+  font-weight: 500;
+}
+
+.primary-button,
+.small-primary,
+.text-button,
+.select-button,
+.template-button,
+.outline-file-button,
+.filter-row button,
+.tool-tile,
+.quick-button,
+.role-card,
+.assignment-chip,
+.score-tabs button,
+.classroom-chip > button:first-child,
+.danger-button,
+.icon-danger,
+.avatar-button,
+.toast,
+.student-initial,
+.profile-avatar,
+.score-result,
+.score-input,
+.grade-badge span {
+  font-weight: 600;
+}
+
+.side-brand strong,
+.auth-card h2,
+.page-header h1,
+.hero-strip h1,
+.top-bar h2,
+.section-heading h2,
+.stat-card strong,
+.material-body h2,
+.submission-card strong,
+.score-card strong,
+.lesson-card strong,
+.empty-state strong,
+.profile-panel h2,
+.role-card strong,
+.upload-panel strong,
+.score-result strong {
+  font-weight: 700;
+}
+
+.primary-button,
+.small-primary {
+  border: 1px solid rgba(23, 101, 42, 0.14);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #23833b 0%, #17652a 100%);
+  box-shadow: 0 8px 18px rgba(23, 101, 42, 0.14);
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+.primary-button:hover:not(:disabled),
+.small-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(23, 101, 42, 0.17);
+  filter: saturate(1.03);
+}
+
+.primary-button:active:not(:disabled),
+.small-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.select-button,
+.template-button,
+.outline-file-button,
+.filter-row button,
+.assignment-chip,
+.score-tabs button,
+.classroom-chip > button:first-child,
+.tool-tile,
+.quick-button,
+.role-card {
+  border-color: #dce7d8;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 5px 14px rgba(17, 45, 25, 0.045);
+}
+
+.filter-row button,
+.select-button,
+.template-button,
+.outline-file-button {
+  color: #344054;
+}
+
+.filter-row button.active,
+.assignment-chip.active,
+.score-tabs button.active,
+.classroom-chip.active > button:first-child,
+.side-nav nav button.active {
+  background: #17652a;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(23, 101, 42, 0.14);
+}
+
+.danger-button,
+.icon-danger {
+  border-color: #f2c9bb;
+  border-radius: 10px;
+  background: #fff8f5;
+  color: #b73514;
+  box-shadow: 0 5px 14px rgba(201, 71, 29, 0.07);
+}
+
+.icon-button,
+.avatar-button {
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(18, 55, 27, 0.08);
 }
