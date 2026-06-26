@@ -6,7 +6,7 @@
 
 - Vite + React + TypeScript
 - Supabase Auth, Database และ Storage
-- Netlify static deploy
+- Netlify static deploy + Functions
 - GitHub Actions สำหรับ build check
 
 ## ฟีเจอร์ในต้นแบบ
@@ -29,13 +29,16 @@ npm run dev
 
 1. สร้าง Supabase project ใหม่
 2. เปิด SQL editor แล้วรัน `database/supabase-schema.sql`
-3. สร้าง user ใน Auth สำหรับครูและนักเรียน
+3. สร้าง user ใน Auth สำหรับครู
 4. เพิ่มค่า env จาก `.env.example`
 
 ```bash
 VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your-public-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-private-service-role-key
 ```
+
+`SUPABASE_SERVICE_ROLE_KEY` ใช้เฉพาะฝั่ง Netlify Function เพื่อให้ครูสร้าง/รีเซ็ตรหัสบัญชีนักเรียนจากหน้ารายชื่อได้ ห้ามนำค่านี้ไปใส่ในโค้ดหน้าเว็บหรือเผยแพร่ใน repository
 
 ## Deploy ด้วย GitHub และ Netlify
 
@@ -43,5 +46,5 @@ VITE_SUPABASE_ANON_KEY=your-public-anon-key
 2. ใน Netlify เลือก Add new site จาก GitHub repository
 3. Build command: `npm run build`
 4. Publish directory: `dist`
-5. เพิ่ม environment variables `VITE_SUPABASE_URL` และ `VITE_SUPABASE_ANON_KEY`
+5. เพิ่ม environment variables `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` และ `SUPABASE_SERVICE_ROLE_KEY`
 6. Deploy
