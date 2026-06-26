@@ -22,20 +22,33 @@ create table if not exists public.materials (
   created_by uuid references public.profiles (id)
 );
 
+create table if not exists public.classrooms (
+  id uuid primary key default uuid_generate_v4(),
+  academic_year text not null,
+  level text not null,
+  room text not null,
+  subject text not null,
+  display_name text not null,
+  created_at timestamptz not null default now(),
+  unique (academic_year, level, room, subject)
+);
+
 create table if not exists public.students (
   id uuid primary key default uuid_generate_v4(),
   student_no integer,
   student_code text not null unique,
   full_name text not null,
   gender text,
-  class_name text not null default 'ม.1/1 - สังคมศึกษา',
+  class_name text not null default 'ยังไม่ได้เลือกห้องเรียน',
+  classroom_id uuid references public.classrooms (id) on delete set null,
   created_at timestamptz not null default now()
 );
 
 create table if not exists public.score_assignments (
   id uuid primary key default uuid_generate_v4(),
   title text not null,
-  class_name text not null default 'ม.1/1 - สังคมศึกษา',
+  class_name text not null default 'ยังไม่ได้เลือกห้องเรียน',
+  classroom_id uuid references public.classrooms (id) on delete set null,
   raw_max numeric not null check (raw_max > 0),
   final_max numeric not null check (final_max > 0),
   created_at timestamptz not null default now()
@@ -59,6 +72,7 @@ create table if not exists public.submissions (
   assignment_title text not null,
   student_name text not null,
   student_code text not null,
+  classroom_id uuid references public.classrooms (id) on delete set null,
   file_path text,
   status text not null default 'รอตรวจ',
   raw_score numeric not null default 0 check (raw_score >= 0),
@@ -82,6 +96,7 @@ create table if not exists public.scores (
 create table if not exists public.student_roster_uploads (
   id uuid primary key default uuid_generate_v4(),
   class_name text not null,
+  classroom_id uuid references public.classrooms (id) on delete set null,
   file_path text not null,
   file_name text not null,
   file_size integer not null,
@@ -89,10 +104,16 @@ create table if not exists public.student_roster_uploads (
 );
 
 alter table public.profiles add column if not exists school_name text default 'โรงเรียนเทพศิรินทร์ นนทบุรี';
+alter table public.students add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
+alter table public.students alter column class_name set default 'ยังไม่ได้เลือกห้องเรียน';
+alter table public.score_assignments add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
+alter table public.score_assignments alter column class_name set default 'ยังไม่ได้เลือกห้องเรียน';
+alter table public.submissions add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
 alter table public.submissions add column if not exists raw_score numeric not null default 0 check (raw_score >= 0);
 alter table public.submissions add column if not exists raw_max numeric not null default 10 check (raw_max > 0);
 alter table public.submissions add column if not exists final_score numeric not null default 0 check (final_score >= 0);
 alter table public.submissions add column if not exists final_max numeric not null default 10 check (final_max > 0);
+alter table public.student_roster_uploads add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
 
 insert into storage.buckets (id, name, public)
 values ('classroom-files', 'classroom-files', false)
@@ -100,6 +121,7 @@ on conflict (id) do nothing;
 
 alter table public.profiles enable row level security;
 alter table public.materials enable row level security;
+alter table public.classrooms enable row level security;
 alter table public.students enable row level security;
 alter table public.score_assignments enable row level security;
 alter table public.score_entries enable row level security;
@@ -118,6 +140,15 @@ create policy "classroom materials readable" on public.materials for select to a
 create policy "classroom materials insertable" on public.materials for insert to authenticated with check (true);
 create policy "classroom materials updateable" on public.materials for update to authenticated using (true) with check (true);
 create policy "classroom materials deleteable" on public.materials for delete to authenticated using (true);
+
+drop policy if exists "classrooms readable" on public.classrooms;
+drop policy if exists "classrooms insertable" on public.classrooms;
+drop policy if exists "classrooms updateable" on public.classrooms;
+drop policy if exists "classrooms deleteable" on public.classrooms;
+create policy "classrooms readable" on public.classrooms for select to authenticated using (true);
+create policy "classrooms insertable" on public.classrooms for insert to authenticated with check (true);
+create policy "classrooms updateable" on public.classrooms for update to authenticated using (true) with check (true);
+create policy "classrooms deleteable" on public.classrooms for delete to authenticated using (true);
 
 drop policy if exists "students readable" on public.students;
 drop policy if exists "students insertable" on public.students;

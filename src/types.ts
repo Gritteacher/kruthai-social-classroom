@@ -29,6 +29,15 @@ export interface Material {
   accent: "green" | "amber" | "blue" | "coral";
 }
 
+export interface Classroom {
+  id: string;
+  academicYear: string;
+  level: string;
+  room: string;
+  subject: string;
+  displayName: string;
+}
+
 export interface StudentRecord {
   id: string;
   no: number;
@@ -36,12 +45,14 @@ export interface StudentRecord {
   name: string;
   gender: string;
   className: string;
+  classroomId?: string;
 }
 
 export interface ScoreAssignment {
   id: string;
   title: string;
   className: string;
+  classroomId?: string;
   rawMax: number;
   finalMax: number;
   createdAt: string;
@@ -63,6 +74,7 @@ export interface SubmissionRecord {
   assignmentTitle: string;
   studentName: string;
   studentId: string;
+  classroomId?: string;
   filePath?: string;
   status: SubmissionStatus;
   submittedAt: string;
