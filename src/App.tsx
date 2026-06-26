@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   Bell,
@@ -16,23 +16,55 @@ import {
   LogOut,
   Mail,
   Megaphone,
+  Plus,
+  Save,
   Search,
   ShieldCheck,
+  Trash2,
   Upload,
   User,
   Users
 } from "lucide-react";
-import { materials, rosterPreview, scoreRows as baseScoreRows, studentScores, submissions } from "./data/mockData";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
-import type { AppSession, Material, MaterialType, NavItem, Role, ScoreRow, ViewKey } from "./types";
+import type {
+  AppSession,
+  Material,
+  MaterialType,
+  NavItem,
+  Role,
+  ScoreAssignment,
+  ScoreEntry,
+  StudentRecord,
+  SubmissionRecord,
+  SubmissionStatus,
+  ViewKey
+} from "./types";
 
 type MaterialUpload = { file: File | null; title: string; unit: string; level: string; type: MaterialType };
+type StudentDraft = { no: string; studentId: string; name: string; gender: string; className: string };
+type AssignmentDraft = { title: string; className: string; rawMax: string; finalMax: string };
+type LocalState = {
+  materials: Material[];
+  students: StudentRecord[];
+  assignments: ScoreAssignment[];
+  scoreEntries: ScoreEntry[];
+  submissions: SubmissionRecord[];
+};
 
 const SCHOOL_LOGO = "/kruthai-logo.png";
+const SCHOOL_NAME = "โรงเรียนเทพศิรินทร์ นนทบุรี";
+const DEFAULT_CLASS = "ม.1/1 - สังคมศึกษา";
+const STORAGE_BUCKET = "classroom-files";
+const LOCAL_STATE_KEY = "kruthai-classroom-state-v3";
+const filters: Array<"ทั้งหมด" | MaterialType | "ม.1" | "ม.2" | "ม.3"> = ["ทั้งหมด", "ม.1", "ม.2", "ม.3", "VIDEO", "PDF"];
+const materialTypes: MaterialType[] = ["PDF", "VIDEO", "IMG"];
+const submissionStatuses: SubmissionStatus[] = ["ยังไม่ส่ง", "ส่งแล้ว", "รอตรวจ", "ตรวจแล้ว", "ให้แก้ไข", "ส่งช้า"];
+
 const sessions: Record<Role, AppSession> = {
-  teacher: { role: "teacher", name: "คุณครูไต๋", room: "โรงเรียนวัดสามัคคีธรรม", school: "ห้องเรียนสังคมศึกษา" },
-  student: { role: "student", name: "สมชาย ดีมาก", room: "ชั้นมัธยมศึกษาปีที่ 3/1", school: "โรงเรียนวัดสามัคคีธรรม" }
+  teacher: { role: "teacher", name: "คุณครูไต๋", room: SCHOOL_NAME, school: "ห้องเรียนสังคมศึกษา" },
+  student: { role: "student", name: "นักเรียน", room: "ชั้นมัธยมศึกษา", school: SCHOOL_NAME }
 };
+
 const teacherNav: NavItem[] = [
   { key: "home", label: "หน้าหลัก", icon: Home },
   { key: "materials", label: "สื่อการสอน", icon: BookOpen },
@@ -40,6 +72,7 @@ const teacherNav: NavItem[] = [
   { key: "work", label: "ตรวจงาน", icon: ClipboardCheck },
   { key: "students", label: "รายชื่อ", icon: Users }
 ];
+
 const studentNav: NavItem[] = [
   { key: "home", label: "หน้าหลัก", icon: Home },
   { key: "materials", label: "สื่อการสอน", icon: BookOpen },
@@ -47,8 +80,6 @@ const studentNav: NavItem[] = [
   { key: "scores", label: "คะแนน", icon: BarChart3 },
   { key: "profile", label: "โปรไฟล์", icon: User }
 ];
-const filters: Array<"ทั้งหมด" | MaterialType | "ม.1" | "ม.2" | "ม.3"> = ["ทั้งหมด", "ม.1", "ม.2", "ม.3", "VIDEO", "PDF"];
-const materialTypes: MaterialType[] = ["PDF", "VIDEO", "IMG"];
 
 function App() {
   const [role, setRole] = useState<Role>("teacher");
@@ -56,13 +87,73 @@ function App() {
   const [view, setView] = useState<ViewKey>("home");
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
-  const [rows, setRows] = useState<ScoreRow[]>(baseScoreRows);
-  const [materialItems, setMaterialItems] = useState<Material[]>(materials);
+  const [loadingData, setLoadingData] = useState(false);
+  const [materialItems, setMaterialItems] = useState<Material[]>([]);
+  const [students, setStudents] = useState<StudentRecord[]>([]);
+  const [assignments, setAssignments] = useState<ScoreAssignment[]>([]);
+  const [scoreEntries, setScoreEntries] = useState<ScoreEntry[]>([]);
+  const [submissionItems, setSubmissionItems] = useState<SubmissionRecord[]>([]);
   const nav = session?.role === "student" ? studentNav : teacherNav;
+
   const flash = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 3000);
   };
+
+  function persistLocal(partial: Partial<LocalState>) {
+    if (isSupabaseConfigured) return;
+    const snapshot: LocalState = {
+      materials: materialItems,
+      students,
+      assignments,
+      scoreEntries,
+      submissions: submissionItems,
+      ...partial
+    };
+    localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(snapshot));
+  }
+
+  async function loadClassroomData(showToast = false) {
+    setLoadingData(true);
+    if (!isSupabaseConfigured) {
+      const saved = readLocalState();
+      setMaterialItems(saved.materials);
+      setStudents(saved.students);
+      setAssignments(saved.assignments);
+      setScoreEntries(saved.scoreEntries);
+      setSubmissionItems(saved.submissions);
+      setLoadingData(false);
+      if (showToast) flash("โหลดข้อมูลจากเครื่องนี้แล้ว");
+      return;
+    }
+
+    const client = supabase as any;
+    const [materialsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult] = await Promise.all([
+      client.from("materials").select("*").order("published_at", { ascending: false }),
+      client.from("students").select("*").order("student_no", { ascending: true }),
+      client.from("score_assignments").select("*").order("created_at", { ascending: false }),
+      client.from("score_entries").select("*").order("updated_at", { ascending: false }),
+      client.from("submissions").select("*").order("submitted_at", { ascending: false })
+    ]);
+
+    const errors = [materialsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult].filter((result) => result.error);
+    if (errors.length) {
+      flash("บางตารางใน Supabase ยังไม่พร้อม ผมใส่ fallback เป็นหน้าว่างให้ก่อน");
+    }
+
+    setMaterialItems(((materialsResult.data ?? []) as any[]).filter((row) => row.file_path).map(mapMaterialRow));
+    setStudents(((studentsResult.data ?? []) as any[]).map(mapStudentRow));
+    setAssignments(((assignmentsResult.data ?? []) as any[]).map(mapAssignmentRow));
+    setScoreEntries(((entriesResult.data ?? []) as any[]).map(mapScoreEntryRow));
+    setSubmissionItems(((submissionsResult.data ?? []) as any[]).map(mapSubmissionRow));
+    setLoadingData(false);
+    if (showToast && errors.length === 0) flash("โหลดข้อมูลล่าสุดจาก Supabase แล้ว");
+  }
+
+  useEffect(() => {
+    if (!session) return;
+    void loadClassroomData();
+  }, [session?.role]);
 
   async function login(email: string, password: string) {
     setBusy(true);
@@ -70,7 +161,8 @@ function App() {
       const { data, error } = await supabase!.auth.signInWithPassword({ email, password });
       setBusy(false);
       if (error) return flash(error.message);
-      setSession({ ...sessions[role], name: (data.user?.user_metadata?.full_name as string) || sessions[role].name });
+      const name = (data.user?.user_metadata?.full_name as string) || sessions[role].name;
+      setSession({ ...sessions[role], name });
     } else {
       setBusy(false);
       setSession(sessions[role]);
@@ -95,116 +187,291 @@ function App() {
     setView("home");
   }
 
-  async function saveScores() {
-    setBusy(true);
-    if (isSupabaseConfigured) {
-      const payload = rows.map((row) => ({
-        student_code: row.studentId,
-        assessment_title: "สอบบทที่ 4",
-        score: row.score,
-        max_score: row.maxScore,
-        passed: row.score >= 15
-      }));
-      const { error } = await supabase!.from("scores").upsert(payload, { onConflict: "student_code,assessment_title" });
-      setBusy(false);
-      if (error) return flash(error.message);
-    } else {
-      localStorage.setItem("kruthai-score-draft", JSON.stringify(rows));
-      setBusy(false);
-    }
-    flash("บันทึกคะแนนเรียบร้อย");
-  }
-
-  async function uploadFile(kind: "roster" | "submission", file: File | null) {
-    if (!file) return flash(kind === "roster" ? "กรุณาเลือกไฟล์รายชื่อนักเรียน" : "กรุณาเลือกไฟล์งาน");
-    setBusy(true);
-    if (isSupabaseConfigured) {
-      const folder = kind === "roster" ? "rosters" : "submissions";
-      const path = `${folder}/${Date.now()}-${file.name}`;
-      const upload = await supabase!.storage.from("classroom-files").upload(path, file);
-      if (upload.error) {
-        setBusy(false);
-        return flash(upload.error.message);
-      }
-      const table = kind === "roster" ? "student_roster_uploads" : "submissions";
-      const record =
-        kind === "roster"
-          ? { class_name: "ม.1/1 - สังคมศึกษา", file_path: path, file_name: file.name, file_size: file.size }
-          : { assignment_title: "ใบงานบทที่ 4", student_name: sessions.student.name, student_code: "65010", file_path: path, status: "รอตรวจ" };
-      const { error } = await supabase!.from(table).insert(record);
-      setBusy(false);
-      if (error) return flash(error.message);
-    } else {
-      setBusy(false);
-    }
-    flash(kind === "roster" ? `รับไฟล์ ${file.name} แล้ว` : `ส่งงาน ${file.name} เรียบร้อย`);
-  }
-
   async function uploadMaterial({ file, title, unit, level, type }: MaterialUpload) {
-    if (!title.trim()) {
-      flash("กรุณาใส่ชื่อสื่อการสอน");
-      return false;
-    }
-    if (!file) {
-      flash("กรุณาเลือกไฟล์สื่อการสอน");
-      return false;
-    }
+    if (!title.trim()) return flashAndFail("กรุณาใส่ชื่อสื่อการสอน", flash);
+    if (!file) return flashAndFail("กรุณาเลือกไฟล์สื่อการสอน", flash);
     setBusy(true);
-    const storagePath = `materials/${Date.now()}-${file.name}`;
+    const storagePath = `materials/${Date.now()}-${safeFileName(file.name)}`;
+
     if (isSupabaseConfigured) {
-      const upload = await supabase!.storage.from("classroom-files").upload(storagePath, file);
+      const client = supabase as any;
+      const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file);
       if (upload.error) {
         setBusy(false);
         flash(upload.error.message);
         return false;
       }
-      const { error } = await supabase!.from("materials").insert({
-        title: title.trim(),
-        unit: unit.trim() || "สื่อเสริม",
-        level,
-        material_type: type,
-        file_path: storagePath
-      });
-      if (error) {
-        setBusy(false);
-        flash(error.message);
+      const insert = await client
+        .from("materials")
+        .insert({ title: title.trim(), unit: unit.trim() || "สื่อเสริม", level, material_type: type, file_path: storagePath })
+        .select("*")
+        .single();
+      setBusy(false);
+      if (insert.error) {
+        flash(insert.error.message);
         return false;
       }
+      setMaterialItems((current) => [mapMaterialRow(insert.data), ...current]);
+    } else {
+      const next = [
+        {
+          id: crypto.randomUUID(),
+          title: title.trim(),
+          unit: unit.trim() || "สื่อเสริม",
+          level,
+          type,
+          filePath: storagePath,
+          date: formatDate(new Date().toISOString()),
+          accent: accentForType(type)
+        },
+        ...materialItems
+      ];
+      setMaterialItems(next);
+      persistLocal({ materials: next });
+      setBusy(false);
     }
-    setMaterialItems((current) => [
-      {
-        id: `uploaded-${Date.now()}`,
-        title: title.trim(),
-        unit: unit.trim() || "สื่อเสริม",
-        level,
-        type,
-        filePath: storagePath,
-        date: new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }),
-        accent: "green"
-      },
-      ...current
-    ]);
-    setBusy(false);
     flash(`อัปโหลดสื่อ ${title.trim()} เรียบร้อย`);
     return true;
   }
 
+  async function deleteMaterial(item: Material) {
+    setBusy(true);
+    if (isSupabaseConfigured) {
+      const client = supabase as any;
+      if (item.filePath) await client.storage.from(STORAGE_BUCKET).remove([item.filePath]);
+      const result = await client.from("materials").delete().eq("id", item.id);
+      setBusy(false);
+      if (result.error) return flash(result.error.message);
+    } else {
+      setBusy(false);
+    }
+    const next = materialItems.filter((material) => material.id !== item.id);
+    setMaterialItems(next);
+    persistLocal({ materials: next });
+    flash(`ลบสื่อ "${item.title}" แล้ว`);
+  }
+
   async function openMaterial(item: Material) {
-    if (item.filePath && isSupabaseConfigured) {
-      const { data, error } = await supabase!.storage.from("classroom-files").createSignedUrl(item.filePath, 60 * 10);
+    if (!item.filePath) return flash("สื่อนี้ไม่มีไฟล์จริง จึงไม่แสดงในคลังแล้ว");
+    if (isSupabaseConfigured) {
+      const { data, error } = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
       if (error || !data?.signedUrl) return flash(error?.message || "เปิดไฟล์ไม่ได้");
       window.open(data.signedUrl, "_blank", "noopener,noreferrer");
       return flash(`เปิดไฟล์ ${item.title} ในแท็บใหม่`);
     }
-    if (item.image) {
-      window.open(item.image, "_blank", "noopener,noreferrer");
-      return flash(`เปิดภาพประกอบ ${item.title}`);
+    flash("โหมดทดลองบันทึกชื่อไฟล์ไว้ แต่ยังเปิดไฟล์จริงจากเครื่องไม่ได้");
+  }
+
+  async function addStudent(draft: StudentDraft) {
+    if (!draft.studentId.trim()) return flashAndFail("กรอกรหัสนักเรียนก่อน", flash);
+    if (!draft.name.trim()) return flashAndFail("กรอกชื่อ-นามสกุลก่อน", flash);
+    const payload = {
+      student_no: Number(draft.no) || students.length + 1,
+      student_code: draft.studentId.trim(),
+      full_name: draft.name.trim(),
+      gender: draft.gender.trim(),
+      class_name: draft.className.trim() || DEFAULT_CLASS
+    };
+    setBusy(true);
+    if (isSupabaseConfigured) {
+      const result = await (supabase as any).from("students").insert(payload).select("*").single();
+      setBusy(false);
+      if (result.error) {
+        flash(result.error.message);
+        return false;
+      }
+      setStudents((current) => [...current, mapStudentRow(result.data)].sort(sortStudents));
+    } else {
+      const next = [...students, mapStudentRow({ id: crypto.randomUUID(), ...payload })].sort(sortStudents);
+      setStudents(next);
+      persistLocal({ students: next });
+      setBusy(false);
     }
-    const html = `<!doctype html><html lang="th"><meta charset="utf-8"><title>${item.title}</title><body style="font-family:sans-serif;line-height:1.7;max-width:760px;margin:40px auto;padding:0 20px"><h1>${item.title}</h1><p><strong>${item.unit}</strong> ระดับ ${item.level}</p><p>เอกสารตัวอย่างนี้สร้างจากระบบห้องเรียน เพื่อให้ปุ่มเปิดสื่อใช้งานได้ระหว่างรออัปโหลดไฟล์จริง</p><ul><li>อ่านหัวข้อสำคัญ</li><li>จดคำถามท้ายบท</li><li>ส่งสรุปในคาบถัดไป</li></ul></body></html>`;
-    const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-    window.open(url, "_blank", "noopener,noreferrer");
-    window.setTimeout(() => URL.revokeObjectURL(url), 30000);
-    flash(`เปิดตัวอย่างบทเรียน ${item.title}`);
+    flash(`เพิ่มรายชื่อ ${draft.name.trim()} แล้ว`);
+    return true;
+  }
+
+  async function deleteStudent(student: StudentRecord) {
+    setBusy(true);
+    if (isSupabaseConfigured) {
+      const result = await (supabase as any).from("students").delete().eq("id", student.id);
+      setBusy(false);
+      if (result.error) return flash(result.error.message);
+    } else {
+      setBusy(false);
+    }
+    const nextStudents = students.filter((item) => item.id !== student.id);
+    const nextScores = scoreEntries.filter((item) => item.studentRecordId !== student.id);
+    setStudents(nextStudents);
+    setScoreEntries(nextScores);
+    persistLocal({ students: nextStudents, scoreEntries: nextScores });
+    flash(`ลบรายชื่อ ${student.name} แล้ว`);
+  }
+
+  async function uploadRosterFile(file: File | null) {
+    if (!file) return flash("กรุณาเลือกไฟล์รายชื่อนักเรียน");
+    setBusy(true);
+    if (isSupabaseConfigured) {
+      const storagePath = `rosters/${Date.now()}-${safeFileName(file.name)}`;
+      const upload = await (supabase as any).storage.from(STORAGE_BUCKET).upload(storagePath, file);
+      if (upload.error) {
+        setBusy(false);
+        return flash(upload.error.message);
+      }
+      const result = await (supabase as any).from("student_roster_uploads").insert({ class_name: DEFAULT_CLASS, file_path: storagePath, file_name: file.name, file_size: file.size });
+      setBusy(false);
+      if (result.error) return flash(result.error.message);
+    } else {
+      setBusy(false);
+    }
+    flash(`เก็บไฟล์รายชื่อ ${file.name} แล้ว หากต้องการเพิ่มรายคนใช้ฟอร์มด้านล่าง`);
+  }
+
+  async function addAssignment(draft: AssignmentDraft) {
+    if (!draft.title.trim()) return flashAndFail("กรอกชื่องานหรือแบบประเมินก่อน", flash);
+    const rawMax = positiveNumber(draft.rawMax, 10);
+    const finalMax = positiveNumber(draft.finalMax, rawMax);
+    const payload = { title: draft.title.trim(), class_name: draft.className.trim() || DEFAULT_CLASS, raw_max: rawMax, final_max: finalMax };
+    setBusy(true);
+    if (isSupabaseConfigured) {
+      const result = await (supabase as any).from("score_assignments").insert(payload).select("*").single();
+      setBusy(false);
+      if (result.error) {
+        flash(result.error.message);
+        return false;
+      }
+      setAssignments((current) => [mapAssignmentRow(result.data), ...current]);
+    } else {
+      const next = [mapAssignmentRow({ id: crypto.randomUUID(), created_at: new Date().toISOString(), ...payload }), ...assignments];
+      setAssignments(next);
+      persistLocal({ assignments: next });
+      setBusy(false);
+    }
+    flash(`เพิ่มงานคะแนน "${draft.title.trim()}" แล้ว`);
+    return true;
+  }
+
+  async function deleteAssignment(assignment: ScoreAssignment) {
+    setBusy(true);
+    if (isSupabaseConfigured) {
+      const result = await (supabase as any).from("score_assignments").delete().eq("id", assignment.id);
+      setBusy(false);
+      if (result.error) return flash(result.error.message);
+    } else {
+      setBusy(false);
+    }
+    const nextAssignments = assignments.filter((item) => item.id !== assignment.id);
+    const nextEntries = scoreEntries.filter((item) => item.assignmentId !== assignment.id);
+    setAssignments(nextAssignments);
+    setScoreEntries(nextEntries);
+    persistLocal({ assignments: nextAssignments, scoreEntries: nextEntries });
+    flash(`ลบงานคะแนน "${assignment.title}" แล้ว`);
+  }
+
+  function updateScoreDraft(assignment: ScoreAssignment, student: StudentRecord, value: string) {
+    const rawScore = clampScore(value, assignment.rawMax);
+    const nextEntry = buildScoreEntry(assignment, student, rawScore);
+    setScoreEntries((current) => {
+      const exists = current.some((entry) => entry.assignmentId === assignment.id && entry.studentRecordId === student.id);
+      const next = exists
+        ? current.map((entry) => entry.assignmentId === assignment.id && entry.studentRecordId === student.id ? { ...entry, ...nextEntry, id: entry.id } : entry)
+        : [...current, nextEntry];
+      persistLocal({ scoreEntries: next });
+      return next;
+    });
+  }
+
+  async function saveScoreSheet(assignment: ScoreAssignment) {
+    if (!students.length) return flash("ยังไม่มีรายชื่อนักเรียน");
+    const payload = students.map((student) => {
+      const entry = findScoreEntry(scoreEntries, assignment.id, student.id);
+      const rawScore = entry?.rawScore ?? 0;
+      return {
+        assignment_id: assignment.id,
+        student_id: student.id,
+        student_code: student.studentId,
+        raw_score: rawScore,
+        raw_max: assignment.rawMax,
+        final_score: scaledScore(rawScore, assignment.rawMax, assignment.finalMax),
+        final_max: assignment.finalMax
+      };
+    });
+    setBusy(true);
+    if (isSupabaseConfigured) {
+      const result = await (supabase as any).from("score_entries").upsert(payload, { onConflict: "assignment_id,student_id" });
+      setBusy(false);
+      if (result.error) return flash(result.error.message);
+      await loadClassroomData();
+    } else {
+      setBusy(false);
+    }
+    flash(`บันทึกคะแนน "${assignment.title}" แล้ว`);
+  }
+
+  function updateSubmissionDraft(id: string, patch: Partial<SubmissionRecord>) {
+    setSubmissionItems((current) => current.map((item) => {
+      if (item.id !== id) return item;
+      const merged = { ...item, ...patch };
+      return { ...merged, finalScore: scaledScore(merged.rawScore, merged.rawMax, merged.finalMax) };
+    }));
+  }
+
+  async function saveSubmissionReview(item: SubmissionRecord) {
+    setBusy(true);
+    if (isSupabaseConfigured) {
+      const result = await (supabase as any)
+        .from("submissions")
+        .update({
+          status: item.status,
+          raw_score: item.rawScore,
+          raw_max: item.rawMax,
+          final_score: scaledScore(item.rawScore, item.rawMax, item.finalMax),
+          final_max: item.finalMax
+        })
+        .eq("id", item.id);
+      setBusy(false);
+      if (result.error) return flash(result.error.message);
+    } else {
+      setBusy(false);
+      persistLocal({ submissions: submissionItems });
+    }
+    flash(`บันทึกผลตรวจงานของ ${item.studentName} แล้ว`);
+  }
+
+  async function submitWork(file: File | null, assignmentTitle: string) {
+    if (!assignmentTitle.trim()) return flash("กรอกชื่องานก่อนส่ง");
+    if (!file) return flash("กรุณาเลือกไฟล์งาน");
+    setBusy(true);
+    const storagePath = `submissions/${Date.now()}-${safeFileName(file.name)}`;
+    const record = {
+      assignment_title: assignmentTitle.trim(),
+      student_name: session?.name || "นักเรียน",
+      student_code: "student",
+      file_path: storagePath,
+      status: "รอตรวจ",
+      raw_score: 0,
+      raw_max: 10,
+      final_score: 0,
+      final_max: 10
+    };
+    if (isSupabaseConfigured) {
+      const client = supabase as any;
+      const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file);
+      if (upload.error) {
+        setBusy(false);
+        return flash(upload.error.message);
+      }
+      const result = await client.from("submissions").insert(record).select("*").single();
+      setBusy(false);
+      if (result.error) return flash(result.error.message);
+      setSubmissionItems((current) => [mapSubmissionRow(result.data), ...current]);
+    } else {
+      const next = [mapSubmissionRow({ id: crypto.randomUUID(), submitted_at: new Date().toISOString(), ...record }), ...submissionItems];
+      setSubmissionItems(next);
+      persistLocal({ submissions: next });
+      setBusy(false);
+    }
+    flash(`ส่งงาน ${file.name} เรียบร้อย`);
   }
 
   if (!session) {
@@ -232,16 +499,17 @@ function App() {
           </div>
           <div className="top-actions">
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
-            <button className="icon-button" title="การแจ้งเตือน" onClick={() => flash("ประกาศล่าสุด: สอบเก็บคะแนนบทที่ 4 วันศุกร์นี้")}><Bell aria-hidden /></button>
-            <button className="avatar-button" onClick={logout}>{session.role === "teacher" ? "ค" : "ส"}</button>
+            <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
+            <button className="avatar-button" onClick={logout}>{session.role === "teacher" ? "ค" : "น"}</button>
           </div>
         </header>
         <section className="content-area">
-          {view === "home" && <HomeView session={session} setView={setView} flash={flash} />}
-          {view === "materials" && <MaterialsView role={session.role} materials={materialItems} busy={busy} flash={flash} onOpen={openMaterial} onUpload={uploadMaterial} />}
-          {view === "scores" && <ScoresView role={session.role} rows={rows} setRows={setRows} busy={busy} saveScores={saveScores} flash={flash} />}
-          {view === "work" && <WorkView role={session.role} busy={busy} uploadFile={uploadFile} flash={flash} />}
-          {view === "students" && <StudentsView busy={busy} uploadFile={uploadFile} flash={flash} />}
+          {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
+          {view === "home" && <HomeView session={session} setView={setView} flash={flash} materials={materialItems} students={students} submissions={submissionItems} assignments={assignments} />}
+          {view === "materials" && <MaterialsView role={session.role} materials={materialItems} busy={busy} flash={flash} onOpen={openMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} />}
+          {view === "scores" && <ScoresView role={session.role} students={students} assignments={assignments} entries={scoreEntries} busy={busy} addAssignment={addAssignment} deleteAssignment={deleteAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} />}
+          {view === "work" && <WorkView role={session.role} submissions={submissionItems} busy={busy} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} />}
+          {view === "students" && <StudentsView students={students} busy={busy} addStudent={addStudent} deleteStudent={deleteStudent} uploadRosterFile={uploadRosterFile} />}
           {view === "profile" && <ProfileView session={session} />}
         </section>
       </main>
@@ -263,8 +531,8 @@ function Auth({ role, busy, toast, onRole, onLogin, onResetPassword }: { role: R
       <section className="brand-panel">
         <div className="brand-mark"><img className="brand-logo" src={SCHOOL_LOGO} alt="โลโก้โรงเรียน" /></div>
         <h1>ห้องเรียนสังคมครูไต๋</h1>
-        <p>ระบบห้องเรียนออนไลน์วิชาสังคมศึกษา</p>
-        <span>v1.2.2</span>
+        <p>{SCHOOL_NAME}</p>
+        <span>v1.3.0</span>
       </section>
       <section className="auth-panel">
         <div className="auth-card">
@@ -290,26 +558,40 @@ function Auth({ role, busy, toast, onRole, onLogin, onResetPassword }: { role: R
 function RoleCard({ selected, icon: Icon, title, body, onClick }: { selected: boolean; icon: NavItem["icon"]; title: string; body: string; onClick: () => void }) {
   return <button className={`role-card ${selected ? "selected" : ""}`} onClick={onClick} type="button"><Icon aria-hidden /><span><strong>{title}</strong><small>{body}</small></span>{selected && <CheckCircle2 aria-hidden />}</button>;
 }
+
 function NavButton({ item, active, onClick }: { item: NavItem; active: boolean; onClick: () => void }) {
   const Icon = item.icon;
   return <button className={active ? "active" : ""} onClick={onClick} title={item.label} type="button"><Icon aria-hidden /><span>{item.label}</span></button>;
 }
 
-function HomeView({ session, setView, flash }: { session: AppSession; setView: (view: ViewKey) => void; flash: (message: string) => void }) {
+function HomeView({ session, setView, flash, materials, students, submissions, assignments }: { session: AppSession; setView: (view: ViewKey) => void; flash: (message: string) => void; materials: Material[]; students: StudentRecord[]; submissions: SubmissionRecord[]; assignments: ScoreAssignment[] }) {
   const isTeacher = session.role === "teacher";
-  const stats = isTeacher ? [["นักเรียนทั้งหมด", "124", "green"], ["งานรอตรวจ", "18", "coral"], ["ประกาศ", "5", "amber"]] : [["คะแนนรวม", "88/100", "amber"], ["เฉลี่ยห้อง", "78%", "blue"], ["ส่งงาน", "12/12", "green"]];
-  return <div className="page-stack"><section className="hero-strip"><div><p className="eyebrow">{session.school}</p><h1>{isTeacher ? "เมนูหลัก" : "บทเรียนล่าสุด"}</h1></div>{!isTeacher && <div className="grade-badge"><strong>A</strong><span>88 / 100</span></div>}</section><div className="stat-grid">{stats.map(([label, value, tone]) => <article className={`stat-card tone-${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>{isTeacher ? <TeacherHome setView={setView} /> : <StudentHome setView={setView} flash={flash} />}</div>;
-}
-function TeacherHome({ setView }: { setView: (view: ViewKey) => void }) {
-  const tools = [["อัปโหลดสื่อการสอน", Upload, "materials"], ["จัดการคะแนน", BarChart3, "scores"], ["ตรวจงานนักเรียน", ClipboardCheck, "work"], ["อัปโหลดรายชื่อ", FileSpreadsheet, "students"]] as const;
-  return <div className="two-column"><section className="panel"><SectionTitle title="งานของครูวันนี้" note="ม.3/1 - สังคมศึกษา" /><div className="action-grid">{tools.map(([label, Icon, view]) => <button className="tool-tile" key={label} onClick={() => setView(view)}><Icon aria-hidden /><span>{label}</span></button>)}</div></section><section className="panel"><SectionTitle title="งานรอตรวจ" note="ดูทั้งหมด" /><SubmissionList compact /></section></div>;
-}
-function StudentHome({ setView, flash }: { setView: (view: ViewKey) => void; flash: (message: string) => void }) {
-  const quick = [["สื่อการสอน", BookOpen, "materials"], ["ส่งงาน", CloudUpload, "work"], ["คะแนนของฉัน", BarChart3, "scores"], ["ประกาศ", Megaphone, "home"]] as const;
-  return <div className="two-column"><section className="panel"><SectionTitle title="ทางลัด" note="อัปเดตเมื่อ 2 ชม. ที่แล้ว" /><div className="quick-grid">{quick.map(([label, Icon, view]) => <button className="quick-button" key={label} onClick={() => view === "home" ? flash("ประกาศล่าสุดอยู่ในหน้านี้แล้ว") : setView(view)}><Icon aria-hidden /><span>{label}</span></button>)}</div></section><section className="panel"><SectionTitle title="ประกาศล่าสุด" note="ศุกร์นี้" /><article className="announcement-card"><Megaphone aria-hidden /><div><strong>สอบเก็บคะแนนบทที่ 4</strong><p>เตรียมอ่านหัวข้อประวัติศาสตร์รัตนโกสินทร์ และนำสมุดมาทบทวนในคาบ</p></div></article></section><section className="panel wide-panel"><SectionTitle title="บทเรียนล่าสุด" note="ดูทั้งหมด" /><div className="lesson-strip">{materials.filter((item) => item.image).slice(0, 2).map((item) => <LessonCard key={item.id} item={item} />)}</div></section></div>;
+  const waiting = submissions.filter((item) => item.status !== "ตรวจแล้ว").length;
+  const stats = isTeacher
+    ? [["นักเรียนทั้งหมด", String(students.length), "green"], ["งานรอตรวจ", String(waiting), "coral"], ["สื่อจริง", String(materials.length), "amber"]]
+    : [["สื่อที่เปิดได้", String(materials.length), "green"], ["งานที่ส่ง", String(submissions.length), "blue"], ["รายการคะแนน", String(assignments.length), "amber"]];
+  return (
+    <div className="page-stack">
+      <section className="hero-strip">
+        <div><p className="eyebrow">{session.school}</p><h1>{isTeacher ? "เมนูหลัก" : "บทเรียนล่าสุด"}</h1></div>
+      </section>
+      <div className="stat-grid">{stats.map(([label, value, tone]) => <article className={`stat-card tone-${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
+      {isTeacher ? <TeacherHome setView={setView} submissions={submissions} /> : <StudentHome setView={setView} flash={flash} materials={materials} />}
+    </div>
+  );
 }
 
-function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload }: { role: Role; materials: Material[]; busy: boolean; flash: (message: string) => void; onOpen: (item: Material) => void; onUpload: (input: MaterialUpload) => Promise<boolean> }) {
+function TeacherHome({ setView, submissions }: { setView: (view: ViewKey) => void; submissions: SubmissionRecord[] }) {
+  const tools = [["อัปโหลดสื่อการสอน", Upload, "materials"], ["จัดการคะแนน", BarChart3, "scores"], ["ตรวจงานนักเรียน", ClipboardCheck, "work"], ["เพิ่มรายชื่อ", FileSpreadsheet, "students"]] as const;
+  return <div className="two-column"><section className="panel"><SectionTitle title="งานของครู" note={DEFAULT_CLASS} /><div className="action-grid">{tools.map(([label, Icon, view]) => <button className="tool-tile" key={label} onClick={() => setView(view)}><Icon aria-hidden /><span>{label}</span></button>)}</div></section><section className="panel"><SectionTitle title="งานรอตรวจ" note={`${submissions.length} รายการ`} />{submissions.length ? <SubmissionList items={submissions.slice(0, 2)} compact /> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนส่งงาน รายการจะมาแสดงตรงนี้" />}</section></div>;
+}
+
+function StudentHome({ setView, flash, materials }: { setView: (view: ViewKey) => void; flash: (message: string) => void; materials: Material[] }) {
+  const quick = [["สื่อการสอน", BookOpen, "materials"], ["ส่งงาน", CloudUpload, "work"], ["คะแนนของฉัน", BarChart3, "scores"], ["ประกาศ", Megaphone, "home"]] as const;
+  return <div className="two-column"><section className="panel"><SectionTitle title="ทางลัด" note="เลือกเมนูที่ต้องการ" /><div className="quick-grid">{quick.map(([label, Icon, view]) => <button className="quick-button" key={label} onClick={() => view === "home" ? flash("ยังไม่มีประกาศใหม่") : setView(view)}><Icon aria-hidden /><span>{label}</span></button>)}</div></section><section className="panel"><SectionTitle title="สื่อล่าสุด" note={`${materials.length} รายการ`} />{materials.length ? <div className="mini-list">{materials.slice(0, 3).map((item) => <div key={item.id}><strong>{item.title}</strong><span>{item.level} · {item.type}</span></div>)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="รอคุณครูอัปโหลดไฟล์จริง" />}</section></div>;
+}
+
+function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload, onDelete }: { role: Role; materials: Material[]; busy: boolean; flash: (message: string) => void; onOpen: (item: Material) => void; onUpload: (input: MaterialUpload) => Promise<boolean>; onDelete: (item: Material) => void }) {
   const [filter, setFilter] = useState<(typeof filters)[number]>("ทั้งหมด");
   const [query, setQuery] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -325,6 +607,7 @@ function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload }
       return matchFilter && matchQuery;
     });
   }, [filter, items, query]);
+
   async function saveMaterial() {
     const ok = await onUpload({ file, title, unit, level, type });
     if (!ok) return;
@@ -334,9 +617,10 @@ function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload }
     setLevel("ม.3");
     setType("PDF");
   }
+
   return (
     <div className="page-stack">
-      <PageHeader title="สื่อการสอน" eyebrow="คลังบทเรียน" />
+      <PageHeader title="สื่อการสอน" eyebrow="คลังไฟล์จริง" />
       <div className="material-tools">
         <div className="input-shell material-search"><Search aria-hidden /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อบทเรียน หน่วย หรือระดับชั้น" /></div>
         <button className="select-button" type="button" onClick={() => flash(`พบสื่อ ${filtered.length} รายการ`)}>ค้นหา</button>
@@ -344,7 +628,7 @@ function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload }
       <div className="filter-row">{filters.map((item) => <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div>
       {role === "teacher" && (
         <section className="panel material-uploader">
-          <SectionTitle title="อัปโหลดสื่อการสอน" note="บันทึกเข้า Supabase Storage" />
+          <SectionTitle title="อัปโหลดสื่อการสอน" note="เก็บไฟล์ใน Supabase Storage" />
           <div className="form-grid">
             <label className="field">ชื่อสื่อ<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="เช่น ใบงานประชาธิปไตย" /></label>
             <label className="field">หน่วยการเรียน<input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="บทที่ 1" /></label>
@@ -355,49 +639,179 @@ function MaterialsView({ role, materials: items, busy, flash, onOpen, onUpload }
           <button className="primary-button full-button" disabled={busy} onClick={saveMaterial}><Upload aria-hidden />{busy ? "กำลังอัปโหลด" : "อัปโหลดสื่อการสอน"}</button>
         </section>
       )}
-      <div className="material-grid">{filtered.map((item) => <MaterialCard key={item.id} item={item} onOpen={onOpen} />)}</div>
-      {filtered.length === 0 && <section className="panel"><SectionTitle title="ไม่พบสื่อที่ค้นหา" note="ลองเปลี่ยนคำค้นหรือระดับชั้น" /></section>}
+      {filtered.length ? <div className="material-grid">{filtered.map((item) => <MaterialCard key={item.id} item={item} role={role} onOpen={onOpen} onDelete={onDelete} />)}</div> : <EmptyState title="ยังไม่มีสื่อการสอนจริง" body="เมื่ออัปโหลดไฟล์แล้ว รายการจะมาแสดงในหน้านี้" />}
     </div>
   );
 }
 
-function ScoresView({ role, rows, setRows, busy, saveScores, flash }: { role: Role; rows: ScoreRow[]; setRows: (rows: ScoreRow[]) => void; busy: boolean; saveScores: () => void; flash: (message: string) => void }) {
-  if (role === "student") return <div className="page-stack"><PageHeader title="คะแนนของฉัน" eyebrow="สมชาย ดีมาก (ม.3/1)" /><section className="score-hero"><div><strong>3.85 / 4.0</strong><span>อัปเดตเมื่อ วันนี้ 09:00 น.</span></div><b>A</b></section><section className="panel"><SectionTitle title="คะแนนรายวิชา" note="3 รายการ" /><div className="score-list">{studentScores.map((item) => <article className="score-card" key={item.title}><div><strong>{item.title}</strong><span>วันที่: {item.date}</span></div><div className="score-progress"><span>{item.score} / {item.max}</span><progress value={item.score} max={item.max} /><small>ผ่าน</small></div></article>)}</div></section></div>;
-  const update = (id: string, value: string) => setRows(rows.map((row) => row.id === id ? { ...row, score: Math.max(0, Math.min(20, Number(value) || 0)) } : row));
-  return <div className="page-stack"><PageHeader title="จัดการคะแนน" eyebrow="ชั้น ม.3/1 - สอบบทที่ 4" /><div className="control-row"><button className="select-button" onClick={() => flash("ตอนนี้เลือกห้อง ม.3/1")}>ม.3/1 <ChevronDown aria-hidden /></button><button className="select-button" onClick={() => flash("ตอนนี้เลือกแบบประเมิน: สอบบทที่ 4")}>สอบบทที่ 4 <ChevronDown aria-hidden /></button></div><section className="panel score-manager"><SectionTitle title="คะแนนเฉลี่ยห้อง" note="16.4 / 20" /><div className="score-table">{rows.map((row) => <article className="score-row" key={row.id}><div className="student-initial">{row.name.slice(0, 1)}</div><div><strong>{row.name}</strong><span>ID: {row.studentId}</span></div><span className={`status-pill ${row.score >= 15 ? "pass" : "fail"}`}>{row.score >= 15 ? "ผ่าน" : "ไม่ผ่าน"}</span><label className="score-input"><input type="number" min="0" max={row.maxScore} value={row.score} onChange={(event) => update(row.id, event.target.value)} /><span>/ {row.maxScore}</span></label></article>)}</div><button className="primary-button full-button" disabled={busy} onClick={saveScores}><CheckCircle2 aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกคะแนน"}</button></section></div>;
+function ScoresView({ role, students, assignments, entries, busy, addAssignment, deleteAssignment, updateScoreDraft, saveScoreSheet }: { role: Role; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void }) {
+  const [draft, setDraft] = useState<AssignmentDraft>({ title: "", className: DEFAULT_CLASS, rawMax: "10", finalMax: "10" });
+  const [selectedId, setSelectedId] = useState("");
+  const [mode, setMode] = useState<"raw" | "scaled">("raw");
+  const selected = assignments.find((assignment) => assignment.id === selectedId) || assignments[0];
+  const note = selected ? `คะแนนดิบเต็ม ${formatScore(selected.rawMax)} หารเป็นคะแนนเก็บ ${formatScore(selected.finalMax)}` : "สร้างงานคะแนนก่อน";
+
+  async function createAssignment() {
+    const ok = await addAssignment(draft);
+    if (!ok) return;
+    setDraft({ title: "", className: DEFAULT_CLASS, rawMax: "10", finalMax: "10" });
+  }
+
+  if (role === "student") {
+    return <StudentScoresView assignments={assignments} entries={entries} students={students} />;
+  }
+
+  return (
+    <div className="page-stack">
+      <PageHeader title="จัดการคะแนน" eyebrow="กำหนดงานและคะแนนเอง" />
+      <section className="panel compact-form">
+        <SectionTitle title="เพิ่มงานคะแนน" note="คะแนนดิบ -> คะแนนที่หารแล้ว" />
+        <div className="form-grid">
+          <label className="field">ชื่องาน / แบบประเมิน<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น ใบงานที่ 1" /></label>
+          <label className="field">ชั้นเรียน<input value={draft.className} onChange={(event) => setDraft({ ...draft, className: event.target.value })} /></label>
+          <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => setDraft({ ...draft, rawMax: event.target.value })} /></label>
+          <label className="field">คิดเป็นคะแนนเก็บ<input type="number" min="1" value={draft.finalMax} onChange={(event) => setDraft({ ...draft, finalMax: event.target.value })} /></label>
+        </div>
+        <button className="primary-button" disabled={busy} onClick={createAssignment}><Plus aria-hidden />เพิ่มงานคะแนน</button>
+      </section>
+      <section className="panel score-manager">
+        <SectionTitle title="ตารางคะแนน" note={note} />
+        {assignments.length ? (
+          <>
+            <div className="assignment-list">{assignments.map((assignment) => <button className={`assignment-chip ${selected?.id === assignment.id ? "active" : ""}`} key={assignment.id} onClick={() => setSelectedId(assignment.id)}>{assignment.title}<span>{formatScore(assignment.rawMax)}{" -> "}{formatScore(assignment.finalMax)}</span></button>)}</div>
+            <div className="score-tabs"><button className={mode === "raw" ? "active" : ""} onClick={() => setMode("raw")}>คะแนนดิบ</button><button className={mode === "scaled" ? "active" : ""} onClick={() => setMode("scaled")}>คะแนนที่หารแล้ว</button></div>
+            {selected && students.length ? <div className="score-table">{students.map((student) => {
+              const entry = findScoreEntry(entries, selected.id, student.id);
+              const rawScore = entry?.rawScore ?? 0;
+              const final = scaledScore(rawScore, selected.rawMax, selected.finalMax);
+              return (
+                <article className="score-row score-row-wide" key={student.id}>
+                  <div className="student-initial">{student.name.slice(0, 1) || student.studentId.slice(0, 1)}</div>
+                  <div><strong>{student.name}</strong><span>ID: {student.studentId}</span></div>
+                  <span className={`status-pill ${final >= selected.finalMax * 0.5 ? "pass" : "pending"}`}>{final >= selected.finalMax * 0.5 ? "ผ่าน" : "รอปรับ"}</span>
+                  {mode === "raw" ? <label className="score-input"><input type="number" min="0" max={selected.rawMax} value={rawScore} onChange={(event) => updateScoreDraft(selected, student, event.target.value)} /><span>/ {formatScore(selected.rawMax)}</span></label> : <div className="score-result"><strong>{formatScore(final)}</strong><span>/ {formatScore(selected.finalMax)}</span></div>}
+                </article>
+              );
+            })}</div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
+            <div className="form-actions">
+              {selected && <button className="primary-button" disabled={busy || !students.length} onClick={() => saveScoreSheet(selected)}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกคะแนน"}</button>}
+              {selected && <button className="danger-button" disabled={busy} onClick={() => deleteAssignment(selected)}><Trash2 aria-hidden />ลบงานนี้</button>}
+            </div>
+          </>
+        ) : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานคะแนนแรก แล้วระบบจะสร้างตารางให้กรอกตามรายชื่อนักเรียน" />}
+      </section>
+    </div>
+  );
 }
-function WorkView({ role, busy, uploadFile, flash }: { role: Role; busy: boolean; uploadFile: (kind: "roster" | "submission", file: File | null) => void; flash: (message: string) => void }) {
+
+function StudentScoresView({ assignments, entries, students }: { assignments: ScoreAssignment[]; entries: ScoreEntry[]; students: StudentRecord[] }) {
+  const student = students[0];
+  const studentEntries = student ? entries.filter((entry) => entry.studentRecordId === student.id) : [];
+  return <div className="page-stack"><PageHeader title="คะแนนของฉัน" eyebrow={student?.name || "ยังไม่มีข้อมูลนักเรียน"} />{studentEntries.length ? <section className="panel"><SectionTitle title="คะแนนรายงาน" note={`${studentEntries.length} รายการ`} /><div className="score-list">{studentEntries.map((entry) => {
+    const assignment = assignments.find((item) => item.id === entry.assignmentId);
+    return <article className="score-card" key={entry.id}><div><strong>{assignment?.title || "งานคะแนน"}</strong><span>คะแนนดิบ {formatScore(entry.rawScore)} / {formatScore(entry.rawMax)}</span></div><div className="score-progress"><span>{formatScore(entry.finalScore)} / {formatScore(entry.finalMax)}</span><progress value={entry.finalScore} max={entry.finalMax} /></div></article>;
+  })}</div></section> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
+}
+
+function WorkView({ role, submissions, busy, submitWork, updateSubmission, saveSubmission }: { role: Role; submissions: SubmissionRecord[]; busy: boolean; submitWork: (file: File | null, assignmentTitle: string) => void; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void }) {
   const [file, setFile] = useState<File | null>(null);
-  if (role === "teacher") return <div className="page-stack"><PageHeader title="ตรวจงาน" eyebrow="งานที่นักเรียนส่งเข้าระบบ" /><section className="panel"><SubmissionList onAction={(title) => flash(`ทำเครื่องหมายตรวจงาน "${title}" แล้ว`)} /></section></div>;
-  return <div className="page-stack"><PageHeader title="ส่งงาน" eyebrow="ใบงานบทที่ 4" /><UploadPanel file={file} setFile={setFile} accept=".pdf,.docx,.png,.jpg" label="เลือกไฟล์งานของคุณ" help="รองรับ PDF, DOCX, PNG, JPG ขนาดไม่เกิน 10MB" /><button className="primary-button full-button" disabled={busy} onClick={() => uploadFile("submission", file)}><CloudUpload aria-hidden />{busy ? "กำลังส่งงาน" : "ส่งงาน"}</button><section className="panel"><SectionTitle title="ประวัติการส่งงาน" note="3 รายการล่าสุด" /><SubmissionList compact /></section></div>;
+  const [assignmentTitle, setAssignmentTitle] = useState("");
+  if (role === "teacher") {
+    return (
+      <div className="page-stack">
+        <PageHeader title="ตรวจงาน" eyebrow="สถานะและคะแนนงานส่ง" />
+        <section className="panel">
+          <SectionTitle title="รายการงานส่ง" note={`${submissions.length} รายการ`} />
+          {submissions.length ? <div className="submission-list">{submissions.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} />)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงาน รายการจะปรากฏที่นี่" />}
+        </section>
+      </div>
+    );
+  }
+  return <div className="page-stack"><PageHeader title="ส่งงาน" eyebrow="อัปโหลดไฟล์งานของคุณ" /><section className="panel compact-form"><label className="field">ชื่องาน<input value={assignmentTitle} onChange={(event) => setAssignmentTitle(event.target.value)} placeholder="เช่น ใบงานที่ 1" /></label><UploadPanel file={file} setFile={setFile} accept=".pdf,.docx,.png,.jpg,.jpeg" label="เลือกไฟล์งานของคุณ" help="รองรับ PDF, DOCX, PNG, JPG ขนาดไม่เกิน 10MB" /><button className="primary-button full-button" disabled={busy} onClick={() => submitWork(file, assignmentTitle)}><CloudUpload aria-hidden />{busy ? "กำลังส่งงาน" : "ส่งงาน"}</button></section><section className="panel"><SectionTitle title="ประวัติการส่งงาน" note={`${submissions.length} รายการ`} />{submissions.length ? <SubmissionList items={submissions} compact /> : <EmptyState title="ยังไม่มีประวัติ" body="เมื่อส่งงานแล้วจะแสดงรายการที่นี่" />}</section></div>;
 }
-function StudentsView({ busy, uploadFile, flash }: { busy: boolean; uploadFile: (kind: "roster" | "submission", file: File | null) => void; flash: (message: string) => void }) {
+
+function ReviewCard({ item, busy, updateSubmission, saveSubmission }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void }) {
+  return (
+    <article className="submission-card review-card">
+      <div>
+        <strong>{item.assignmentTitle}</strong>
+        <span>{item.studentName} · ID: {item.studentId}</span>
+        <small>{item.submittedAt}</small>
+      </div>
+      <div className="review-grid">
+        <label className="field">สถานะ<select value={item.status} onChange={(event) => updateSubmission(item.id, { status: event.target.value as SubmissionStatus })}>{submissionStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
+        <label className="field">คะแนนดิบ<input type="number" min="0" value={item.rawScore} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} /></label>
+        <label className="field">เต็มดิบ<input type="number" min="1" value={item.rawMax} onChange={(event) => updateSubmission(item.id, { rawMax: positiveNumber(event.target.value, item.rawMax) })} /></label>
+        <label className="field">คะแนนเก็บเต็ม<input type="number" min="1" value={item.finalMax} onChange={(event) => updateSubmission(item.id, { finalMax: positiveNumber(event.target.value, item.finalMax) })} /></label>
+        <div className="score-result"><strong>{formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}</strong><span>/ {formatScore(item.finalMax)}</span></div>
+        <button className="small-primary" disabled={busy} onClick={() => saveSubmission(item)}><Save aria-hidden />บันทึก</button>
+      </div>
+    </article>
+  );
+}
+
+function StudentsView({ students, busy, addStudent, deleteStudent, uploadRosterFile }: { students: StudentRecord[]; busy: boolean; addStudent: (draft: StudentDraft) => Promise<boolean>; deleteStudent: (student: StudentRecord) => void; uploadRosterFile: (file: File | null) => void }) {
   const [file, setFile] = useState<File | null>(null);
-  return <div className="page-stack"><PageHeader title="อัปโหลดรายชื่อนักเรียน" eyebrow="ม.1/1 - สังคมศึกษา" /><div className="control-row"><button className="select-button wide-select" onClick={() => flash("ตอนนี้เลือก ม.1/1 - สังคมศึกษา")}>ม.1/1 - สังคมศึกษา <ChevronDown aria-hidden /></button></div><UploadPanel file={file} setFile={setFile} accept=".xlsx,.csv,.xls" label="ลากไฟล์มาวางที่นี่" help="รองรับไฟล์ .xlsx, .csv, .xls ขนาดไม่เกิน 5MB" /><section className="panel"><SectionTitle title="รูปแบบไฟล์ที่รองรับ" /><div className="template-row"><button className="template-button active" onClick={() => downloadRosterTemplate("excel")}><Download aria-hidden />Excel Template</button><button className="template-button" onClick={() => downloadRosterTemplate("csv")}><Download aria-hidden />CSV Template</button></div><div className="student-preview"><div className="student-preview-head"><span>เลขที่</span><span>รหัสนักเรียน</span><span>ชื่อ-นามสกุล</span><span>เพศ</span></div>{rosterPreview.map((student) => <div className="student-preview-row" key={student.id}><span>{student.no}</span><span>{student.id}</span><strong>{student.name}</strong><span>{student.gender}</span></div>)}</div></section><button className="primary-button full-button" disabled={busy} onClick={() => uploadFile("roster", file)}><CheckCircle2 aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกรายชื่อนักเรียน"}</button></div>;
+  const [draft, setDraft] = useState<StudentDraft>({ no: "", studentId: "", name: "", gender: "", className: DEFAULT_CLASS });
+  async function saveStudent() {
+    const ok = await addStudent(draft);
+    if (!ok) return;
+    setDraft({ no: "", studentId: "", name: "", gender: "", className: DEFAULT_CLASS });
+  }
+  return (
+    <div className="page-stack">
+      <PageHeader title="รายชื่อนักเรียน" eyebrow={DEFAULT_CLASS} />
+      <UploadPanel file={file} setFile={setFile} accept=".xlsx,.csv,.xls" label="เก็บไฟล์รายชื่อนักเรียน" help="รองรับไฟล์ .xlsx, .csv, .xls ขนาดไม่เกิน 5MB" />
+      <button className="primary-button full-button" disabled={busy} onClick={() => uploadRosterFile(file)}><CheckCircle2 aria-hidden />{busy ? "กำลังบันทึกไฟล์" : "บันทึกไฟล์รายชื่อ"}</button>
+      <section className="panel compact-form">
+        <SectionTitle title="เพิ่มรายชื่อนักเรียน" note="เพิ่มเองทีละคนได้" />
+        <div className="form-grid">
+          <label className="field">เลขที่<input type="number" min="1" value={draft.no} onChange={(event) => setDraft({ ...draft, no: event.target.value })} /></label>
+          <label className="field">รหัสนักเรียน<input value={draft.studentId} onChange={(event) => setDraft({ ...draft, studentId: event.target.value })} /></label>
+          <label className="field">ชื่อ-นามสกุล<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+          <label className="field">เพศ / หมายเหตุ<input value={draft.gender} onChange={(event) => setDraft({ ...draft, gender: event.target.value })} /></label>
+          <label className="field">ชั้นเรียน<input value={draft.className} onChange={(event) => setDraft({ ...draft, className: event.target.value })} /></label>
+        </div>
+        <div className="form-actions"><button className="primary-button" disabled={busy} onClick={saveStudent}><Plus aria-hidden />เพิ่มรายชื่อ</button><button className="template-button" onClick={() => downloadRosterTemplate("csv")}><Download aria-hidden />CSV Template</button></div>
+      </section>
+      <section className="panel">
+        <SectionTitle title="รายชื่อทั้งหมด" note={`${students.length} คน`} />
+        {students.length ? <div className="student-preview"><div className="student-preview-head"><span>เลขที่</span><span>รหัสนักเรียน</span><span>ชื่อ-นามสกุล</span><span>เพศ</span><span></span></div>{students.map((student) => <div className="student-preview-row student-preview-row-action" key={student.id}><span>{student.no}</span><span>{student.studentId}</span><strong>{student.name}</strong><span>{student.gender || "-"}</span><button className="icon-danger" disabled={busy} onClick={() => deleteStudent(student)} title="ลบรายชื่อ"><Trash2 aria-hidden /></button></div>)}</div> : <EmptyState title="ยังไม่มีรายชื่อ" body="เพิ่มรายชื่อด้วยฟอร์มด้านบน หรืออัปโหลดไฟล์เก็บไว้ก่อน" />}
+      </section>
+    </div>
+  );
 }
+
 function UploadPanel({ file, setFile, accept, label, help }: { file: File | null; setFile: (file: File | null) => void; accept: string; label: string; help: string }) {
   return <section className="upload-panel"><CloudUpload aria-hidden /><strong>{label}</strong><span>หรือ</span><label className="outline-file-button"><Upload aria-hidden /><input accept={accept} type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />{file ? file.name : "เลือกไฟล์จากเครื่อง"}</label><small>{help}</small></section>;
 }
+
 function ProfileView({ session }: { session: AppSession }) {
   return <div className="page-stack"><PageHeader title="โปรไฟล์" eyebrow={session.room} /><section className="profile-panel"><div className="profile-avatar">{session.name.slice(0, 1)}</div><div><h2>{session.name}</h2><p>{session.school}</p></div></section></div>;
 }
+
 function PageHeader({ title, eyebrow }: { title: string; eyebrow: string }) {
   return <div className="page-header"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1></div></div>;
 }
+
 function SectionTitle({ title, note }: { title: string; note?: string }) {
   return <div className="section-heading"><h2>{title}</h2>{note && <span>{note}</span>}</div>;
 }
-function MaterialCard({ item, onOpen }: { item: Material; onOpen: (item: Material) => void }) {
-  return <article className={`material-card tone-border-${item.accent}`}>{item.image ? <img src={item.image} alt="" /> : <div className={`material-icon tone-${item.accent}`}><BookOpen aria-hidden /></div>}<div className="material-body"><div className="material-meta"><span className={`type-pill ${item.type.toLowerCase()}`}>{item.type}</span><span>{item.date}</span></div><h2>{item.title}</h2><p>{item.unit} · ระดับ: {item.level}</p><button className="small-primary" onClick={() => onOpen(item)}><Eye aria-hidden />เปิดดู</button></div></article>;
+
+function MaterialCard({ item, role, onOpen, onDelete }: { item: Material; role: Role; onOpen: (item: Material) => void; onDelete: (item: Material) => void }) {
+  return <article className={`material-card tone-border-${item.accent}`}><div className={`material-icon tone-${item.accent}`}><BookOpen aria-hidden /></div><div className="material-body"><div className="material-meta"><span className={`type-pill ${item.type.toLowerCase()}`}>{item.type}</span><span>{item.date}</span></div><h2>{item.title}</h2><p>{item.unit} · ระดับ: {item.level}</p><div className="card-actions"><button className="small-primary" onClick={() => onOpen(item)}><Eye aria-hidden />เปิดดู</button>{role === "teacher" && <button className="danger-button small-danger" onClick={() => onDelete(item)}><Trash2 aria-hidden />ลบ</button>}</div></div></article>;
 }
-function LessonCard({ item }: { item: Material }) {
-  return <article className="lesson-card"><img src={item.image} alt="" /><div><span>{item.unit}</span><strong>{item.title}</strong></div></article>;
+
+function SubmissionList({ items, compact = false }: { items: SubmissionRecord[]; compact?: boolean }) {
+  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card" key={item.id}><div><strong>{item.assignmentTitle}</strong><span>{item.studentName} · ID: {item.studentId}</span></div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div></article>)}</div>;
 }
-function SubmissionList({ compact = false, onAction }: { compact?: boolean; onAction?: (title: string) => void }) {
-  return <div className="submission-list">{submissions.slice(0, compact ? 2 : submissions.length).map((item) => <article className="submission-card" key={item.title}><div><strong>{item.title}</strong><span>{item.student} · ID: {item.id}</span></div><div className="submission-state"><small>{item.date}</small><span className={`status-pill ${item.status === "ตรวจแล้ว" ? "pass" : "pending"}`}>{item.status}</span>{onAction && <button className="small-primary" onClick={() => onAction(item.title)}><CheckCircle2 aria-hidden />ตรวจแล้ว</button>}</div></article>)}</div>;
+
+function EmptyState({ title, body }: { title: string; body: string }) {
+  return <div className="empty-state"><strong>{title}</strong><span>{body}</span></div>;
 }
+
 function downloadRosterTemplate(kind: "excel" | "csv") {
-  const csv = "เลขที่,รหัสนักเรียน,ชื่อ-นามสกุล,เพศ,ชั้นเรียน\n1,65001,กฤษฎา มาดี,ชาย,ม.1/1\n2,65002,จิรนันท์ รักเรียน,หญิง,ม.1/1\n";
+  const csv = "เลขที่,รหัสนักเรียน,ชื่อ-นามสกุล,เพศ,ชั้นเรียน\n1,65001,ชื่อ นักเรียน,ชาย,ม.1/1\n";
   const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -406,4 +820,152 @@ function downloadRosterTemplate(kind: "excel" | "csv") {
   anchor.click();
   URL.revokeObjectURL(url);
 }
+
+function readLocalState(): LocalState {
+  const fallback: LocalState = { materials: [], students: [], assignments: [], scoreEntries: [], submissions: [] };
+  try {
+    const raw = localStorage.getItem(LOCAL_STATE_KEY);
+    if (!raw) return fallback;
+    return { ...fallback, ...JSON.parse(raw) };
+  } catch {
+    return fallback;
+  }
+}
+
+function mapMaterialRow(row: any): Material {
+  const type = (row.material_type || row.type || "PDF") as MaterialType;
+  return {
+    id: String(row.id),
+    title: row.title || "สื่อการสอน",
+    unit: row.unit || "สื่อเสริม",
+    level: row.level || "ม.1",
+    type,
+    date: formatDate(row.published_at || row.date || new Date().toISOString()),
+    filePath: row.file_path || row.filePath || "",
+    accent: accentForType(type)
+  };
+}
+
+function mapStudentRow(row: any): StudentRecord {
+  return {
+    id: String(row.id),
+    no: Number(row.student_no ?? row.no ?? 0),
+    studentId: row.student_code || row.studentId || "",
+    name: row.full_name || row.name || "",
+    gender: row.gender || "",
+    className: row.class_name || row.className || DEFAULT_CLASS
+  };
+}
+
+function mapAssignmentRow(row: any): ScoreAssignment {
+  return {
+    id: String(row.id),
+    title: row.title || "งานคะแนน",
+    className: row.class_name || row.className || DEFAULT_CLASS,
+    rawMax: Number(row.raw_max ?? row.rawMax ?? 10),
+    finalMax: Number(row.final_max ?? row.finalMax ?? 10),
+    createdAt: formatDate(row.created_at || row.createdAt || new Date().toISOString())
+  };
+}
+
+function mapScoreEntryRow(row: any): ScoreEntry {
+  return {
+    id: String(row.id),
+    assignmentId: row.assignment_id || row.assignmentId || "",
+    studentRecordId: row.student_id || row.studentRecordId || "",
+    studentId: row.student_code || row.studentId || "",
+    rawScore: Number(row.raw_score ?? row.rawScore ?? 0),
+    rawMax: Number(row.raw_max ?? row.rawMax ?? 10),
+    finalScore: Number(row.final_score ?? row.finalScore ?? 0),
+    finalMax: Number(row.final_max ?? row.finalMax ?? 10)
+  };
+}
+
+function mapSubmissionRow(row: any): SubmissionRecord {
+  const rawScore = Number(row.raw_score ?? row.rawScore ?? 0);
+  const rawMax = Number(row.raw_max ?? row.rawMax ?? 10);
+  const finalMax = Number(row.final_max ?? row.finalMax ?? 10);
+  return {
+    id: String(row.id),
+    assignmentTitle: row.assignment_title || row.assignmentTitle || "งานที่ส่ง",
+    studentName: row.student_name || row.studentName || "นักเรียน",
+    studentId: row.student_code || row.studentId || "",
+    filePath: row.file_path || row.filePath || undefined,
+    status: (row.status || "รอตรวจ") as SubmissionStatus,
+    submittedAt: formatDate(row.submitted_at || row.submittedAt || new Date().toISOString()),
+    rawScore,
+    rawMax,
+    finalScore: Number(row.final_score ?? row.finalScore ?? scaledScore(rawScore, rawMax, finalMax)),
+    finalMax
+  };
+}
+
+function buildScoreEntry(assignment: ScoreAssignment, student: StudentRecord, rawScore: number): ScoreEntry {
+  return {
+    id: `draft-${assignment.id}-${student.id}`,
+    assignmentId: assignment.id,
+    studentRecordId: student.id,
+    studentId: student.studentId,
+    rawScore,
+    rawMax: assignment.rawMax,
+    finalScore: scaledScore(rawScore, assignment.rawMax, assignment.finalMax),
+    finalMax: assignment.finalMax
+  };
+}
+
+function findScoreEntry(entries: ScoreEntry[], assignmentId: string, studentId: string) {
+  return entries.find((entry) => entry.assignmentId === assignmentId && entry.studentRecordId === studentId);
+}
+
+function scaledScore(rawScore: number, rawMax: number, finalMax: number) {
+  if (!rawMax || rawMax <= 0) return 0;
+  return Math.round((rawScore / rawMax) * finalMax * 100) / 100;
+}
+
+function clampScore(value: string, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(max, parsed));
+}
+
+function positiveNumber(value: string, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function formatScore(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function formatDate(input: string) {
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return input;
+  return date.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+}
+
+function safeFileName(name: string) {
+  return name.replace(/[^\w.\-\u0E00-\u0E7F]+/g, "-");
+}
+
+function accentForType(type: MaterialType): Material["accent"] {
+  if (type === "VIDEO") return "blue";
+  if (type === "IMG") return "coral";
+  return "green";
+}
+
+function sortStudents(a: StudentRecord, b: StudentRecord) {
+  return a.no - b.no || a.studentId.localeCompare(b.studentId);
+}
+
+function statusTone(status: SubmissionStatus) {
+  if (status === "ตรวจแล้ว") return "pass";
+  if (status === "ให้แก้ไข" || status === "ส่งช้า") return "fail";
+  return "pending";
+}
+
+function flashAndFail(message: string, flash: (message: string) => void) {
+  flash(message);
+  return false;
+}
+
 export default App;
