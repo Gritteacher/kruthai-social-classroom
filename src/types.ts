@@ -27,7 +27,21 @@ export interface Material {
   type: MaterialType;
   date: string;
   filePath: string;
+  className: string;
+  classroomId?: string;
+  previewUrl?: string;
   accent: "green" | "amber" | "blue" | "coral";
+}
+
+export interface MaterialDownloadLog {
+  id: string;
+  materialId: string;
+  materialTitle: string;
+  studentId: string;
+  studentName: string;
+  className: string;
+  classroomId?: string;
+  downloadedAt: string;
 }
 
 export interface Classroom {
@@ -74,15 +88,26 @@ export interface ScoreEntry {
 
 export interface SubmissionRecord {
   id: string;
+  assignmentId?: string;
   assignmentTitle: string;
   studentName: string;
   studentId: string;
   classroomId?: string;
   filePath?: string;
+  previewUrl?: string;
   status: SubmissionStatus;
   submittedAt: string;
   rawScore: number;
   rawMax: number;
   finalScore: number;
   finalMax: number;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  className: string;
+  classroomId?: string;
+  publishedAt: string;
 }
