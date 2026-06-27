@@ -152,9 +152,7 @@ function App() {
     : currentStudent ? [currentStudent] : [];
   const activeAssignments = orderAssignments(session?.role === "teacher"
     ? (workingClassroom ? assignments.filter((assignment) => belongsToClass(assignment, workingClassroom)) : [])
-    : studentScopedItems(assignments, workingClassroom, currentStudent, session).length
-      ? studentScopedItems(assignments, workingClassroom, currentStudent, session)
-      : assignments);
+    : studentScopedItems(assignments, workingClassroom, currentStudent, session));
   const studentGradeLevel = session?.role === "student" ? gradeLevelFromText(currentStudent?.className, session.room) : undefined;
   const activeMaterials = session?.role === "student"
     ? (studentGradeLevel ? materialItems.filter((material) => gradeLevelFromText(material.level) === studentGradeLevel) : [])
@@ -901,7 +899,6 @@ function App() {
             <h2>{session.role === "teacher" ? activeClassName : session.room}</h2>
           </div>
           <div className="top-actions">
-            {session.role === "teacher" && <TeacherClassroomSelector classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onChange={setSelectedClassroomId} />}
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
             <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
             <button className="theme-toggle-button" type="button" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title="เปลี่ยนธีม">{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}<span>{theme === "light" ? "โทนมืด" : "โทนสว่าง"}</span></button>
@@ -910,6 +907,7 @@ function App() {
         </header>
         <section className="content-area">
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
+          {session.role === "teacher" && view !== "profile" && <div className="content-classroom-picker"><TeacherClassroomSelector classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onChange={setSelectedClassroomId} /></div>}
           {view === "home" && <HomeView session={session} setView={setView} flash={flash} materials={activeMaterials} students={activeStudents} submissions={activeSubmissions} assignments={activeAssignments} entries={scoreEntries} announcements={activeAnnouncements} activeClassName={activeClassName} selectedClassroom={workingClassroom} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}

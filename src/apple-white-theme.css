@@ -1681,3 +1681,40 @@ textarea {
     justify-self: end;
   }
 }
+
+.top-bar {
+  z-index: 30;
+}
+
+.content-classroom-picker {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 20px;
+}
+
+.content-classroom-picker .teacher-classroom-picker {
+  grid-column: auto;
+  grid-row: auto;
+  width: min(100%, 420px);
+  min-width: 0;
+}
+
+.content-classroom-picker .teacher-classroom-picker select {
+  width: 100%;
+}
+
+.score-matrix-scroll {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
+
+@media (max-width: 760px) {
+  .content-classroom-picker {
+    margin-bottom: 16px;
+  }
+
+  .content-classroom-picker .teacher-classroom-picker {
+    width: 100%;
+  }
+}
