@@ -16,6 +16,17 @@ body {
   font-weight: 400;
 }
 
+.auth-page {
+  position: relative;
+}
+
+.auth-theme-toggle {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 12;
+}
+
 button,
 input,
 select,
@@ -353,6 +364,179 @@ textarea {
 .score-result span {
   color: var(--muted);
   font-size: 13px;
+}
+
+.desktop-score-matrix {
+  display: grid;
+  gap: 16px;
+}
+
+.score-matrix-scroll {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
+}
+
+.score-matrix {
+  width: max-content;
+  min-width: 100%;
+  border-spacing: 0;
+  border-collapse: separate;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.score-matrix th,
+.score-matrix td {
+  height: 72px;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  vertical-align: middle;
+}
+
+.score-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  height: 88px;
+  background: var(--surface-soft);
+  text-align: left;
+}
+
+.score-matrix tr:last-child > * {
+  border-bottom: 0;
+}
+
+.score-matrix tr > *:last-child {
+  border-right: 0;
+}
+
+.score-matrix .matrix-no,
+.score-matrix .matrix-id,
+.score-matrix .matrix-name {
+  position: sticky;
+  z-index: 3;
+}
+
+.score-matrix .matrix-no {
+  left: 0;
+  width: 62px;
+  min-width: 62px;
+  text-align: center;
+}
+
+.score-matrix .matrix-id {
+  left: 62px;
+  width: 118px;
+  min-width: 118px;
+}
+
+.score-matrix .matrix-name {
+  left: 180px;
+  width: 220px;
+  min-width: 220px;
+  box-shadow: 8px 0 16px rgba(15, 23, 42, 0.05);
+  text-align: left;
+}
+
+.score-matrix thead .matrix-no,
+.score-matrix thead .matrix-id,
+.score-matrix thead .matrix-name {
+  z-index: 6;
+  background: var(--surface-soft);
+}
+
+.matrix-assignment {
+  width: 172px;
+  min-width: 172px;
+}
+
+.matrix-assignment > div {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding-right: 30px;
+}
+
+.matrix-assignment strong,
+.matrix-assignment span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.matrix-assignment span,
+.matrix-score-cell small,
+.matrix-actions > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.matrix-delete {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--coral) 28%, transparent);
+  border-radius: 8px;
+  background: var(--surface-danger);
+  color: var(--coral);
+}
+
+.matrix-delete svg {
+  width: 14px;
+  height: 14px;
+}
+
+.matrix-score-cell {
+  width: 172px;
+  min-width: 172px;
+}
+
+.matrix-score-cell label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.matrix-score-cell input {
+  width: 78px;
+  height: 40px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  color: var(--ink);
+  text-align: center;
+}
+
+.matrix-score-cell label span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.matrix-score-cell small {
+  display: block;
+  margin-top: 5px;
+}
+
+.matrix-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mobile-score-editor {
+  display: none;
 }
 
 .student-preview-head,
@@ -730,6 +914,20 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  .auth-theme-toggle {
+    top: 12px;
+    right: 12px;
+  }
+
+  .desktop-score-matrix {
+    display: none;
+  }
+
+  .mobile-score-editor {
+    display: grid;
+    gap: 14px;
+  }
+
   .content-area {
     padding-inline: 14px;
   }
@@ -780,6 +978,11 @@ textarea {
 
   .score-result {
     justify-content: flex-start;
+  }
+
+  .matrix-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

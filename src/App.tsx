@@ -763,6 +763,31 @@ function App() {
     flash(`บันทึกคะแนน "${assignment.title}" แล้ว`);
   }
 
+  async function saveAllScoreSheets() {
+    if (!activeStudents.length) return flash("ยังไม่มีรายชื่อนักเรียนในห้องนี้");
+    if (!activeAssignments.length) return flash("ยังไม่มีงานคะแนนในห้องนี้");
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    const payload = activeAssignments.flatMap((assignment) => activeStudents.map((student) => {
+      const entry = findScoreEntry(scoreEntries, assignment.id, student.id);
+      const rawScore = entry?.rawScore ?? 0;
+      return {
+        assignment_id: assignment.id,
+        student_id: student.id,
+        student_code: student.studentId,
+        raw_score: rawScore,
+        raw_max: assignment.rawMax,
+        final_score: scaledScore(rawScore, assignment.rawMax, assignment.finalMax),
+        final_max: assignment.finalMax
+      };
+    }));
+    setBusy(true);
+    const result = await (supabase as any).from("score_entries").upsert(payload, { onConflict: "assignment_id,student_id" });
+    setBusy(false);
+    if (result.error) return flash(result.error.message);
+    await loadClassroomData();
+    flash(`บันทึกคะแนนทั้งห้อง ${activeStudents.length} คน จำนวน ${activeAssignments.length} งานแล้ว`);
+  }
+
   function updateSubmissionDraft(id: string, patch: Partial<SubmissionRecord>) {
     setSubmissionItems((current) => current.map((item) => {
       if (item.id !== id) return item;
@@ -826,7 +851,7 @@ function App() {
   }
 
   if (!session) {
-    return <Auth role={role} busy={busy} onRole={setRole} onLogin={login} onResetPassword={requestPasswordReset} toast={toast} />;
+    return <Auth role={role} theme={theme} busy={busy} onRole={setRole} onTheme={() => setTheme((current) => current === "light" ? "dark" : "light")} onLogin={login} onResetPassword={requestPasswordReset} toast={toast} />;
   }
 
   return (
@@ -868,7 +893,7 @@ function App() {
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
           {view === "home" && <HomeView session={session} setView={setView} flash={flash} materials={activeMaterials} students={activeStudents} submissions={activeSubmissions} assignments={activeAssignments} entries={scoreEntries} announcements={activeAnnouncements} activeClassName={activeClassName} selectedClassroom={workingClassroom} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} />}
-          {view === "scores" && <ScoresView role={session.role} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} />}
+          {view === "scores" && <ScoresView role={session.role} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
           {view === "work" && <WorkView role={session.role} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
@@ -880,7 +905,7 @@ function App() {
   );
 }
 
-function Auth({ role, busy, toast, onRole, onLogin, onResetPassword }: { role: Role; busy: boolean; toast: string; onRole: (role: Role) => void; onLogin: (email: string, password: string) => void; onResetPassword: (email: string) => void }) {
+function Auth({ role, theme, busy, toast, onRole, onTheme, onLogin, onResetPassword }: { role: Role; theme: ThemeMode; busy: boolean; toast: string; onRole: (role: Role) => void; onTheme: () => void; onLogin: (email: string, password: string) => void; onResetPassword: (email: string) => void }) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -891,6 +916,7 @@ function Auth({ role, busy, toast, onRole, onLogin, onResetPassword }: { role: R
   const identifierPlaceholder = role === "student" ? "เช่น 65001" : "name@school.ac.th";
   return (
     <main className="auth-page">
+      <button className="theme-toggle-button auth-theme-toggle" type="button" onClick={onTheme} title="เปลี่ยนธีม">{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}<span>{theme === "light" ? "โทนมืด" : "โทนสว่าง"}</span></button>
       <section className="brand-panel">
         <div className="brand-mark"><img className="brand-logo" src={SCHOOL_LOGO} alt="โลโก้โรงเรียน" /></div>
         <h1>ห้องเรียนสังคมครูไต๋</h1>
@@ -1159,7 +1185,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
   );
 }
 
-function ScoresView({ role, students, assignments, entries, busy, activeClassName, addAssignment, deleteAssignment, updateScoreDraft, saveScoreSheet }: { role: Role; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void }) {
+function ScoresView({ role, students, assignments, entries, busy, activeClassName, addAssignment, deleteAssignment, updateScoreDraft, saveScoreSheet, saveAllScoreSheets }: { role: Role; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void; saveAllScoreSheets: () => void }) {
   const [draft, setDraft] = useState<AssignmentDraft>({ title: "", rawMax: "", finalMax: "" });
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
@@ -1189,28 +1215,25 @@ function ScoresView({ role, students, assignments, entries, busy, activeClassNam
         <button className="primary-button" disabled={busy} onClick={createAssignment}><Plus aria-hidden />เพิ่มงานคะแนน</button>
       </section>
       <section className="panel score-manager">
-        <SectionTitle title="ตารางคะแนน" note={note} />
+        <SectionTitle title="ตารางคะแนนทั้งห้อง" note={assignments.length ? `${students.length} คน · ${assignments.length} งาน` : note} />
         {assignments.length ? (
           <>
-            <div className="score-summary-table"><div className="score-summary-head"><span>งานคะแนน</span><span>คะแนนดิบ</span><span>คะแนนเก็บ</span><span>ผู้เรียน</span></div>{assignments.map((assignment) => <button className={`score-summary-row ${selected?.id === assignment.id ? "active" : ""}`} key={assignment.id} onClick={() => setSelectedId(assignment.id)}><strong>{assignment.title}</strong><span>{formatScore(assignment.rawMax)}</span><span>{formatScore(assignment.finalMax)}</span><span>{students.length} คน</span></button>)}</div>
-            <div className="assignment-list">{assignments.map((assignment) => <button className={`assignment-chip ${selected?.id === assignment.id ? "active" : ""}`} key={assignment.id} onClick={() => setSelectedId(assignment.id)}>{assignment.title}<span>{formatScore(assignment.rawMax)}{" -> "}{formatScore(assignment.finalMax)}</span></button>)}</div>
-            <div className="score-tabs"><button className={mode === "raw" ? "active" : ""} onClick={() => setMode("raw")}>คะแนนดิบ</button><button className={mode === "scaled" ? "active" : ""} onClick={() => setMode("scaled")}>คะแนนที่หารแล้ว</button></div>
-            {selected && students.length ? <div className="score-table">{students.map((student) => {
-              const entry = findScoreEntry(entries, selected.id, student.id);
+            {students.length ? <div className="desktop-score-matrix"><div className="score-matrix-scroll"><table className="score-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment) => <th className="matrix-assignment" key={assignment.id}><div><strong>{assignment.title}</strong><span>ดิบ {formatScore(assignment.rawMax)} → เก็บ {formatScore(assignment.finalMax)}</span><button className="matrix-delete" type="button" disabled={busy} onClick={() => deleteAssignment(assignment)} title={`ลบ ${assignment.title}`}><Trash2 aria-hidden /></button></div></th>)}</tr></thead><tbody>{students.map((student) => <tr key={student.id}><td className="matrix-no">{student.no}</td><td className="matrix-id">{student.studentId}</td><th className="matrix-name" scope="row">{student.name}</th>{assignments.map((assignment) => {
+              const entry = findScoreEntry(entries, assignment.id, student.id);
               const rawScore = entry?.rawScore ?? 0;
-              const final = scaledScore(rawScore, selected.rawMax, selected.finalMax);
-              return (
-                <article className="score-row score-row-wide" key={student.id}>
-                  <div className="student-initial">{student.name.slice(0, 1) || student.studentId.slice(0, 1)}</div>
-                  <div><strong>{student.name}</strong><span>ID: {student.studentId}</span></div>
-                  <span className={`status-pill ${final >= selected.finalMax * 0.5 ? "pass" : "pending"}`}>{final >= selected.finalMax * 0.5 ? "ผ่าน" : "รอปรับ"}</span>
-                  {mode === "raw" ? <label className="score-input"><input type="number" min="0" max={selected.rawMax} value={entry ? numericInputValue(rawScore) : ""} onChange={(event) => updateScoreDraft(selected, student, event.target.value)} placeholder="0" /><span>/ {formatScore(selected.rawMax)}</span></label> : <div className="score-result"><strong>{formatScore(final)}</strong><span>/ {formatScore(selected.finalMax)}</span></div>}
-                </article>
-              );
-            })}</div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
-            <div className="form-actions">
-              {selected && <button className="primary-button" disabled={busy || !students.length} onClick={() => saveScoreSheet(selected)}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกคะแนน"}</button>}
-              {selected && <button className="danger-button" disabled={busy} onClick={() => deleteAssignment(selected)}><Trash2 aria-hidden />ลบงานนี้</button>}
+              const final = scaledScore(rawScore, assignment.rawMax, assignment.finalMax);
+              return <td className="matrix-score-cell" key={assignment.id}><label><input aria-label={`${assignment.title} ของ ${student.name}`} type="number" min="0" max={assignment.rawMax} value={entry ? numericInputValue(rawScore) : ""} onChange={(event) => updateScoreDraft(assignment, student, event.target.value)} placeholder="0" /><span>/ {formatScore(assignment.rawMax)}</span></label><small>เก็บ {formatScore(final)} / {formatScore(assignment.finalMax)}</small></td>;
+            })}</tr>)}</tbody></table></div><div className="matrix-actions"><span>กรอกคะแนนดิบ ระบบคำนวณคะแนนเก็บให้อัตโนมัติ</span><button className="primary-button" disabled={busy || !students.length} onClick={saveAllScoreSheets}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกคะแนนทั้งห้อง"}</button></div></div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
+            <div className="mobile-score-editor">
+              <div className="assignment-list">{assignments.map((assignment) => <button className={`assignment-chip ${selected?.id === assignment.id ? "active" : ""}`} key={assignment.id} onClick={() => setSelectedId(assignment.id)}>{assignment.title}<span>{formatScore(assignment.rawMax)}{" → "}{formatScore(assignment.finalMax)}</span></button>)}</div>
+              <div className="score-tabs"><button className={mode === "raw" ? "active" : ""} onClick={() => setMode("raw")}>คะแนนดิบ</button><button className={mode === "scaled" ? "active" : ""} onClick={() => setMode("scaled")}>คะแนนที่หารแล้ว</button></div>
+              {selected && students.length ? <div className="score-table">{students.map((student) => {
+                const entry = findScoreEntry(entries, selected.id, student.id);
+                const rawScore = entry?.rawScore ?? 0;
+                const final = scaledScore(rawScore, selected.rawMax, selected.finalMax);
+                return <article className="score-row score-row-wide" key={student.id}><div className="student-initial">{student.name.slice(0, 1) || student.studentId.slice(0, 1)}</div><div><strong>{student.name}</strong><span>ID: {student.studentId}</span></div>{mode === "raw" ? <label className="score-input"><input type="number" min="0" max={selected.rawMax} value={entry ? numericInputValue(rawScore) : ""} onChange={(event) => updateScoreDraft(selected, student, event.target.value)} placeholder="0" /><span>/ {formatScore(selected.rawMax)}</span></label> : <div className="score-result"><strong>{formatScore(final)}</strong><span>/ {formatScore(selected.finalMax)}</span></div>}</article>;
+              })}</div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
+              <div className="form-actions">{selected && <button className="primary-button" disabled={busy || !students.length} onClick={() => saveScoreSheet(selected)}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกคะแนนงานนี้"}</button>}{selected && <button className="danger-button" disabled={busy} onClick={() => deleteAssignment(selected)}><Trash2 aria-hidden />ลบงานนี้</button>}</div>
             </div>
           </>
         ) : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานคะแนนแรก แล้วระบบจะสร้างตารางให้กรอกตามรายชื่อนักเรียน" />}

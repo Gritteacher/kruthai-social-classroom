@@ -642,6 +642,9 @@ textarea {
 .small-primary,
 .filter-row button.active,
 .template-button.active,
+.assignment-chip.active,
+.score-tabs button.active,
+.classroom-chip.active > button:first-child,
 .avatar-button {
   border-color: #1d1d1f !important;
   background: #1d1d1f !important;
