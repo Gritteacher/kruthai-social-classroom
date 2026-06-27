@@ -699,7 +699,8 @@ textarea {
 
 .teacher-actions-panel,
 .announcement-compose-panel,
-.teacher-overview-panel {
+.teacher-pending-panel,
+.teacher-announcement-panel {
   min-width: 0;
 }
 
@@ -709,13 +710,176 @@ textarea {
   gap: 16px;
 }
 
-.teacher-overview-panel {
+.teacher-pending-panel {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1;
+}
+
+.teacher-announcement-panel {
+  grid-column: 2;
+  grid-row: 2;
+  overflow: hidden;
+  border-color: rgba(255, 69, 58, 0.16);
+  background: linear-gradient(145deg, #fff 0%, #fff9f8 100%);
+  box-shadow: 0 22px 58px rgba(217, 48, 37, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.announcement-overview-header,
+.announcement-overview-title,
+.announcement-overview-meta,
+.announcement-overview-empty {
+  display: flex;
+  align-items: center;
+}
+
+.announcement-overview-header {
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 69, 58, 0.12);
+}
+
+.announcement-overview-title {
+  min-width: 0;
+  gap: 12px;
+}
+
+.announcement-overview-icon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: #fff0ee;
+  color: #d93025;
+}
+
+.announcement-overview-icon svg,
+.announcement-overview-empty > svg {
+  width: 21px;
+  height: 21px;
+}
+
+.announcement-overview-title h2,
+.announcement-overview-title p,
+.announcement-overview-item p {
+  margin: 0;
+}
+
+.announcement-overview-title h2 {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.announcement-overview-title p,
+.announcement-overview-item small,
+.announcement-overview-empty span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.announcement-count {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #fff0ee;
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.announcement-overview-list {
+  display: grid;
+}
+
+.announcement-overview-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid rgba(255, 69, 58, 0.1);
+}
+
+.announcement-overview-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.announcement-overview-copy {
+  min-width: 0;
+}
+
+.announcement-overview-meta {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.announcement-overview-meta strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+}
+
+.announcement-overview-meta span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.announcement-overview-item p {
+  padding: 5px 0 7px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.announcement-overview-item small {
+  display: block;
+}
+
+.announcement-overview-empty {
+  gap: 12px;
+  min-height: 112px;
+  justify-content: center;
+  padding: 18px;
+  text-align: left;
+}
+
+.announcement-overview-empty > svg {
+  flex: 0 0 auto;
+  color: #d93025;
+}
+
+.announcement-overview-empty strong,
+.announcement-overview-empty span {
+  display: block;
 }
 
 .announcement-compose-grid {
   gap: 14px;
+}
+
+:root[data-theme="dark"] .teacher-announcement-panel {
+  border-color: rgba(255, 69, 58, 0.22);
+  background: linear-gradient(145deg, rgba(46, 24, 24, 0.96) 0%, rgba(25, 18, 18, 0.98) 100%);
+  box-shadow: 0 26px 68px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+:root[data-theme="dark"] .announcement-overview-header,
+:root[data-theme="dark"] .announcement-overview-item {
+  border-color: rgba(255, 138, 128, 0.14);
+}
+
+:root[data-theme="dark"] .announcement-overview-icon,
+:root[data-theme="dark"] .announcement-count {
+  background: rgba(255, 69, 58, 0.15);
+  color: #ff9a91;
 }
 
 .modal-backdrop {
@@ -878,7 +1042,8 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .teacher-overview-panel {
+  .teacher-pending-panel,
+  .teacher-announcement-panel {
     grid-column: auto;
     grid-row: auto;
   }

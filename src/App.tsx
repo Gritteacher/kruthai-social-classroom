@@ -214,7 +214,7 @@ function App() {
     setStudents(((studentsResult.data ?? []) as any[]).map(mapStudentRow));
     setAssignments(((assignmentsResult.data ?? []) as any[]).map(mapAssignmentRow));
     setScoreEntries(((entriesResult.data ?? []) as any[]).map(mapScoreEntryRow));
-    setSubmissionItems(((submissionsResult.data ?? []) as any[]).map(mapSubmissionRow));
+    setSubmissionItems(((submissionsResult.data ?? []) as any[]).map(mapSubmissionRow).filter((item) => !isLegacyDemoSubmission(item)));
     setLoadingData(false);
     if (showToast && errors.length === 0) flash("โหลดข้อมูลล่าสุดจาก Supabase แล้ว");
   }
@@ -1076,18 +1076,33 @@ function TeacherHome({ setView, classrooms, submissions, announcements, busy, ad
         )}
       </section>
 
-      <section className="panel teacher-overview-panel">
+      <section className="panel teacher-pending-panel">
         <SectionTitle title="งานรอตรวจ" note={`${submissions.length} รายการ`} />
         {submissions.length ? <SubmissionList items={submissions.slice(0, 3)} compact /> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนส่งงาน รายการจะมาแสดงตรงนี้" />}
-        <SectionTitle title="ประกาศล่าสุด" note={`${announcements.length} รายการ`} />
+      </section>
+
+      <section className="panel teacher-announcement-panel">
+        <header className="announcement-overview-header">
+          <div className="announcement-overview-title">
+            <span className="announcement-overview-icon"><Megaphone aria-hidden /></span>
+            <div>
+              <h2>ประกาศล่าสุด</h2>
+              <p>ข้อความที่เผยแพร่ให้นักเรียน</p>
+            </div>
+          </div>
+          <span className="announcement-count">{announcements.length} รายการ</span>
+        </header>
         {announcements.length ? (
-          <div className="announcement-list">
+          <div className="announcement-overview-list">
             {announcements.slice(0, 4).map((item) => (
-              <article className="announcement-card" key={item.id}>
-                <div>
-                  <strong>{item.title}</strong>
-                  <span>{item.className} · {item.publishedAt}</span>
+              <article className="announcement-overview-item" key={item.id}>
+                <div className="announcement-overview-copy">
+                  <div className="announcement-overview-meta">
+                    <strong>{item.title}</strong>
+                    <span>{item.publishedAt}</span>
+                  </div>
                   <p>{item.body}</p>
+                  <small>{item.className}</small>
                 </div>
                 <button className="icon-danger" disabled={busy} onClick={() => deleteAnnouncement(item)} title="ลบประกาศ">
                   <Trash2 aria-hidden />
@@ -1096,7 +1111,10 @@ function TeacherHome({ setView, classrooms, submissions, announcements, busy, ad
             ))}
           </div>
         ) : (
-          <EmptyState title="ยังไม่มีประกาศ" body="ประกาศจากทุกห้องจะแสดงตรงนี้" />
+          <div className="announcement-overview-empty">
+            <Megaphone aria-hidden />
+            <div><strong>ยังไม่มีประกาศ</strong><span>ประกาศจากทุกห้องจะแสดงตรงนี้</span></div>
+          </div>
         )}
       </section>
     </div>
@@ -1690,6 +1708,11 @@ function mapSubmissionRow(row: any): SubmissionRecord {
     finalScore: Number(row.final_score ?? row.finalScore ?? scaledScore(rawScore, rawMax, finalMax)),
     finalMax
   };
+}
+
+function isLegacyDemoSubmission(item: SubmissionRecord) {
+  const compactName = item.studentName.replace(/\s+/g, "");
+  return compactName === "สมชายดีมาก" && item.studentId.trim().toLowerCase() === "student";
 }
 
 function buildScoreEntry(assignment: ScoreAssignment, student: StudentRecord, rawScore: number): ScoreEntry {
