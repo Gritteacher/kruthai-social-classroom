@@ -159,6 +159,78 @@ textarea {
   backdrop-filter: blur(20px);
 }
 
+@media (min-width: 981px) {
+  .side-nav {
+    gap: 24px;
+    padding: 0 18px 24px;
+  }
+
+  .side-brand {
+    height: 84px;
+    min-height: 84px;
+    padding: 10px 6px;
+  }
+
+  .top-bar {
+    min-height: 84px;
+    flex-wrap: nowrap;
+    gap: clamp(20px, 3vw, 42px);
+    padding-block: 10px;
+  }
+
+  .top-title-block {
+    display: grid;
+    flex: 1 1 auto;
+    align-content: center;
+    gap: 2px;
+    min-width: 220px;
+  }
+
+  .top-title-block .eyebrow {
+    margin: 0;
+    line-height: 1.3;
+  }
+
+  .top-title-block h2 {
+    line-height: 1.3;
+  }
+
+  .top-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .teacher-classroom-picker {
+    width: clamp(240px, 24vw, 300px);
+    min-width: 0;
+    gap: 3px;
+    line-height: 1.2;
+  }
+
+  .teacher-classroom-picker select,
+  .top-actions .icon-button,
+  .top-actions .theme-toggle-button,
+  .top-actions .avatar-button {
+    height: 42px;
+    min-height: 42px;
+  }
+
+  .top-actions .icon-button,
+  .top-actions .avatar-button {
+    flex: 0 0 42px;
+    width: 42px;
+  }
+
+  .top-actions .theme-toggle-button {
+    flex: 0 0 auto;
+    padding-inline: 12px;
+    white-space: nowrap;
+  }
+}
+
 .top-bar h2,
 .page-header h1,
 .hero-strip h1 {
