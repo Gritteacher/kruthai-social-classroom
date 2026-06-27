@@ -306,6 +306,76 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
+.assignment-order-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.assignment-order-item > div {
+  display: grid;
+  grid-template-rows: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.assignment-order-item > div button,
+.matrix-header-actions button {
+  display: grid;
+  width: 32px;
+  min-height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+}
+
+.assignment-order-item svg,
+.matrix-header-actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.teacher-score-view-switch {
+  display: inline-grid;
+  width: fit-content;
+  grid-template-columns: repeat(2, auto);
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+}
+
+.teacher-score-view-switch button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.teacher-score-view-switch button.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.teacher-score-view-switch svg,
+.score-overview-heading .primary-button svg {
+  width: 17px;
+  height: 17px;
+}
+
 .assignment-chip,
 .score-tabs button {
   border: 1px solid var(--line);
@@ -460,7 +530,6 @@ textarea {
   position: relative;
   display: grid;
   gap: 4px;
-  padding-right: 30px;
 }
 
 .matrix-assignment strong,
@@ -477,9 +546,6 @@ textarea {
 }
 
 .matrix-delete {
-  position: absolute;
-  top: 0;
-  right: 0;
   display: grid;
   width: 28px;
   height: 28px;
@@ -494,6 +560,24 @@ textarea {
 .matrix-delete svg {
   width: 14px;
   height: 14px;
+}
+
+.matrix-header-actions {
+  display: flex;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.matrix-header-actions button:disabled,
+.assignment-order-item button:disabled {
+  cursor: default;
+  opacity: 0.32;
+}
+
+.matrix-header-actions .matrix-delete {
+  border-color: color-mix(in srgb, var(--coral) 28%, transparent);
+  background: var(--surface-danger);
+  color: var(--coral);
 }
 
 .matrix-score-cell {
@@ -533,6 +617,65 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.score-overview-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.score-overview-heading .primary-button {
+  min-height: 42px;
+  flex: 0 0 auto;
+}
+
+.mobile-score-overview-list {
+  display: none;
+}
+
+.overview-assignment strong,
+.overview-assignment span,
+.matrix-overview-score strong,
+.matrix-overview-score span,
+.matrix-total strong,
+.matrix-total span {
+  display: block;
+}
+
+.overview-assignment span,
+.matrix-overview-score span,
+.matrix-total span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.matrix-overview-score {
+  width: 138px;
+  min-width: 138px;
+  text-align: center;
+}
+
+.matrix-overview-score strong,
+.matrix-total strong {
+  font-size: 16px;
+}
+
+.score-matrix .matrix-total {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  width: 112px;
+  min-width: 112px;
+  border-left: 1px solid var(--line);
+  background: var(--surface-soft);
+  text-align: center;
+  box-shadow: -8px 0 16px rgba(15, 23, 42, 0.05);
+}
+
+.score-matrix thead .matrix-total {
+  z-index: 6;
 }
 
 .mobile-score-editor {
@@ -926,6 +1069,81 @@ textarea {
   .mobile-score-editor {
     display: grid;
     gap: 14px;
+  }
+
+  .teacher-score-view-switch {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .score-overview-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .score-overview-heading .primary-button {
+    width: 100%;
+  }
+
+  .desktop-score-overview {
+    display: none;
+  }
+
+  .mobile-score-overview-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .mobile-score-overview-card {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--paper);
+  }
+
+  .mobile-score-overview-card header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px;
+    background: var(--surface-soft);
+  }
+
+  .mobile-score-overview-card header span,
+  .mobile-score-total span {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .mobile-score-total {
+    flex: 0 0 auto;
+    text-align: right;
+  }
+
+  .mobile-score-total strong {
+    font-size: 20px;
+  }
+
+  .mobile-assignment-score {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 42px;
+    padding: 8px 14px;
+    border-top: 1px solid var(--line);
+  }
+
+  .mobile-assignment-score span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--muted);
+  }
+
+  .mobile-assignment-score strong {
+    flex: 0 0 auto;
   }
 
   .content-area {
