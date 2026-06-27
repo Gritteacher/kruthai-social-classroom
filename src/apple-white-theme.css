@@ -1426,3 +1426,97 @@ textarea {
   color: #ffe781;
   box-shadow: 0 20px 58px rgba(0, 0, 0, 0.46), 0 0 0 1px rgba(255, 214, 10, 0.06) inset;
 }
+
+/* Keep command controls visually consistent across forms, cards, and tables. */
+.primary-button,
+.template-button,
+.select-button,
+.outline-file-button,
+.danger-button,
+.mobile-logout-button {
+  height: 46px;
+  min-height: 46px;
+  padding-block: 0;
+}
+
+.small-primary,
+.small-danger {
+  height: 40px;
+  min-height: 40px;
+}
+
+.icon-button,
+.avatar-button,
+.icon-danger {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+}
+
+.primary-button svg,
+.small-primary svg,
+.template-button svg,
+.select-button svg,
+.outline-file-button svg,
+.danger-button svg,
+.icon-button svg,
+.icon-danger svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
+.form-actions > .primary-button,
+.form-actions > .template-button,
+.form-actions > .danger-button {
+  height: 46px;
+  min-height: 46px;
+}
+
+.card-actions > .small-primary,
+.card-actions > .template-button,
+.card-actions > .danger-button {
+  height: 42px;
+  min-height: 42px;
+}
+
+.bulk-account-row > .small-primary,
+.bulk-account-row > .template-button,
+.bulk-account-row > .danger-button,
+.account-button {
+  height: 44px;
+  min-height: 44px;
+}
+
+.top-actions .icon-button,
+.top-actions .avatar-button,
+.top-actions .theme-toggle-button,
+.top-actions .mobile-logout-button,
+.teacher-classroom-picker select {
+  height: 42px;
+  min-height: 42px;
+}
+
+.classroom-chip {
+  grid-template-columns: minmax(0, 1fr) 46px;
+}
+
+.classroom-chip > button:first-child,
+.classroom-chip > .icon-danger {
+  height: 100%;
+  min-height: 64px;
+}
+
+.classroom-chip > .icon-danger {
+  width: 46px;
+  min-width: 46px;
+}
+
+.student-preview-row-action > .icon-danger {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+}

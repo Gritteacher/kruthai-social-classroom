@@ -200,7 +200,7 @@ function App() {
       flash("บางตารางใน Supabase ยังไม่พร้อม กรุณาตรวจ schema แล้วลองโหลดใหม่");
     }
 
-    const nextClassrooms = ((classroomsResult.data ?? []) as any[]).map(mapClassroomRow);
+    const nextClassrooms = ((classroomsResult.data ?? []) as any[]).map(mapClassroomRow).sort(sortClassrooms);
     setClassroomItems(nextClassrooms);
     setSelectedClassroomId((current) => {
       if (current && nextClassrooms.some((item) => item.id === current)) return current;
@@ -480,7 +480,7 @@ function App() {
       return false;
     }
     const nextClassroom = mapClassroomRow(result.data);
-    setClassroomItems((current) => [nextClassroom, ...current]);
+    setClassroomItems((current) => [...current, nextClassroom].sort(sortClassrooms));
     setSelectedClassroomId(nextClassroom.id);
     flash(`เพิ่มห้องเรียน ${displayName} แล้ว`);
     return true;
@@ -1905,6 +1905,21 @@ function accentForType(type: MaterialType): Material["accent"] {
 
 function sortStudents(a: StudentRecord, b: StudentRecord) {
   return a.no - b.no || a.studentId.localeCompare(b.studentId);
+}
+
+function sortClassrooms(a: Classroom, b: Classroom) {
+  const levelOrder = gradeNumber(a.level) - gradeNumber(b.level);
+  if (levelOrder) return levelOrder;
+  const roomOrder = a.room.localeCompare(b.room, "th", { numeric: true, sensitivity: "base" });
+  if (roomOrder) return roomOrder;
+  const subjectOrder = a.subject.localeCompare(b.subject, "th", { numeric: true, sensitivity: "base" });
+  if (subjectOrder) return subjectOrder;
+  return b.academicYear.localeCompare(a.academicYear, "th", { numeric: true });
+}
+
+function gradeNumber(level: string) {
+  const match = level.match(/([1-6])/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
 function formatClassroomName(draft: ClassroomDraft) {
