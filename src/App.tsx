@@ -57,7 +57,7 @@ type MaterialUpload = { file: File | null; title: string; unit: string; level: s
 type ClassroomDraft = { academicYear: string; level: string; room: string; subject: string };
 type StudentDraft = { no: string; studentId: string; name: string; gender: string };
 type RosterStudent = { no: number; studentId: string; name: string; gender: string };
-type AnnouncementDraft = { title: string; body: string };
+type AnnouncementDraft = { title: string; body: string; classroomId: string };
 type AssignmentDraft = { title: string; rawMax: string; finalMax: string; classroomIds: string[] };
 type ThemeMode = "light" | "dark";
 
@@ -367,15 +367,16 @@ function App() {
   }
 
   async function addAnnouncement(draft: AnnouncementDraft) {
-    if (!selectedClassroom) return flashAndFail("เลือกห้องเรียนก่อนประกาศ", flash);
+    const targetClassroom = classroomItems.find((classroom) => classroom.id === draft.classroomId);
+    if (!targetClassroom) return flashAndFail("เลือกห้องเรียนก่อนประกาศ", flash);
     if (!draft.title.trim()) return flashAndFail("กรอกหัวข้อประกาศก่อน", flash);
     if (!draft.body.trim()) return flashAndFail("กรอกรายละเอียดประกาศก่อน", flash);
     if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
     const payload = {
       title: draft.title.trim(),
       body: draft.body.trim(),
-      class_name: selectedClassroom.displayName,
-      classroom_id: selectedClassroom.id
+      class_name: targetClassroom.displayName,
+      classroom_id: targetClassroom.id
     };
     setBusy(true);
     const result = await (supabase as any).from("announcements").insert(payload).select("*").single();
@@ -385,7 +386,7 @@ function App() {
       return false;
     }
     setAnnouncementItems((current) => [mapAnnouncementRow(result.data), ...current]);
-    flash(`ประกาศสำหรับ ${selectedClassroom.displayName} ถูกเผยแพร่แล้ว`);
+    flash(`ประกาศสำหรับ ${targetClassroom.displayName} ถูกเผยแพร่แล้ว`);
     return true;
   }
 
@@ -896,7 +897,7 @@ function App() {
               </div>
             </div>
             <p className="eyebrow">{session.role === "teacher" ? session.school : `สวัสดี ${session.name}`}</p>
-            <h2>{session.role === "teacher" ? activeClassName : session.room}</h2>
+            <h2>{session.role === "teacher" ? (view === "home" ? "ภาพรวมทุกห้อง" : activeClassName) : session.room}</h2>
           </div>
           <div className="top-actions">
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
@@ -907,7 +908,7 @@ function App() {
         </header>
         <section className="content-area">
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
-          {view === "home" && <HomeView session={session} setView={setView} flash={flash} materials={activeMaterials} students={activeStudents} submissions={activeSubmissions} assignments={activeAssignments} entries={scoreEntries} announcements={activeAnnouncements} activeClassName={activeClassName} selectedClassroom={workingClassroom} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
+          {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} openSubmission={openSubmissionFile} />}
@@ -979,38 +980,42 @@ function TeacherClassroomSelector({ classrooms, selectedClassroomId, onChange }:
   );
 }
 
-function HomeView({ session, setView, flash, materials, students, submissions, assignments, entries, announcements, activeClassName, selectedClassroom, busy, addAnnouncement, deleteAnnouncement }: { session: AppSession; setView: (view: ViewKey) => void; flash: (message: string) => void; materials: Material[]; students: StudentRecord[]; submissions: SubmissionRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; announcements: Announcement[]; activeClassName: string; selectedClassroom?: Classroom; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void }) {
+function HomeView({ session, setView, materials, classrooms, students, submissions, assignments, entries, announcements, busy, addAnnouncement, deleteAnnouncement }: { session: AppSession; setView: (view: ViewKey) => void; materials: Material[]; classrooms: Classroom[]; students: StudentRecord[]; submissions: SubmissionRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; announcements: Announcement[]; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void }) {
   const isTeacher = session.role === "teacher";
   if (!isTeacher) {
     return <div className="page-stack"><StudentHome setView={setView} materials={materials} entries={entries} students={students} announcements={announcements} /></div>;
   }
   const waiting = submissions.filter((item) => item.status !== "ตรวจแล้ว").length;
-  const stats = [["นักเรียนทั้งหมด", String(students.length), "green"], ["งานรอตรวจ", String(waiting), "coral"], ["สื่อการสอน", String(materials.length), "amber"]];
+  const stats = [["ห้องเรียน", String(classrooms.length), "blue"], ["นักเรียนทั้งหมด", String(students.length), "green"], ["งานคะแนน", String(assignments.length), "amber"], ["งานรอตรวจ", String(waiting), "coral"], ["สื่อการสอน", String(materials.length), "blue"], ["ประกาศ", String(announcements.length), "amber"]];
   return (
     <div className="page-stack">
       <section className="hero-strip">
         <div><p className="eyebrow">{session.school}</p><h1>เมนูหลัก</h1></div>
       </section>
       <div className="stat-grid">{stats.map(([label, value, tone]) => <article className={`stat-card tone-${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
-      <TeacherHome setView={setView} submissions={submissions} announcements={announcements} activeClassName={activeClassName} selectedClassroom={selectedClassroom} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />
+      <TeacherHome setView={setView} classrooms={classrooms} submissions={submissions} announcements={announcements} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />
     </div>
   );
 }
 
-function TeacherHome({ setView, submissions, announcements, activeClassName, selectedClassroom, busy, addAnnouncement, deleteAnnouncement }: { setView: (view: ViewKey) => void; submissions: SubmissionRecord[]; announcements: Announcement[]; activeClassName: string; selectedClassroom?: Classroom; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void }) {
-  const [draft, setDraft] = useState<AnnouncementDraft>({ title: "", body: "" });
+function TeacherHome({ setView, classrooms, submissions, announcements, busy, addAnnouncement, deleteAnnouncement }: { setView: (view: ViewKey) => void; classrooms: Classroom[]; submissions: SubmissionRecord[]; announcements: Announcement[]; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void }) {
+  const [draft, setDraft] = useState<AnnouncementDraft>({ title: "", body: "", classroomId: classrooms[0]?.id || "" });
   const tools = [["อัปโหลดสื่อการสอน", Upload, "materials"], ["จัดการคะแนน", BarChart3, "scores"], ["ตรวจงานนักเรียน", ClipboardCheck, "work"], ["เพิ่มรายชื่อ", FileSpreadsheet, "students"]] as const;
 
   async function publishAnnouncement() {
     const ok = await addAnnouncement(draft);
     if (!ok) return;
-    setDraft({ title: "", body: "" });
+    setDraft((current) => ({ title: "", body: "", classroomId: current.classroomId }));
   }
+
+  useEffect(() => {
+    if (!draft.classroomId && classrooms[0]?.id) setDraft((current) => ({ ...current, classroomId: classrooms[0].id }));
+  }, [classrooms, draft.classroomId]);
 
   return (
     <div className="teacher-home-layout">
       <section className="panel teacher-actions-panel">
-        <SectionTitle title="งานของครู" note={activeClassName} />
+        <SectionTitle title="งานของครู" note="ข้อมูลรวมทุกห้อง" />
         <div className="action-grid">
           {tools.map(([label, Icon, view]) => (
             <button className="tool-tile" key={label} onClick={() => setView(view)}>
@@ -1022,10 +1027,14 @@ function TeacherHome({ setView, submissions, announcements, activeClassName, sel
       </section>
 
       <section className="panel announcement-compose-panel">
-        {selectedClassroom ? (
+        {classrooms.length ? (
           <>
-            <SectionTitle title="ประกาศถึงห้องนี้" note={selectedClassroom.displayName} />
+            <SectionTitle title="เพิ่มประกาศ" note="เลือกห้องเรียนก่อนเผยแพร่" />
             <div className="form-grid announcement-compose-grid">
+              <label className="field full-span">
+                ห้องเรียนที่ประกาศ
+                <select value={draft.classroomId} onChange={(event) => setDraft({ ...draft, classroomId: event.target.value })}>{classrooms.map((classroom) => <option key={classroom.id} value={classroom.id}>{classroom.displayName}</option>)}</select>
+              </label>
               <label className="field">
                 หัวข้อประกาศ
                 <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น แจ้งงานสัปดาห์นี้" />
@@ -1043,7 +1052,7 @@ function TeacherHome({ setView, submissions, announcements, activeClassName, sel
             </div>
           </>
         ) : (
-          <EmptyState title="ยังไม่ได้เลือกห้องเรียน" body="เลือกห้องเรียนด้านบนก่อนจึงจะประกาศได้" />
+          <EmptyState title="ยังไม่มีห้องเรียน" body="เพิ่มห้องเรียนในเมนูรายชื่อก่อนสร้างประกาศ" />
         )}
       </section>
 
@@ -1057,7 +1066,7 @@ function TeacherHome({ setView, submissions, announcements, activeClassName, sel
               <article className="announcement-card" key={item.id}>
                 <div>
                   <strong>{item.title}</strong>
-                  <span>{item.publishedAt}</span>
+                  <span>{item.className} · {item.publishedAt}</span>
                   <p>{item.body}</p>
                 </div>
                 <button className="icon-danger" disabled={busy} onClick={() => deleteAnnouncement(item)} title="ลบประกาศ">
@@ -1067,7 +1076,7 @@ function TeacherHome({ setView, submissions, announcements, activeClassName, sel
             ))}
           </div>
         ) : (
-          <EmptyState title="ยังไม่มีประกาศ" body="ประกาศของห้องที่เลือกจะแสดงตรงนี้" />
+          <EmptyState title="ยังไม่มีประกาศ" body="ประกาศจากทุกห้องจะแสดงตรงนี้" />
         )}
       </section>
     </div>
@@ -1186,7 +1195,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
   const [draft, setDraft] = useState<AssignmentDraft>({ title: "", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
-  const [teacherView, setTeacherView] = useState<"entry" | "overview">("entry");
+  const [teacherView, setTeacherView] = useState<"add" | "entry" | "overview">("add");
   const selected = assignments.find((assignment) => assignment.id === selectedId) || assignments[0];
   const note = selected ? `คะแนนดิบเต็ม ${formatScore(selected.rawMax)} หารเป็นคะแนนเก็บ ${formatScore(selected.finalMax)}` : "สร้างงานคะแนนก่อน";
 
@@ -1210,15 +1219,15 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
 
   return (
     <div className="page-stack">
-      <PageHeader title={teacherView === "entry" ? "จัดการคะแนน" : "ดูคะแนนรวม"} eyebrow={activeClassName} />
+      <PageHeader title={teacherView === "add" ? "เพิ่มงาน" : teacherView === "entry" ? "กรอกคะแนน" : "ดูคะแนนรวม"} eyebrow={teacherView === "add" ? "กำหนดงานคะแนน" : activeClassName} />
       <div className="teacher-score-view-switch" role="tablist" aria-label="มุมมองคะแนน">
+        <button className={teacherView === "add" ? "active" : ""} type="button" role="tab" aria-selected={teacherView === "add"} onClick={() => setTeacherView("add")}><Plus aria-hidden />เพิ่มงาน</button>
         <button className={teacherView === "entry" ? "active" : ""} type="button" role="tab" aria-selected={teacherView === "entry"} onClick={() => setTeacherView("entry")}><Pencil aria-hidden />กรอกคะแนน</button>
         <button className={teacherView === "overview" ? "active" : ""} type="button" role="tab" aria-selected={teacherView === "overview"} onClick={() => setTeacherView("overview")}><BarChart3 aria-hidden />ดูคะแนนรวม</button>
       </div>
-      {teacherView === "entry" ? <>
+      {teacherView === "add" &&
         <section className="panel compact-form">
           <SectionTitle title="เพิ่มงานคะแนน" note="งานที่เพิ่มก่อนจะแสดงก่อน" />
-          <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
           <div className="form-grid">
             <label className="field">ชื่องาน / แบบประเมิน<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น ใบงานที่ 1" /></label>
             <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => setDraft({ ...draft, rawMax: event.target.value })} placeholder="เช่น 10" /></label>
@@ -1229,9 +1238,11 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
             <div className="classroom-checkbox-grid">{classrooms.map((classroom) => <label className="classroom-checkbox" key={classroom.id}><input type="checkbox" checked={draft.classroomIds.includes(classroom.id)} onChange={() => toggleAssignmentClassroom(classroom.id)} /><span>{classroom.displayName}</span></label>)}</div>
           </fieldset>
           <button className="primary-button" disabled={busy} onClick={createAssignment}><Plus aria-hidden />เพิ่มงานคะแนน</button>
-        </section>
+        </section>}
+      {teacherView === "entry" &&
         <section className="panel score-manager">
           <SectionTitle title="ตารางกรอกคะแนนทั้งห้อง" note={assignments.length ? `${students.length} คน · ${assignments.length} งาน` : note} />
+          <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
           {assignments.length ? (
             <>
               {students.length ? <div className="desktop-score-matrix"><div className="score-matrix-scroll"><table className="score-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment, index) => <th className="matrix-assignment" key={assignment.id}><div><strong>{assignment.title}</strong><span>ดิบ {formatScore(assignment.rawMax)} → เก็บ {formatScore(assignment.finalMax)}</span><div className="matrix-header-actions"><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} title={`ย้าย ${assignment.title} ไปก่อนหน้า`} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} title={`ย้าย ${assignment.title} ไปถัดไป`} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button><button className="matrix-delete" type="button" disabled={busy} onClick={() => deleteAssignment(assignment)} title={`ลบ ${assignment.title}`} aria-label={`ลบ ${assignment.title}`}><Trash2 aria-hidden /></button></div></div></th>)}</tr></thead><tbody>{students.map((student) => <tr key={student.id}><td className="matrix-no">{student.no}</td><td className="matrix-id">{student.studentId}</td><th className="matrix-name" scope="row">{student.name}</th>{assignments.map((assignment) => {
@@ -1253,8 +1264,8 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
               </div>
             </>
           ) : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานคะแนนแรก แล้วระบบจะสร้างตารางให้กรอกตามรายชื่อนักเรียน" />}
-        </section>
-      </> : <TeacherScoreOverview students={students} assignments={assignments} entries={entries} onEdit={() => setTeacherView("entry")} />}
+        </section>}
+      {teacherView === "overview" && <TeacherScoreOverview students={students} assignments={assignments} entries={entries} onEdit={() => setTeacherView("entry")} />}
     </div>
   );
 }
@@ -1289,7 +1300,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
   const [assignmentId, setAssignmentId] = useState("");
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    if (role === "teacher" || !isSupabaseConfigured) return;
     let active = true;
     void Promise.all(submissions.filter((item) => item.filePath).map(async (item) => {
       const result = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 60);
@@ -1305,7 +1316,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
     return () => {
       active = false;
     };
-  }, [submissions]);
+  }, [role, submissions]);
   useEffect(() => {
     if (!assignmentId && assignments[0]?.id) setAssignmentId(assignments[0].id);
   }, [assignmentId, assignments]);
@@ -1316,7 +1327,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
         <section className="panel">
           <SectionTitle title="รายการงานส่ง" note={`${submissions.length} รายการ`} />
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
-          {submissions.length ? <div className="submission-list">{submissions.map((item) => <ReviewCard key={item.id} item={item} previewUrl={previewUrls[item.id]} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} openSubmission={openSubmission} />)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
+          {submissions.length ? <div className="submission-list">{submissions.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} openSubmission={openSubmission} />)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
         </section>
       </div>
     );
@@ -1346,16 +1357,14 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
   );
 }
 
-function ReviewCard({ item, previewUrl, busy, updateSubmission, saveSubmission, openSubmission }: { item: SubmissionRecord; previewUrl?: string; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
+function ReviewCard({ item, busy, updateSubmission, saveSubmission, openSubmission }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
   return (
     <article className="submission-card review-card">
       <div>
         <strong>{item.assignmentTitle}</strong>
         <div className="student-submission-identity"><span>{item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>
         <small>{item.submittedAt}</small>
-        <small>{item.filePath ? `ไฟล์: ${fileNameFromPath(item.filePath)}` : "ยังไม่มีไฟล์แนบ"}</small>
-        <FilePreview itemType={materialTypeFromFile(item.filePath || "", "")} url={previewUrl} label={item.assignmentTitle} compact />
-        <button className="text-button inline-link" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath}><ExternalLink aria-hidden />เปิดไฟล์งานนักเรียน</button>
+        <div className="review-file-box"><FileText aria-hidden /><div><span>ไฟล์งาน</span><strong>{item.filePath ? fileNameFromPath(item.filePath) : "ยังไม่มีไฟล์แนบ"}</strong></div><button className="template-button" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath}><ExternalLink aria-hidden />เปิดไฟล์</button></div>
       </div>
       <div className="review-grid">
         <label className="field">สถานะ<select value={item.status} onChange={(event) => updateSubmission(item.id, { status: event.target.value as SubmissionStatus })}>{submissionStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
@@ -1470,7 +1479,7 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
 }
 
 function UploadPanel({ file, setFile, accept, label, help }: { file: File | null; setFile: (file: File | null) => void; accept: string; label: string; help: string }) {
-  return <section className="upload-panel"><CloudUpload aria-hidden /><strong>{label}</strong><span>หรือ</span><label className="outline-file-button"><Upload aria-hidden /><input accept={accept} type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />{file ? file.name : "เลือกไฟล์จากเครื่อง"}</label><small>{help}</small></section>;
+  return <section className="upload-panel"><CloudUpload aria-hidden /><strong>{label}</strong><span>หรือ</span><label className="outline-file-button"><Upload aria-hidden /><input accept={accept} type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><span className="file-choice-label">{file ? file.name : "เลือกไฟล์จากเครื่อง"}</span></label><small>{help}</small></section>;
 }
 
 function ProfileView({ session, busy, changePassword }: { session: AppSession; busy: boolean; changePassword: (newPassword: string) => void }) {
@@ -1532,7 +1541,7 @@ function MaterialCard({ item, role, downloadCount, onOpen, onDownload, onDelete 
 }
 
 function SubmissionList({ items, previewUrls = {}, onOpen, compact = false }: { items: SubmissionRecord[]; previewUrls?: Record<string, string>; onOpen?: (item: SubmissionRecord) => void; compact?: boolean }) {
-  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card" key={item.id}><div><strong>{item.assignmentTitle}</strong><div className="student-submission-identity"><span>{item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div><FilePreview itemType={materialTypeFromFile(item.filePath || "", "")} url={previewUrls[item.id]} label={item.assignmentTitle} compact /></div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath}><Eye aria-hidden />ดูงาน</button>}</div></article>)}</div>;
+  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card" key={item.id}><div><strong>{item.assignmentTitle}</strong><div className="student-submission-identity"><span>{item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>{!compact && <FilePreview itemType={materialTypeFromFile(item.filePath || "", "")} url={previewUrls[item.id]} label={item.assignmentTitle} compact />}</div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath}><Eye aria-hidden />ดูงาน</button>}</div></article>)}</div>;
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {

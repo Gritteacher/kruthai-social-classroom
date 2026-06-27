@@ -1707,8 +1707,147 @@ textarea {
   isolation: isolate;
 }
 
+.page-stack,
+.panel,
+.compact-form,
+.upload-panel,
+.form-grid,
+.field,
+.review-card,
+.review-grid,
+.submission-card,
+.teacher-home-layout {
+  min-width: 0;
+}
+
+.field input,
+.field select,
+.field textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.field select {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outline-file-button {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.upload-panel {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.upload-panel > strong,
+.upload-panel > small {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.file-choice-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teacher-score-view-switch {
+  max-width: 100%;
+  grid-template-columns: repeat(3, auto);
+}
+
+.review-card {
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+}
+
+.review-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.review-grid .small-primary {
+  width: 100%;
+}
+
+.review-file-box {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.review-file-box > svg {
+  width: 20px;
+  height: 20px;
+  color: var(--muted);
+}
+
+.review-file-box > div {
+  display: grid;
+  min-width: 0;
+}
+
+.review-file-box span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.review-file-box strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.review-file-box .template-button {
+  height: 38px;
+  min-height: 38px;
+  padding-inline: 12px;
+}
+
+@media (max-width: 1100px) {
+  .review-card {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 760px) {
   .panel-classroom-picker {
+    width: 100%;
+  }
+
+  .teacher-score-view-switch {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .teacher-score-view-switch button {
+    gap: 5px;
+    min-width: 0;
+    padding-inline: 6px;
+    font-size: 12px;
+  }
+
+  .review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-file-box {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .review-file-box .template-button {
+    grid-column: 1 / -1;
     width: 100%;
   }
 }
