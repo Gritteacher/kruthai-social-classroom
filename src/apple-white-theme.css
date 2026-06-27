@@ -1520,3 +1520,164 @@ textarea {
   height: 44px;
   min-height: 44px;
 }
+
+.student-home-welcome {
+  display: grid;
+  gap: 2px;
+  padding: 2px;
+}
+
+.student-home-welcome p,
+.student-home-welcome h1,
+.student-home-welcome span {
+  margin: 0;
+}
+
+.student-home-welcome p,
+.student-home-welcome span {
+  color: var(--muted);
+}
+
+.student-home-welcome h1 {
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.25;
+}
+
+.student-home-welcome span {
+  margin-top: 4px;
+  font-size: 16px;
+}
+
+.assignment-classroom-fieldset {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.assignment-classroom-fieldset legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.classroom-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.classroom-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.classroom-checkbox input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  accent-color: #1d1d1f;
+}
+
+.classroom-checkbox span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.teacher-download-log .download-log-head,
+.teacher-download-log .download-log-row {
+  grid-template-columns: minmax(0, 1.4fr) minmax(150px, 0.9fr) minmax(130px, 0.9fr) 42px;
+}
+
+.download-log-row > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.download-log-row > span:nth-child(2) b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.download-log-row > span:nth-child(2) small,
+.student-submission-identity small,
+.profile-student-code {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.download-log-delete {
+  justify-self: end;
+}
+
+.score-row-wide {
+  grid-template-columns: minmax(0, 1fr) minmax(128px, auto);
+}
+
+.student-score-identity,
+.student-submission-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.student-score-identity strong,
+.student-submission-identity span {
+  overflow-wrap: anywhere;
+}
+
+.student-submission-identity {
+  margin-top: 3px;
+}
+
+.profile-panel > div {
+  display: grid;
+  gap: 4px;
+}
+
+.profile-student-code {
+  display: block;
+}
+
+:root[data-theme="dark"] .classroom-checkbox {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+:root[data-theme="dark"] .classroom-checkbox input {
+  accent-color: #f5f5f7;
+}
+
+@media (max-width: 760px) {
+  .student-home-welcome {
+    padding-inline: 2px;
+  }
+
+  .student-home-welcome h1 {
+    font-size: 28px;
+  }
+
+  .classroom-checkbox-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .teacher-download-log .download-log-head,
+  .teacher-download-log .download-log-row,
+  .score-row-wide {
+    grid-template-columns: 1fr;
+  }
+
+  .download-log-delete {
+    justify-self: end;
+  }
+}

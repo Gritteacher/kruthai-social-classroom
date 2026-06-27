@@ -49,8 +49,12 @@ create policy "announcements deleteable" on public.announcements for delete to a
 
 drop policy if exists "material download logs readable" on public.material_download_logs;
 drop policy if exists "material download logs insertable" on public.material_download_logs;
+drop policy if exists "material download logs deleteable" on public.material_download_logs;
 create policy "material download logs readable" on public.material_download_logs for select to authenticated using (true);
 create policy "material download logs insertable" on public.material_download_logs for insert to authenticated with check (true);
+create policy "material download logs deleteable" on public.material_download_logs for delete to authenticated using (
+  exists (select 1 from public.profiles where id = auth.uid() and role = 'teacher')
+);
 
 create or replace function public.create_student_account(
   p_student_record_id uuid,

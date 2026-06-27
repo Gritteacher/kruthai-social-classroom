@@ -58,7 +58,7 @@ type ClassroomDraft = { academicYear: string; level: string; room: string; subje
 type StudentDraft = { no: string; studentId: string; name: string; gender: string };
 type RosterStudent = { no: number; studentId: string; name: string; gender: string };
 type AnnouncementDraft = { title: string; body: string };
-type AssignmentDraft = { title: string; rawMax: string; finalMax: string };
+type AssignmentDraft = { title: string; rawMax: string; finalMax: string; classroomIds: string[] };
 type ThemeMode = "light" | "dark";
 
 const SCHOOL_LOGO = `${import.meta.env.BASE_URL}kruthai-logo.png`;
@@ -678,22 +678,35 @@ function App() {
   }
 
   async function addAssignment(draft: AssignmentDraft) {
-    if (!selectedClassroom) return flashAndFail("เพิ่มหรือเลือกห้องเรียนก่อนสร้างงานคะแนน", flash);
+    if (!draft.classroomIds.length) return flashAndFail("เลือกห้องเรียนอย่างน้อย 1 ห้องก่อนสร้างงานคะแนน", flash);
     if (!draft.title.trim()) return flashAndFail("กรอกชื่องานหรือแบบประเมินก่อน", flash);
     if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
     const rawMax = positiveNumber(draft.rawMax, 10);
     const finalMax = positiveNumber(draft.finalMax, rawMax);
-    const payload = { title: draft.title.trim(), class_name: selectedClassroom.displayName, classroom_id: selectedClassroom.id, raw_max: rawMax, final_max: finalMax };
+    const targetClassrooms = classroomItems.filter((classroom) => draft.classroomIds.includes(classroom.id));
+    if (!targetClassrooms.length) return flashAndFail("ไม่พบห้องเรียนที่เลือก กรุณาเลือกใหม่", flash);
+    const payload = targetClassrooms.map((classroom) => ({ title: draft.title.trim(), class_name: classroom.displayName, classroom_id: classroom.id, raw_max: rawMax, final_max: finalMax }));
     setBusy(true);
-    const result = await (supabase as any).from("score_assignments").insert(payload).select("*").single();
+    const result = await (supabase as any).from("score_assignments").insert(payload).select("*");
     setBusy(false);
     if (result.error) {
       flash(result.error.message);
       return false;
     }
-    setAssignments((current) => [...current, mapAssignmentRow(result.data)]);
-    flash(`เพิ่มงานคะแนน "${draft.title.trim()}" แล้ว`);
+    const createdAssignments = ((result.data ?? []) as any[]).map(mapAssignmentRow);
+    setAssignments((current) => [...current, ...createdAssignments]);
+    flash(`เพิ่มงานคะแนน "${draft.title.trim()}" ให้ ${createdAssignments.length} ห้องแล้ว`);
     return true;
+  }
+
+  async function deleteMaterialDownloadLog(log: MaterialDownloadLog) {
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    setBusy(true);
+    const result = await (supabase as any).from("material_download_logs").delete().eq("id", log.id);
+    setBusy(false);
+    if (result.error) return flash(result.error.message);
+    setMaterialDownloadLogs((current) => current.filter((item) => item.id !== log.id));
+    flash(`ลบประวัติการดาวน์โหลดของ ${log.studentName} แล้ว`);
   }
 
   async function deleteAssignment(assignment: ScoreAssignment) {
@@ -893,14 +906,13 @@ function App() {
             <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
             <button className="theme-toggle-button" type="button" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title="เปลี่ยนธีม">{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}<span>{theme === "light" ? "โทนมืด" : "โทนสว่าง"}</span></button>
             <button className="mobile-logout-button" onClick={logout} title="ออกจากระบบ"><LogOut aria-hidden /><span>ออกจากระบบ</span></button>
-            <button className="avatar-button" onClick={logout}>{session.role === "teacher" ? "ค" : "น"}</button>
           </div>
         </header>
         <section className="content-area">
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
           {view === "home" && <HomeView session={session} setView={setView} flash={flash} materials={activeMaterials} students={activeStudents} submissions={activeSubmissions} assignments={activeAssignments} entries={scoreEntries} announcements={activeAnnouncements} activeClassName={activeClassName} selectedClassroom={workingClassroom} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
-          {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} />}
-          {view === "scores" && <ScoresView role={session.role} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
+          {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
+          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
           {view === "work" && <WorkView role={session.role} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
@@ -1066,11 +1078,12 @@ function TeacherHome({ setView, submissions, announcements, activeClassName, sel
 }
 
 function StudentHome({ setView, materials, entries, students, announcements }: { setView: (view: ViewKey) => void; materials: Material[]; entries: ScoreEntry[]; students: StudentRecord[]; announcements: Announcement[] }) {
-  const score = scoreSummaryForStudent(students[0], entries);
-  return <><section className="student-home-grid"><button className="student-home-card score-home-card" onClick={() => setView("scores")}><div className="score-ring home-score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${score.ringPercent * 3.6}deg, var(--ring-track) ${score.ringPercent * 3.6}deg 360deg)` }}><div><strong>{formatScore(score.totalFinal)}</strong><span>คะแนน</span></div></div></button><button className="student-home-card" onClick={() => setView("materials")}><BookOpen aria-hidden /><span>{materials.length} ไฟล์</span><strong>สื่อการสอน</strong><small>เปิดดูและดาวน์โหลดสื่อ</small></button></section><div className="two-column student-home-lists"><section className="panel announcement-panel-red"><SectionTitle title="ประกาศ" note={`${announcements.length} รายการ`} />{announcements.length ? <div className="announcement-list">{announcements.slice(0, 4).map((item) => <article className="announcement-card announcement-card-student" key={item.id}><div><strong>{item.title}</strong><span>{item.publishedAt}</span><p>{item.body}</p></div></article>)}</div> : <EmptyState title="ยังไม่มีประกาศ" body="เมื่อคุณครูประกาศ ระบบจะแสดงที่นี่" />}</section><section className="panel"><SectionTitle title="สื่อล่าสุด" note={`${materials.length} รายการ`} />{materials.length ? <div className="mini-list">{materials.slice(0, 3).map((item) => <div key={item.id}><strong>{item.title}</strong><span>{item.level} · {item.type}</span></div>)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="รอคุณครูอัปโหลดสื่อ" />}</section></div></>;
+  const student = students[0];
+  const score = scoreSummaryForStudent(student, entries);
+  return <><section className="student-home-welcome"><p>ยินดีด้วยครับ</p><h1>{student?.name || "นักเรียน"}</h1><span>{student?.className || "ยังไม่พบข้อมูลชั้นเรียน"}</span></section><section className="student-home-grid"><button className="student-home-card score-home-card" onClick={() => setView("scores")}><div className="score-ring home-score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${score.ringPercent * 3.6}deg, var(--ring-track) ${score.ringPercent * 3.6}deg 360deg)` }}><div><strong>{formatScore(score.totalFinal)}</strong><span>คะแนน</span></div></div></button><button className="student-home-card" onClick={() => setView("materials")}><BookOpen aria-hidden /><span>{materials.length} ไฟล์</span><strong>สื่อการสอน</strong><small>เปิดดูและดาวน์โหลดสื่อ</small></button></section><div className="two-column student-home-lists"><section className="panel announcement-panel-red"><SectionTitle title="ประกาศ" note={`${announcements.length} รายการ`} />{announcements.length ? <div className="announcement-list">{announcements.slice(0, 4).map((item) => <article className="announcement-card announcement-card-student" key={item.id}><div><strong>{item.title}</strong><span>{item.publishedAt}</span><p>{item.body}</p></div></article>)}</div> : <EmptyState title="ยังไม่มีประกาศ" body="เมื่อคุณครูประกาศ ระบบจะแสดงที่นี่" />}</section><section className="panel"><SectionTitle title="สื่อล่าสุด" note={`${materials.length} รายการ`} />{materials.length ? <div className="mini-list">{materials.slice(0, 3).map((item) => <div key={item.id}><strong>{item.title}</strong><span>{item.level} · {item.type}</span></div>)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="รอคุณครูอัปโหลดสื่อ" />}</section></div></>;
 }
 
-function MaterialsView({ role, session, currentStudent, materials: items, logs, busy, flash, onOpen, onDownload, onUpload, onDelete }: { role: Role; session: AppSession; currentStudent?: StudentRecord; materials: Material[]; logs: MaterialDownloadLog[]; busy: boolean; flash: (message: string) => void; onOpen: (item: Material) => void; onDownload: (item: Material, studentCode: string, password: string) => Promise<boolean>; onUpload: (input: MaterialUpload) => Promise<boolean>; onDelete: (item: Material) => void }) {
+function MaterialsView({ role, session, currentStudent, materials: items, logs, busy, flash, onOpen, onDownload, onUpload, onDelete, onDeleteLog }: { role: Role; session: AppSession; currentStudent?: StudentRecord; materials: Material[]; logs: MaterialDownloadLog[]; busy: boolean; flash: (message: string) => void; onOpen: (item: Material) => void; onDownload: (item: Material, studentCode: string, password: string) => Promise<boolean>; onUpload: (input: MaterialUpload) => Promise<boolean>; onDelete: (item: Material) => void; onDeleteLog: (log: MaterialDownloadLog) => void }) {
   const [filter, setFilter] = useState<(typeof filters)[number]>("ทั้งหมด");
   const [query, setQuery] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -1166,24 +1179,32 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
       {filtered.length ? <div className="material-grid">{filtered.map((item) => <MaterialCard key={item.id} item={item} role={role} downloadCount={logs.filter((log) => log.materialId === item.id).length} onOpen={() => onOpen(item)} onDownload={() => role === "student" ? chooseDownloadTarget(item) : void directDownload(item)} onDelete={() => onDelete(item)} />)}</div> : <EmptyState title={role === "student" && studentLevel ? `ยังไม่มีสื่อสำหรับ ${studentLevel}` : "ยังไม่มีสื่อการสอน"} body={role === "student" ? "เมื่อคุณครูอัปโหลดสื่อของระดับชั้นคุณ รายการจะแสดงที่นี่" : "เมื่ออัปโหลดไฟล์แล้ว รายการจะมาแสดงในหน้านี้"} />}
       <section className="panel">
         <SectionTitle title={role === "teacher" ? "ประวัติดาวน์โหลดทั้งหมด" : "ประวัติดาวน์โหลดของฉัน"} note={`${logs.length} รายการ`} />
-        {logs.length ? <div className="download-log-table"><div className="download-log-head"><span>สื่อ</span><span>นักเรียน</span><span>วันที่</span></div>{logs.map((log) => <div className="download-log-row" key={log.id}><strong>{log.materialTitle}</strong><span>{log.studentName} · {log.studentId}</span><span>{log.downloadedAt}</span></div>)}</div> : <EmptyState title="ยังไม่มีประวัติดาวน์โหลด" body="เมื่อมีการดาวน์โหลดสื่อ ระบบจะบันทึกไว้ที่นี่" />}
+        {logs.length ? <div className={`download-log-table ${role === "teacher" ? "teacher-download-log" : ""}`}><div className="download-log-head"><span>สื่อ</span><span>นักเรียน</span><span>วันที่</span>{role === "teacher" && <span aria-hidden />}</div>{logs.map((log) => <div className="download-log-row" key={log.id}><strong>{log.materialTitle}</strong><span><b>{log.studentName}</b><small>รหัสนักเรียน {log.studentId}</small></span><span>{log.downloadedAt}</span>{role === "teacher" && <button className="icon-danger download-log-delete" type="button" disabled={busy} onClick={() => onDeleteLog(log)} title={`ลบประวัติของ ${log.studentName}`} aria-label={`ลบประวัติการดาวน์โหลดของ ${log.studentName}`}><Trash2 aria-hidden /></button>}</div>)}</div> : <EmptyState title="ยังไม่มีประวัติดาวน์โหลด" body="เมื่อมีการดาวน์โหลดสื่อ ระบบจะบันทึกไว้ที่นี่" />}
       </section>
     </div>
   );
 }
 
-function ScoresView({ role, students, assignments, entries, busy, activeClassName, addAssignment, deleteAssignment, moveAssignment, updateScoreDraft, saveScoreSheet, saveAllScoreSheets }: { role: Role; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void; saveAllScoreSheets: () => void }) {
-  const [draft, setDraft] = useState<AssignmentDraft>({ title: "", rawMax: "", finalMax: "" });
+function ScoresView({ role, classrooms, selectedClassroomId, students, assignments, entries, busy, activeClassName, addAssignment, deleteAssignment, moveAssignment, updateScoreDraft, saveScoreSheet, saveAllScoreSheets }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void; saveAllScoreSheets: () => void }) {
+  const [draft, setDraft] = useState<AssignmentDraft>({ title: "", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
   const [teacherView, setTeacherView] = useState<"entry" | "overview">("entry");
   const selected = assignments.find((assignment) => assignment.id === selectedId) || assignments[0];
   const note = selected ? `คะแนนดิบเต็ม ${formatScore(selected.rawMax)} หารเป็นคะแนนเก็บ ${formatScore(selected.finalMax)}` : "สร้างงานคะแนนก่อน";
 
+  useEffect(() => {
+    setDraft((current) => ({ ...current, classroomIds: selectedClassroomId ? [selectedClassroomId] : [] }));
+  }, [selectedClassroomId]);
+
+  function toggleAssignmentClassroom(classroomId: string) {
+    setDraft((current) => ({ ...current, classroomIds: current.classroomIds.includes(classroomId) ? current.classroomIds.filter((id) => id !== classroomId) : [...current.classroomIds, classroomId] }));
+  }
+
   async function createAssignment() {
     const ok = await addAssignment(draft);
     if (!ok) return;
-    setDraft({ title: "", rawMax: "", finalMax: "" });
+    setDraft({ title: "", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   }
 
   if (role === "student") {
@@ -1205,6 +1226,10 @@ function ScoresView({ role, students, assignments, entries, busy, activeClassNam
             <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => setDraft({ ...draft, rawMax: event.target.value })} placeholder="เช่น 10" /></label>
             <label className="field">คิดเป็นคะแนนเก็บ<input type="number" min="1" value={draft.finalMax} onChange={(event) => setDraft({ ...draft, finalMax: event.target.value })} placeholder="เช่น 5" /></label>
           </div>
+          <fieldset className="assignment-classroom-fieldset">
+            <legend>เลือกห้องเรียนที่ได้รับงาน</legend>
+            <div className="classroom-checkbox-grid">{classrooms.map((classroom) => <label className="classroom-checkbox" key={classroom.id}><input type="checkbox" checked={draft.classroomIds.includes(classroom.id)} onChange={() => toggleAssignmentClassroom(classroom.id)} /><span>{classroom.displayName}</span></label>)}</div>
+          </fieldset>
           <button className="primary-button" disabled={busy} onClick={createAssignment}><Plus aria-hidden />เพิ่มงานคะแนน</button>
         </section>
         <section className="panel score-manager">
@@ -1224,7 +1249,7 @@ function ScoresView({ role, students, assignments, entries, busy, activeClassNam
                   const entry = findScoreEntry(entries, selected.id, student.id);
                   const rawScore = entry?.rawScore ?? 0;
                   const final = scaledScore(rawScore, selected.rawMax, selected.finalMax);
-                  return <article className="score-row score-row-wide" key={student.id}><div className="student-initial">{student.name.slice(0, 1) || student.studentId.slice(0, 1)}</div><div><strong>{student.name}</strong><span>ID: {student.studentId}</span></div>{mode === "raw" ? <label className="score-input"><input type="number" min="0" max={selected.rawMax} value={entry ? numericInputValue(rawScore) : ""} onChange={(event) => updateScoreDraft(selected, student, event.target.value)} placeholder="0" /><span>/ {formatScore(selected.rawMax)}</span></label> : <div className="score-result"><strong>{formatScore(final)}</strong><span>/ {formatScore(selected.finalMax)}</span></div>}</article>;
+                  return <article className="score-row score-row-wide" key={student.id}><div className="student-score-identity"><strong>{student.name}</strong><span>รหัสนักเรียน {student.studentId}</span></div>{mode === "raw" ? <label className="score-input"><input type="number" min="0" max={selected.rawMax} value={entry ? numericInputValue(rawScore) : ""} onChange={(event) => updateScoreDraft(selected, student, event.target.value)} placeholder="0" /><span>/ {formatScore(selected.rawMax)}</span></label> : <div className="score-result"><strong>{formatScore(final)}</strong><span>/ {formatScore(selected.finalMax)}</span></div>}</article>;
                 })}</div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
                 <div className="form-actions">{selected && <button className="primary-button" disabled={busy || !students.length} onClick={() => saveScoreSheet(selected)}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกคะแนนงานนี้"}</button>}{selected && <button className="danger-button" disabled={busy} onClick={() => deleteAssignment(selected)}><Trash2 aria-hidden />ลบงานนี้</button>}</div>
               </div>
@@ -1306,7 +1331,7 @@ function WorkView({ role, assignments, submissions, busy, activeClassName, submi
             <label className="field">
               ชื่องาน
               <select value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)}>
-                {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.title} ({formatScore(assignment.rawMax)} / {formatScore(assignment.finalMax)})</option>)}
+                {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.title}</option>)}
               </select>
             </label>
             <UploadPanel file={file} setFile={setFile} accept=".pdf,.docx,.png,.jpg,.jpeg" label="เลือกไฟล์งานของคุณ" help="รองรับ PDF, DOCX, PNG, JPG ขนาดไม่เกิน 10MB" />
@@ -1327,7 +1352,7 @@ function ReviewCard({ item, previewUrl, busy, updateSubmission, saveSubmission, 
     <article className="submission-card review-card">
       <div>
         <strong>{item.assignmentTitle}</strong>
-        <span>{item.studentName} · ID: {item.studentId}</span>
+        <div className="student-submission-identity"><span>{item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>
         <small>{item.submittedAt}</small>
         <small>{item.filePath ? `ไฟล์: ${fileNameFromPath(item.filePath)}` : "ยังไม่มีไฟล์แนบ"}</small>
         <FilePreview itemType={materialTypeFromFile(item.filePath || "", "")} url={previewUrl} label={item.assignmentTitle} compact />
@@ -1460,8 +1485,7 @@ function ProfileView({ session, busy, changePassword }: { session: AppSession; b
     <div className="page-stack">
       <PageHeader title="โปรไฟล์" eyebrow={session.room} />
       <section className="profile-panel">
-        <div className="profile-avatar">{session.name.slice(0, 1)}</div>
-        <div><h2>{session.name}</h2><p>{session.school}{session.studentCode ? ` · รหัส ${session.studentCode}` : ""}</p></div>
+        <div><h2>{session.name}</h2><p>{session.school}</p>{session.studentCode && <span className="profile-student-code">รหัสนักเรียน {session.studentCode}</span>}</div>
       </section>
       <section className="panel compact-form">
         <SectionTitle title="เปลี่ยนรหัสผ่าน" />
@@ -1509,7 +1533,7 @@ function MaterialCard({ item, role, downloadCount, onOpen, onDownload, onDelete 
 }
 
 function SubmissionList({ items, previewUrls = {}, onOpen, compact = false }: { items: SubmissionRecord[]; previewUrls?: Record<string, string>; onOpen?: (item: SubmissionRecord) => void; compact?: boolean }) {
-  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card" key={item.id}><div><strong>{item.assignmentTitle}</strong><span>{item.studentName} · ID: {item.studentId}</span><FilePreview itemType={materialTypeFromFile(item.filePath || "", "")} url={previewUrls[item.id]} label={item.assignmentTitle} compact /></div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath}><Eye aria-hidden />ดูงาน</button>}</div></article>)}</div>;
+  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card" key={item.id}><div><strong>{item.assignmentTitle}</strong><div className="student-submission-identity"><span>{item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div><FilePreview itemType={materialTypeFromFile(item.filePath || "", "")} url={previewUrls[item.id]} label={item.assignmentTitle} compact /></div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath}><Eye aria-hidden />ดูงาน</button>}</div></article>)}</div>;
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {
