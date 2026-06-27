@@ -833,6 +833,26 @@ function App() {
     flash(`บันทึกผลตรวจงานของ ${item.studentName} แล้ว`);
   }
 
+  async function deleteSubmissionRecord(item: SubmissionRecord) {
+    if (!window.confirm(`ลบรายการส่งงาน "${item.assignmentTitle}" ของ ${item.studentName} พร้อมไฟล์แนบหรือไม่`)) return;
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    setBusy(true);
+    const client = supabase as any;
+    const result = await client.from("submissions").delete().eq("id", item.id);
+    if (result.error) {
+      setBusy(false);
+      return flash(result.error.message);
+    }
+    let storageError: any = null;
+    if (item.filePath) {
+      const removed = await client.storage.from(STORAGE_BUCKET).remove([item.filePath]);
+      storageError = removed.error;
+    }
+    setSubmissionItems((current) => current.filter((submission) => submission.id !== item.id));
+    setBusy(false);
+    flash(storageError ? "ลบรายการแล้ว แต่ลบไฟล์แนบไม่สำเร็จ" : `ลบงานของ ${item.studentName} แล้ว`);
+  }
+
   async function submitWork(file: File | null, assignmentId: string) {
     const assignment = activeAssignments.find((item) => item.id === assignmentId);
     if (!assignment) return flash("เลือกงานที่คุณต้องการส่งก่อน");
@@ -911,7 +931,7 @@ function App() {
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
-          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} openSubmission={openSubmissionFile} />}
+          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
         </section>
@@ -1265,14 +1285,14 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
             </>
           ) : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานคะแนนแรก แล้วระบบจะสร้างตารางให้กรอกตามรายชื่อนักเรียน" />}
         </section>}
-      {teacherView === "overview" && <TeacherScoreOverview students={students} assignments={assignments} entries={entries} onEdit={() => setTeacherView("entry")} />}
+      {teacherView === "overview" && <TeacherScoreOverview classrooms={classrooms} selectedClassroomId={selectedClassroomId} onClassroomChange={onClassroomChange} students={students} assignments={assignments} entries={entries} onEdit={() => setTeacherView("entry")} />}
     </div>
   );
 }
 
-function TeacherScoreOverview({ students, assignments, entries, onEdit }: { students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; onEdit: () => void }) {
+function TeacherScoreOverview({ classrooms, selectedClassroomId, onClassroomChange, students, assignments, entries, onEdit }: { classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; onEdit: () => void }) {
   const totalMax = assignments.reduce((sum, assignment) => sum + assignment.finalMax, 0);
-  return <section className="panel score-manager teacher-score-overview"><div className="score-overview-heading"><SectionTitle title="คะแนนรวมทุกงาน" note={`${students.length} คน · ${assignments.length} งาน`} /><button className="primary-button" type="button" onClick={onEdit}><Pencil aria-hidden />แก้ไขคะแนน</button></div>{assignments.length && students.length ? <><div className="desktop-score-overview"><div className="score-matrix-scroll"><table className="score-matrix score-overview-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment) => <th className="matrix-assignment overview-assignment" key={assignment.id}><strong>{assignment.title}</strong><span>เต็ม {formatScore(assignment.finalMax)}</span></th>)}<th className="matrix-total">รวม</th></tr></thead><tbody>{students.map((student) => {
+  return <section className="panel score-manager teacher-score-overview"><div className="score-overview-heading"><SectionTitle title="คะแนนรวมทุกงาน" note={`${students.length} คน · ${assignments.length} งาน`} /><button className="primary-button" type="button" onClick={onEdit}><Pencil aria-hidden />แก้ไขคะแนน</button></div><div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>{assignments.length && students.length ? <><div className="desktop-score-overview"><div className="score-matrix-scroll"><table className="score-matrix score-overview-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment) => <th className="matrix-assignment overview-assignment" key={assignment.id}><strong>{assignment.title}</strong><span>เต็ม {formatScore(assignment.finalMax)}</span></th>)}<th className="matrix-total">รวม</th></tr></thead><tbody>{students.map((student) => {
     const studentEntries = assignments.map((assignment) => findScoreEntry(entries, assignment.id, student.id));
     const total = studentEntries.reduce((sum, entry) => sum + (entry?.finalScore ?? 0), 0);
     return <tr key={student.id}><td className="matrix-no">{student.no}</td><td className="matrix-id">{student.studentId}</td><th className="matrix-name" scope="row">{student.name}</th>{assignments.map((assignment, index) => <td className="matrix-overview-score" key={assignment.id}>{studentEntries[index] ? <><strong>{formatScore(studentEntries[index]!.finalScore)}</strong><span>/ {formatScore(assignment.finalMax)}</span></> : <span>–</span>}</td>)}<td className="matrix-total"><strong>{formatScore(total)}</strong><span>/ {formatScore(totalMax)}</span></td></tr>;
@@ -1295,28 +1315,9 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
-function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, busy, activeClassName, submitWork, updateSubmission, saveSubmission, openSubmission }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; assignments: ScoreAssignment[]; submissions: SubmissionRecord[]; busy: boolean; activeClassName: string; submitWork: (file: File | null, assignmentId: string) => void; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
+function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, busy, activeClassName, submitWork, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; assignments: ScoreAssignment[]; submissions: SubmissionRecord[]; busy: boolean; activeClassName: string; submitWork: (file: File | null, assignmentId: string) => void; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [assignmentId, setAssignmentId] = useState("");
-  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
-  useEffect(() => {
-    if (role === "teacher" || !isSupabaseConfigured) return;
-    let active = true;
-    void Promise.all(submissions.filter((item) => item.filePath).map(async (item) => {
-      const result = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 60);
-      return [item.id, result.data?.signedUrl || ""] as const;
-    })).then((pairs) => {
-      if (!active) return;
-      const next: Record<string, string> = {};
-      pairs.forEach(([id, url]) => {
-        if (url) next[id] = url;
-      });
-      setPreviewUrls(next);
-    });
-    return () => {
-      active = false;
-    };
-  }, [role, submissions]);
   useEffect(() => {
     if (!assignmentId && assignments[0]?.id) setAssignmentId(assignments[0].id);
   }, [assignmentId, assignments]);
@@ -1327,7 +1328,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
         <section className="panel">
           <SectionTitle title="รายการงานส่ง" note={`${submissions.length} รายการ`} />
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
-          {submissions.length ? <div className="submission-list">{submissions.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} openSubmission={openSubmission} />)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
+          {submissions.length ? <div className="submission-list">{submissions.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={openSubmission} />)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
         </section>
       </div>
     );
@@ -1351,13 +1352,13 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
       </section>
       <section className="panel">
         <SectionTitle title="ประวัติการส่งงาน" note={`${submissions.length} รายการ`} />
-        {submissions.length ? <SubmissionList items={submissions} previewUrls={previewUrls} onOpen={openSubmission} /> : <EmptyState title="ยังไม่มีประวัติ" body="เมื่อส่งงานแล้วจะแสดงรายการที่นี่" />}
+        {submissions.length ? <SubmissionList items={submissions} onOpen={openSubmission} /> : <EmptyState title="ยังไม่มีประวัติ" body="เมื่อส่งงานแล้วจะแสดงรายการที่นี่" />}
       </section>
     </div>
   );
 }
 
-function ReviewCard({ item, busy, updateSubmission, saveSubmission, openSubmission }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
+function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
   return (
     <article className="submission-card review-card">
       <div>
@@ -1373,6 +1374,7 @@ function ReviewCard({ item, busy, updateSubmission, saveSubmission, openSubmissi
         <label className="field">คะแนนเก็บเต็ม<input type="number" min="1" value={item.finalMax} onChange={(event) => updateSubmission(item.id, { finalMax: positiveNumber(event.target.value, item.finalMax) })} /></label>
         <div className="score-result"><strong>{formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}</strong><span>/ {formatScore(item.finalMax)}</span></div>
         <button className="small-primary" disabled={busy} onClick={() => saveSubmission(item)}><Save aria-hidden />บันทึก</button>
+        <button className="danger-button review-delete-button" disabled={busy} onClick={() => deleteSubmission(item)}><Trash2 aria-hidden />ลบรายการ</button>
       </div>
     </article>
   );
@@ -1540,8 +1542,8 @@ function MaterialCard({ item, role, downloadCount, onOpen, onDownload, onDelete 
   return <article className={`material-card material-name-card tone-border-${item.accent}`}><div className="material-title-display"><div className="material-title-meta"><span className={`type-pill ${item.type.toLowerCase()}`}>{item.type}</span><span>{item.level}</span></div><h2>{item.title}</h2><p>{item.unit}</p></div><div className="material-body"><div className="material-meta"><span>{item.date}</span><span>ดาวน์โหลดแล้ว {downloadCount} ครั้ง</span></div><div className="card-actions"><button className="small-primary" onClick={onOpen}><Eye aria-hidden />ดู</button><button className="template-button" onClick={onDownload}><Download aria-hidden />ดาวน์โหลด</button>{role === "teacher" && <button className="danger-button small-danger" onClick={onDelete}><Trash2 aria-hidden />ลบ</button>}</div></div></article>;
 }
 
-function SubmissionList({ items, previewUrls = {}, onOpen, compact = false }: { items: SubmissionRecord[]; previewUrls?: Record<string, string>; onOpen?: (item: SubmissionRecord) => void; compact?: boolean }) {
-  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card" key={item.id}><div><strong>{item.assignmentTitle}</strong><div className="student-submission-identity"><span>{item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>{!compact && <FilePreview itemType={materialTypeFromFile(item.filePath || "", "")} url={previewUrls[item.id]} label={item.assignmentTitle} compact />}</div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath}><Eye aria-hidden />ดูงาน</button>}</div></article>)}</div>;
+function SubmissionList({ items, onOpen, compact = false }: { items: SubmissionRecord[]; onOpen?: (item: SubmissionRecord) => void; compact?: boolean }) {
+  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card compact-submission-card" key={item.id}><div><strong>{item.assignmentTitle}</strong><div className="student-submission-identity"><span>{item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>{!compact && <small className="submission-file-name">{item.filePath ? `ไฟล์: ${fileNameFromPath(item.filePath)}` : "ยังไม่มีไฟล์แนบ"}</small>}</div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath}><Eye aria-hidden />เปิดไฟล์</button>}</div></article>)}</div>;
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {

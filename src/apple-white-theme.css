@@ -1774,6 +1774,22 @@ textarea {
   width: 100%;
 }
 
+.review-grid .review-delete-button {
+  width: 100%;
+  min-height: 40px;
+}
+
+.submission-file-name {
+  display: block;
+  max-width: 100%;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .review-file-box {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
@@ -1823,6 +1839,67 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  .hero-strip {
+    min-height: 0;
+    padding: 16px;
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .stat-card {
+    min-height: 68px;
+    padding: 11px 12px;
+    border-radius: 12px;
+  }
+
+  .stat-card span {
+    font-size: 11px;
+    line-height: 1.25;
+  }
+
+  .stat-card strong {
+    margin-top: 3px;
+    font-size: 22px;
+  }
+
+  .student-home-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .student-home-card,
+  .score-home-card {
+    min-height: 154px;
+    gap: 7px;
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .student-home-card svg {
+    width: 32px;
+    height: 32px;
+    padding: 7px;
+  }
+
+  .student-home-card strong {
+    font-size: 20px;
+  }
+
+  .student-home-card small {
+    font-size: 12px;
+  }
+
+  .home-score-ring {
+    width: 104px;
+  }
+
+  .home-score-ring strong {
+    font-size: 28px;
+  }
+
   .panel-classroom-picker {
     width: 100%;
   }
