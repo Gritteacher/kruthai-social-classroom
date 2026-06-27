@@ -58,7 +58,7 @@ type AnnouncementDraft = { title: string; body: string };
 type AssignmentDraft = { title: string; rawMax: string; finalMax: string };
 type ThemeMode = "light" | "dark";
 
-const SCHOOL_LOGO = "/kruthai-logo.png";
+const SCHOOL_LOGO = `${import.meta.env.BASE_URL}kruthai-logo.png`;
 const SCHOOL_NAME = "โรงเรียนเทพศิรินทร์ นนทบุรี";
 const NO_CLASS_LABEL = "ยังไม่ได้เลือกห้องเรียน";
 const STORAGE_BUCKET = "classroom-files";
@@ -265,7 +265,8 @@ function App() {
     if (!identifier.includes("@")) return flash(role === "student" ? "นักเรียนเข้าสู่ระบบแล้วเปลี่ยนรหัสผ่านได้ในหน้าโปรไฟล์ หรือให้ครูรีเซ็ตรหัสให้" : "กรอกอีเมลก่อน แล้วกดลืมรหัสผ่านอีกครั้ง");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const { error } = await supabase!.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    const resetUrl = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
+    const { error } = await supabase!.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
     setBusy(false);
     if (error) return flash(error.message);
     flash(`ส่งลิงก์รีเซ็ตรหัสผ่านไปที่ ${email} แล้ว`);
