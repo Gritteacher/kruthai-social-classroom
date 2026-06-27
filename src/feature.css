@@ -192,6 +192,70 @@ textarea {
   gap: 16px;
 }
 
+.material-name-card {
+  display: grid;
+  grid-template-rows: minmax(210px, 1fr) auto;
+}
+
+.material-title-display {
+  display: grid;
+  min-width: 0;
+  align-content: space-between;
+  gap: 18px;
+  padding: 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.material-title-display h2,
+.material-title-display p {
+  margin: 0;
+}
+
+.material-title-display h2 {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 30px;
+  line-height: 1.25;
+}
+
+.material-title-display p {
+  color: var(--muted);
+}
+
+.material-title-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.student-material-level {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--muted);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+}
+
+.student-material-level svg {
+  width: 18px;
+  height: 18px;
+  color: var(--blue);
+}
+
+.student-material-level strong {
+  color: var(--ink);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1171,6 +1235,24 @@ textarea {
   .material-icon,
   .lesson-card img {
     height: clamp(150px, 42vw, 210px);
+  }
+
+  .material-name-card {
+    grid-template-rows: minmax(160px, auto) auto;
+  }
+
+  .material-title-display {
+    gap: 14px;
+    padding: 20px;
+  }
+
+  .material-title-display h2 {
+    font-size: 26px;
+  }
+
+  .student-material-level {
+    width: 100%;
+    justify-content: center;
   }
 
   .score-overview-layout,

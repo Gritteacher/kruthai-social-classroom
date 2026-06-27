@@ -155,7 +155,10 @@ function App() {
     : studentScopedItems(assignments, workingClassroom, currentStudent, session).length
       ? studentScopedItems(assignments, workingClassroom, currentStudent, session)
       : assignments);
-  const activeMaterials = materialItems;
+  const studentGradeLevel = session?.role === "student" ? gradeLevelFromText(currentStudent?.className, session.room) : undefined;
+  const activeMaterials = session?.role === "student"
+    ? (studentGradeLevel ? materialItems.filter((material) => gradeLevelFromText(material.level) === studentGradeLevel) : [])
+    : materialItems;
   const activeSubmissions = session?.role === "teacher"
     ? (workingClassroom ? submissionItems.filter((submission) => belongsToClass(submission, workingClassroom)) : [])
     : submissionItems.filter((submission) => submission.studentId === session?.studentCode);
@@ -1076,18 +1079,18 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
   const [unit, setUnit] = useState("สื่อเสริม");
   const [level, setLevel] = useState("ม.1");
   const [type, setType] = useState<MaterialType>("PDF");
-  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [downloadTargetId, setDownloadTargetId] = useState("");
   const [downloadStudentId, setDownloadStudentId] = useState(currentStudent?.studentId || session.studentCode || "");
   const [downloadPassword, setDownloadPassword] = useState("");
+  const studentLevel = role === "student" ? gradeLevelFromText(currentStudent?.className, session.room) : undefined;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((item) => {
-      const matchFilter = filter === "ทั้งหมด" || (filter === "PDF" || filter === "VIDEO" ? item.type === filter : item.level === filter);
+      const matchFilter = role === "student" || filter === "ทั้งหมด" || (filter === "PDF" || filter === "VIDEO" ? item.type === filter : item.level === filter);
       const matchQuery = !q || `${item.title} ${item.unit} ${item.level}`.toLowerCase().includes(q);
       return matchFilter && matchQuery;
     });
-  }, [filter, items, query]);
+  }, [filter, items, query, role]);
 
   async function saveMaterial() {
     const ok = await onUpload({ file, title, unit, level, type });
@@ -1110,36 +1113,17 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
     setDownloadStudentId(currentStudent?.studentId || session.studentCode || "");
   }, [currentStudent?.studentId, session.studentCode]);
 
-  useEffect(() => {
-    if (!isSupabaseConfigured) return;
-    let active = true;
-    void Promise.all(items.filter((item) => item.filePath).map(async (item) => {
-      const existing = previewUrls[item.id];
-      if (existing) return [item.id, existing] as const;
-      const result = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 60);
-      return [item.id, result.data?.signedUrl || ""] as const;
-    })).then((pairs) => {
-      if (!active) return;
-      setPreviewUrls((current) => {
-        const next = { ...current };
-        pairs.forEach(([id, url]) => {
-          if (url) next[id] = url;
-        });
-        return next;
-      });
-    });
-    return () => {
-      active = false;
-    };
-  }, [items]);
-
   async function directDownload(item: Material) {
-    const url = previewUrls[item.id];
-    if (!url) {
+    if (!item.filePath || !isSupabaseConfigured) {
       onOpen(item);
       return;
     }
-    await triggerFileDownload(url, item);
+    const result = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
+    if (result.error || !result.data?.signedUrl) {
+      flash(result.error?.message || "สร้างลิงก์ดาวน์โหลดไม่สำเร็จ");
+      return;
+    }
+    await triggerFileDownload(result.data.signedUrl, item);
   }
 
   function chooseDownloadTarget(item: Material) {
@@ -1162,10 +1146,10 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
     <div className="page-stack">
       <PageHeader title="สื่อการสอน" eyebrow="คลังสื่อการสอน" />
       <div className="material-tools">
-        <div className="input-shell material-search"><Search aria-hidden /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อบทเรียน หน่วย หรือระดับชั้น" /></div>
+        <div className="input-shell material-search"><Search aria-hidden /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อสื่อหรือหน่วยการเรียน" /></div>
         <button className="select-button" type="button" onClick={() => flash(`พบสื่อ ${filtered.length} รายการ`)}>ค้นหา</button>
       </div>
-      <div className="filter-row">{filters.map((item) => <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div>
+      {role === "teacher" ? <div className="filter-row">{filters.map((item) => <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div> : <div className="student-material-level"><GraduationCap aria-hidden /><span>สื่อการสอนสำหรับ</span><strong>{studentLevel || "ระดับชั้นของคุณ"}</strong></div>}
       {role === "teacher" && (
         <section className="panel material-uploader">
           <SectionTitle title="อัปโหลดสื่อการสอน" note="เก็บไฟล์ใน Supabase Storage" />
@@ -1180,7 +1164,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
         </section>
       )}
       {downloadTarget && role === "student" && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="download-dialog-title"><section id="material-download-confirm" className="panel compact-form download-confirm-panel"><SectionTitle title="ยืนยันการดาวน์โหลด" note={downloadTarget.title} /><p className="modal-copy">กรอกรหัสนักเรียนและรหัสผ่านก่อนดาวน์โหลด ระบบจะบันทึกประวัติการดาวน์โหลดให้ครูเห็น</p><div className="form-grid"><label className="field">รหัสนักเรียน<input value={downloadStudentId} onChange={(event) => setDownloadStudentId(event.target.value)} placeholder="เช่น 65001" /></label><label className="field">รหัสผ่าน<input type="password" value={downloadPassword} onChange={(event) => setDownloadPassword(event.target.value)} placeholder="รหัสผ่านนักเรียน" /></label></div><div className="form-actions"><button className="primary-button" disabled={busy} onClick={() => void submitDownload(downloadTarget)}><Download aria-hidden />{busy ? "กำลังดาวน์โหลด" : "ยืนยันดาวน์โหลด"}</button><button className="template-button" type="button" onClick={() => setDownloadTargetId("")}>ยกเลิก</button></div></section></div>}
-      {filtered.length ? <div className="material-grid">{filtered.map((item) => <MaterialCard key={item.id} item={item} role={role} previewUrl={previewUrls[item.id]} downloadCount={logs.filter((log) => log.materialId === item.id).length} onOpen={() => onOpen(item)} onDownload={() => role === "student" ? chooseDownloadTarget(item) : void directDownload(item)} onDelete={() => onDelete(item)} />)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="เมื่ออัปโหลดไฟล์แล้ว รายการจะมาแสดงในหน้านี้" />}
+      {filtered.length ? <div className="material-grid">{filtered.map((item) => <MaterialCard key={item.id} item={item} role={role} downloadCount={logs.filter((log) => log.materialId === item.id).length} onOpen={() => onOpen(item)} onDownload={() => role === "student" ? chooseDownloadTarget(item) : void directDownload(item)} onDelete={() => onDelete(item)} />)}</div> : <EmptyState title={role === "student" && studentLevel ? `ยังไม่มีสื่อสำหรับ ${studentLevel}` : "ยังไม่มีสื่อการสอน"} body={role === "student" ? "เมื่อคุณครูอัปโหลดสื่อของระดับชั้นคุณ รายการจะแสดงที่นี่" : "เมื่ออัปโหลดไฟล์แล้ว รายการจะมาแสดงในหน้านี้"} />}
       <section className="panel">
         <SectionTitle title={role === "teacher" ? "ประวัติดาวน์โหลดทั้งหมด" : "ประวัติดาวน์โหลดของฉัน"} note={`${logs.length} รายการ`} />
         {logs.length ? <div className="download-log-table"><div className="download-log-head"><span>สื่อ</span><span>นักเรียน</span><span>วันที่</span></div>{logs.map((log) => <div className="download-log-row" key={log.id}><strong>{log.materialTitle}</strong><span>{log.studentName} · {log.studentId}</span><span>{log.downloadedAt}</span></div>)}</div> : <EmptyState title="ยังไม่มีประวัติดาวน์โหลด" body="เมื่อมีการดาวน์โหลดสื่อ ระบบจะบันทึกไว้ที่นี่" />}
@@ -1521,8 +1505,8 @@ function FilePreview({ itemType, url, label, compact = false }: { itemType: Mate
   );
 }
 
-function MaterialCard({ item, role, previewUrl, downloadCount, onOpen, onDownload, onDelete }: { item: Material; role: Role; previewUrl?: string; downloadCount: number; onOpen: () => void; onDownload: () => void; onDelete: () => void }) {
-  return <article className={`material-card tone-border-${item.accent}`}><div className={`material-icon tone-${item.accent}`}><BookOpen aria-hidden /></div><FilePreview itemType={item.type} url={previewUrl} label={item.title} /><div className="material-body"><div className="material-meta"><span className={`type-pill ${item.type.toLowerCase()}`}>{item.type}</span><span>{item.date}</span></div><h2>{item.title}</h2><p>{item.unit} · ระดับ: {item.level}</p><small>ดาวน์โหลดแล้ว {downloadCount} ครั้ง</small><div className="card-actions"><button className="small-primary" onClick={onOpen}><Eye aria-hidden />ดู</button><button className="template-button" onClick={onDownload}><Download aria-hidden />ดาวน์โหลด</button>{role === "teacher" && <button className="danger-button small-danger" onClick={onDelete}><Trash2 aria-hidden />ลบ</button>}</div></div></article>;
+function MaterialCard({ item, role, downloadCount, onOpen, onDownload, onDelete }: { item: Material; role: Role; downloadCount: number; onOpen: () => void; onDownload: () => void; onDelete: () => void }) {
+  return <article className={`material-card material-name-card tone-border-${item.accent}`}><div className="material-title-display"><div className="material-title-meta"><span className={`type-pill ${item.type.toLowerCase()}`}>{item.type}</span><span>{item.level}</span></div><h2>{item.title}</h2><p>{item.unit}</p></div><div className="material-body"><div className="material-meta"><span>{item.date}</span><span>ดาวน์โหลดแล้ว {downloadCount} ครั้ง</span></div><div className="card-actions"><button className="small-primary" onClick={onOpen}><Eye aria-hidden />ดู</button><button className="template-button" onClick={onDownload}><Download aria-hidden />ดาวน์โหลด</button>{role === "teacher" && <button className="danger-button small-danger" onClick={onDelete}><Trash2 aria-hidden />ลบ</button>}</div></div></article>;
 }
 
 function SubmissionList({ items, previewUrls = {}, onOpen, compact = false }: { items: SubmissionRecord[]; previewUrls?: Record<string, string>; onOpen?: (item: SubmissionRecord) => void; compact?: boolean }) {
@@ -1624,6 +1608,11 @@ function mapAssignmentRow(row: any): ScoreAssignment {
     finalMax: Number(row.final_max ?? row.finalMax ?? 10),
     createdAt: row.created_at || row.createdAt || new Date().toISOString()
   };
+}
+
+function gradeLevelFromText(...values: Array<string | undefined>) {
+  const match = values.filter(Boolean).join(" ").match(/ม\.?\s*([1-6])/i);
+  return match ? `ม.${match[1]}` : undefined;
 }
 
 function orderAssignments(items: ScoreAssignment[]) {
