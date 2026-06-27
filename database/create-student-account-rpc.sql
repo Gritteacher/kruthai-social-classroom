@@ -25,7 +25,8 @@ begin
   from public.profiles
   where id = auth.uid();
 
-  if coalesce(v_caller_role, '') <> 'teacher' then
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role'
+    and coalesce(v_caller_role, '') <> 'teacher' then
     raise exception 'เฉพาะบัญชีครูเท่านั้นที่สร้างบัญชีนักเรียนได้';
   end if;
 
@@ -182,5 +183,8 @@ end;
 $$;
 
 revoke all on function public.create_student_account(uuid, text, text, text, uuid, text) from public;
-grant execute on function public.create_student_account(uuid, text, text, text, uuid, text) to authenticated;
+revoke all on function public.create_student_account(uuid, text, text, text, uuid, text) from authenticated;
+grant execute on function public.create_student_account(uuid, text, text, text, uuid, text) to service_role;
+comment on function public.create_student_account(uuid, text, text, text, uuid, text)
+is 'Legacy admin fallback only. The application creates student accounts through the authenticated Netlify Function.';
 notify pgrst, 'reload schema';

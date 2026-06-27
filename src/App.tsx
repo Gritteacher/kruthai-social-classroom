@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type User as SupabaseUser } from "@supabase/supabase-js";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -36,6 +36,28 @@ import {
   Sun
 } from "lucide-react";
 import { isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
+import {
+  safeStorageSegment,
+  storageSafeFileName,
+  userFacingError,
+  validateMaterialFile,
+  validateRosterFile,
+  validateStudentCode,
+  validateStudentPassword,
+  validateSubmissionFile
+} from "./lib/validation";
+import { createOrResetStudentAccount } from "./services/studentService";
+import {
+  isLegacyDemoSubmission,
+  mapAnnouncementRow,
+  mapAssignmentRow,
+  mapClassroomRow,
+  mapMaterialDownloadLogRow,
+  mapMaterialRow,
+  mapScoreEntryRow,
+  mapStudentRow,
+  mapSubmissionRow
+} from "./lib/rowMappers";
 import type {
   Announcement,
   AppSession,
@@ -60,6 +82,7 @@ type RosterStudent = { no: number; studentId: string; name: string; gender: stri
 type AnnouncementDraft = { title: string; body: string; classroomId: string };
 type AssignmentDraft = { title: string; rawMax: string; finalMax: string; classroomIds: string[] };
 type ThemeMode = "light" | "dark";
+type ProfileRow = { full_name?: string | null; role?: string | null; class_name?: string | null; school_name?: string | null; student_code?: string | null };
 
 const SCHOOL_LOGO = `${import.meta.env.BASE_URL}kruthai-logo.png`;
 const SCHOOL_NAME = "โรงเรียนเทพศิรินทร์ นนทบุรี";
@@ -96,12 +119,12 @@ function isRole(value: unknown): value is Role {
   return value === "teacher" || value === "student";
 }
 
-async function resolveAppSession(user: any, fallbackRole: Role): Promise<AppSession> {
+async function resolveAppSession(user: SupabaseUser | null | undefined, fallbackRole: Role): Promise<AppSession> {
   const metadata = (user?.user_metadata ?? {}) as Record<string, unknown>;
-  let profile: any = null;
+  let profile: ProfileRow | null = null;
 
   if (isSupabaseConfigured && user?.id) {
-    const result = await (supabase as any)
+    const result = await supabase!
       .from("profiles")
       .select("full_name, role, class_name, school_name, student_code")
       .eq("id", user.id)
@@ -180,43 +203,45 @@ function App() {
       if (showToast) flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
       return;
     }
+    try {
+      const client = supabase!;
+      const [classroomsResult, materialsResult, announcementsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult] = await Promise.all([
+        client.from("classrooms").select("*").order("created_at", { ascending: false }),
+        client.from("materials").select("*").order("published_at", { ascending: false }),
+        client.from("announcements").select("*").order("published_at", { ascending: false }),
+        client.from("material_download_logs").select("*").order("downloaded_at", { ascending: false }),
+        client.from("students").select("*").order("student_no", { ascending: true }),
+        client.from("score_assignments").select("*").order("created_at", { ascending: true }),
+        client.from("score_entries").select("*").order("updated_at", { ascending: false }),
+        client.from("submissions").select("*").order("submitted_at", { ascending: false })
+      ]);
 
-    const client = supabase as any;
-    const [classroomsResult, materialsResult, announcementsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult] = await Promise.all([
-      client.from("classrooms").select("*").order("created_at", { ascending: false }),
-      client.from("materials").select("*").order("published_at", { ascending: false }),
-      client.from("announcements").select("*").order("published_at", { ascending: false }),
-      client.from("material_download_logs").select("*").order("downloaded_at", { ascending: false }),
-      client.from("students").select("*").order("student_no", { ascending: true }),
-      client.from("score_assignments").select("*").order("created_at", { ascending: true }),
-      client.from("score_entries").select("*").order("updated_at", { ascending: false }),
-      client.from("submissions").select("*").order("submitted_at", { ascending: false })
-    ]);
+      const errors = [classroomsResult, materialsResult, announcementsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult].filter((result) => result.error);
+      if (errors.length) flash("บางตารางใน Supabase ยังไม่พร้อม กรุณาตรวจ schema แล้วลองโหลดใหม่");
 
-    const errors = [classroomsResult, materialsResult, announcementsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult].filter((result) => result.error);
-    if (errors.length) {
-      flash("บางตารางใน Supabase ยังไม่พร้อม กรุณาตรวจ schema แล้วลองโหลดใหม่");
+      const nextClassrooms = (classroomsResult.data ?? []).map(mapClassroomRow).sort(sortClassrooms);
+      setClassroomItems(nextClassrooms);
+      setSelectedClassroomId((current) => {
+        if (current && nextClassrooms.some((item) => item.id === current)) return current;
+        if (session?.role === "student") {
+          const studentRoom = String(session.room || "");
+          return nextClassrooms.find((item) => item.displayName === studentRoom)?.id || nextClassrooms[0]?.id || "";
+        }
+        return nextClassrooms[0]?.id || "";
+      });
+      setMaterialItems((materialsResult.data ?? []).filter((row) => row.file_path).map(mapMaterialRow));
+      setAnnouncementItems((announcementsResult.data ?? []).map(mapAnnouncementRow));
+      setMaterialDownloadLogs((downloadLogsResult.data ?? []).map(mapMaterialDownloadLogRow));
+      setStudents((studentsResult.data ?? []).map(mapStudentRow));
+      setAssignments((assignmentsResult.data ?? []).map(mapAssignmentRow));
+      setScoreEntries((entriesResult.data ?? []).map(mapScoreEntryRow));
+      setSubmissionItems((submissionsResult.data ?? []).map(mapSubmissionRow).filter((item) => !isLegacyDemoSubmission(item)));
+      if (showToast && errors.length === 0) flash("โหลดข้อมูลล่าสุดจาก Supabase แล้ว");
+    } catch (error) {
+      flash(userFacingError(error, "โหลดข้อมูลจาก Supabase ไม่สำเร็จ"));
+    } finally {
+      setLoadingData(false);
     }
-
-    const nextClassrooms = ((classroomsResult.data ?? []) as any[]).map(mapClassroomRow).sort(sortClassrooms);
-    setClassroomItems(nextClassrooms);
-    setSelectedClassroomId((current) => {
-      if (current && nextClassrooms.some((item) => item.id === current)) return current;
-      if (session?.role === "student") {
-        const studentRoom = String(session.room || "");
-        return nextClassrooms.find((item) => item.displayName === studentRoom)?.id || nextClassrooms[0]?.id || "";
-      }
-      return nextClassrooms[0]?.id || "";
-    });
-    setMaterialItems(((materialsResult.data ?? []) as any[]).filter((row) => row.file_path).map(mapMaterialRow));
-    setAnnouncementItems(((announcementsResult.data ?? []) as any[]).map(mapAnnouncementRow));
-    setMaterialDownloadLogs(((downloadLogsResult.data ?? []) as any[]).map(mapMaterialDownloadLogRow));
-    setStudents(((studentsResult.data ?? []) as any[]).map(mapStudentRow));
-    setAssignments(((assignmentsResult.data ?? []) as any[]).map(mapAssignmentRow));
-    setScoreEntries(((entriesResult.data ?? []) as any[]).map(mapScoreEntryRow));
-    setSubmissionItems(((submissionsResult.data ?? []) as any[]).map(mapSubmissionRow).filter((item) => !isLegacyDemoSubmission(item)));
-    setLoadingData(false);
-    if (showToast && errors.length === 0) flash("โหลดข้อมูลล่าสุดจาก Supabase แล้ว");
   }
 
   useEffect(() => {
@@ -252,16 +277,18 @@ function App() {
       return;
     }
     setBusy(true);
-    const { data, error } = await supabase!.auth.signInWithPassword({ email, password });
-    if (error) {
+    try {
+      const { data, error } = await supabase!.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      const nextSession = data.user ? await resolveAppSession(data.user, role) : sessions[role];
+      setRole(nextSession.role);
+      setSession(nextSession);
+      setView("home");
+    } catch (error) {
+      flash(userFacingError(error, "เข้าสู่ระบบไม่สำเร็จ"));
+    } finally {
       setBusy(false);
-      return flash(error.message);
     }
-    const nextSession = data.user ? await resolveAppSession(data.user, role) : sessions[role];
-    setBusy(false);
-    setRole(nextSession.role);
-    setSession(nextSession);
-    setView("home");
   }
 
   async function requestPasswordReset(identifier: string) {
@@ -269,11 +296,16 @@ function App() {
     if (!identifier.includes("@")) return flash(role === "student" ? "นักเรียนเข้าสู่ระบบแล้วเปลี่ยนรหัสผ่านได้ในหน้าโปรไฟล์ หรือให้ครูรีเซ็ตรหัสให้" : "กรอกอีเมลก่อน แล้วกดลืมรหัสผ่านอีกครั้ง");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const resetUrl = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
-    const { error } = await supabase!.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
-    setBusy(false);
-    if (error) return flash(error.message);
-    flash(`ส่งลิงก์รีเซ็ตรหัสผ่านไปที่ ${email} แล้ว`);
+    try {
+      const resetUrl = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
+      const { error } = await supabase!.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
+      if (error) throw error;
+      flash(`ส่งลิงก์รีเซ็ตรหัสผ่านไปที่ ${email} แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "ส่งลิงก์รีเซ็ตรหัสผ่านไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function logout() {
@@ -287,69 +319,84 @@ function App() {
     if (newPassword.trim().length < 6) return flash("รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const { error } = await supabase!.auth.updateUser({ password: newPassword.trim() });
-    setBusy(false);
-    if (error) return flash(error.message);
-    flash("เปลี่ยนรหัสผ่านเรียบร้อย");
+    try {
+      const { error } = await supabase!.auth.updateUser({ password: newPassword.trim() });
+      if (error) throw error;
+      flash("เปลี่ยนรหัสผ่านเรียบร้อย");
+    } catch (error) {
+      flash(userFacingError(error, "เปลี่ยนรหัสผ่านไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function uploadMaterial({ file, title, unit, level, type }: MaterialUpload) {
     if (!title.trim()) return flashAndFail("กรุณาใส่ชื่อสื่อการสอน", flash);
     if (!file) return flashAndFail("กรุณาเลือกไฟล์สื่อการสอน", flash);
+    const fileError = validateMaterialFile(file, type);
+    if (fileError) return flashAndFail(fileError, flash);
     if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
+    const levelNumber = level.match(/[1-6]/)?.[0] || "all";
+    const storagePath = `materials/m${levelNumber}/${Date.now()}-${storageSafeFileName(file.name)}`;
+    const client = supabase!;
     setBusy(true);
-    const storagePath = `materials/${Date.now()}-${storageSafeFileName(file.name)}`;
-    const client = supabase as any;
-    const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
-      contentType: file.type || mimeForMaterial(file.name, type),
-      upsert: false
-    });
-    if (upload.error) {
+    try {
+      const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
+        contentType: file.type || mimeForMaterial(file.name, type),
+        upsert: false
+      });
+      if (upload.error) throw upload.error;
+
+      const insert = await client
+        .from("materials")
+        .insert({
+          title: title.trim(),
+          unit: unit.trim() || "สื่อเสริม",
+          level,
+          material_type: type,
+          class_name: "ทุกห้อง",
+          classroom_id: null,
+          file_path: storagePath
+        })
+        .select("*")
+        .single();
+      if (insert.error) {
+        await client.storage.from(STORAGE_BUCKET).remove([storagePath]);
+        throw insert.error;
+      }
+
+      setMaterialItems((current) => [mapMaterialRow(insert.data), ...current]);
+      flash(`อัปโหลดสื่อ ${title.trim()} เรียบร้อย`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "อัปโหลดสื่อการสอนไม่สำเร็จ"));
+      return false;
+    } finally {
       setBusy(false);
-      flash(upload.error.message);
-      return false;
     }
-    const insert = await client
-      .from("materials")
-      .insert({
-        title: title.trim(),
-        unit: unit.trim() || "สื่อเสริม",
-        level,
-        material_type: type,
-        class_name: "ทุกห้อง",
-        classroom_id: null,
-        file_path: storagePath
-      })
-      .select("*")
-      .single();
-    setBusy(false);
-    if (insert.error) {
-      await client.storage.from(STORAGE_BUCKET).remove([storagePath]);
-      flash(insert.error.message);
-      return false;
-    }
-    setMaterialItems((current) => [mapMaterialRow(insert.data), ...current]);
-    flash(`อัปโหลดสื่อ ${title.trim()} เรียบร้อย`);
-    return true;
   }
 
   async function deleteMaterial(item: Material) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const client = supabase as any;
-    if (item.filePath) await client.storage.from(STORAGE_BUCKET).remove([item.filePath]);
-    const result = await client.from("materials").delete().eq("id", item.id);
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    const next = materialItems.filter((material) => material.id !== item.id);
-    setMaterialItems(next);
-    flash(`ลบสื่อ "${item.title}" แล้ว`);
+    try {
+      const client = supabase!;
+      const result = await client.from("materials").delete().eq("id", item.id);
+      if (result.error) throw result.error;
+      const removed = item.filePath ? await client.storage.from(STORAGE_BUCKET).remove([item.filePath]) : null;
+      setMaterialItems((current) => current.filter((material) => material.id !== item.id));
+      flash(removed?.error ? "ลบข้อมูลสื่อแล้ว แต่ลบไฟล์แนบไม่สำเร็จ" : `ลบสื่อ "${item.title}" แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "ลบสื่อการสอนไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function openMaterial(item: Material) {
     if (!item.filePath) return flash("สื่อนี้ยังไม่มีไฟล์แนบ จึงเปิดไม่ได้");
     if (isSupabaseConfigured) {
-      const { data, error } = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
+      const { data, error } = await supabase!.storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
       if (error || !data?.signedUrl) return flash(error?.message || "เปิดไฟล์ไม่ได้");
       window.open(data.signedUrl, "_blank", "noopener,noreferrer");
       return flash(`เปิดไฟล์ ${item.title} ในแท็บใหม่`);
@@ -360,7 +407,7 @@ function App() {
   async function openSubmissionFile(item: SubmissionRecord) {
     if (!item.filePath) return flash("งานนี้ยังไม่มีไฟล์แนบ");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเปิดไฟล์ไม่ได้");
-    const { data, error } = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
+    const { data, error } = await supabase!.storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
     if (error || !data?.signedUrl) return flash(error?.message || "เปิดไฟล์งานไม่ได้");
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
     flash(`เปิดไฟล์งาน ${item.assignmentTitle} ในแท็บใหม่`);
@@ -379,25 +426,33 @@ function App() {
       classroom_id: targetClassroom.id
     };
     setBusy(true);
-    const result = await (supabase as any).from("announcements").insert(payload).select("*").single();
-    setBusy(false);
-    if (result.error) {
-      flash(result.error.message);
+    try {
+      const result = await supabase!.from("announcements").insert(payload).select("*").single();
+      if (result.error) throw result.error;
+      setAnnouncementItems((current) => [mapAnnouncementRow(result.data), ...current]);
+      flash(`ประกาศสำหรับ ${targetClassroom.displayName} ถูกเผยแพร่แล้ว`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "เผยแพร่ประกาศไม่สำเร็จ"));
       return false;
+    } finally {
+      setBusy(false);
     }
-    setAnnouncementItems((current) => [mapAnnouncementRow(result.data), ...current]);
-    flash(`ประกาศสำหรับ ${targetClassroom.displayName} ถูกเผยแพร่แล้ว`);
-    return true;
   }
 
   async function deleteAnnouncement(item: Announcement) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const result = await (supabase as any).from("announcements").delete().eq("id", item.id);
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    setAnnouncementItems((current) => current.filter((entry) => entry.id !== item.id));
-    flash(`ลบประกาศ "${item.title}" แล้ว`);
+    try {
+      const result = await supabase!.from("announcements").delete().eq("id", item.id);
+      if (result.error) throw result.error;
+      setAnnouncementItems((current) => current.filter((entry) => entry.id !== item.id));
+      flash(`ลบประกาศ "${item.title}" แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "ลบประกาศไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function downloadMaterial(item: Material, studentCode: string, password: string) {
@@ -416,45 +471,40 @@ function App() {
 
     setBusy(true);
     const authClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
-    const email = normalizeLoginIdentifier(studentCode, "student");
-    const auth = await authClient.auth.signInWithPassword({ email, password });
-    if (auth.error || !auth.data.user) {
-      setBusy(false);
-      flash(auth.error?.message || "ตรวจสอบตัวตนไม่สำเร็จ");
+    try {
+      const email = normalizeLoginIdentifier(studentCode, "student");
+      const auth = await authClient.auth.signInWithPassword({ email, password });
+      if (auth.error || !auth.data.user) throw auth.error || new Error("ตรวจสอบตัวตนไม่สำเร็จ");
+
+      const verifiedStudentId = String(auth.data.user.user_metadata?.student_code || studentCodeFromEmail(auth.data.user.email) || studentCode).trim();
+      const studentResult = await authClient.from("students").select("*").eq("student_code", verifiedStudentId).maybeSingle();
+      if (studentResult.error || !studentResult.data) throw studentResult.error || new Error("ไม่พบรายชื่อนักเรียนที่เชื่อมกับบัญชีนี้");
+      const linkedStudent = mapStudentRow(studentResult.data);
+
+      const { data, error } = await authClient.storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
+      if (error || !data?.signedUrl) throw error || new Error("สร้างลิงก์ดาวน์โหลดไม่สำเร็จ");
+
+      const logResult = await authClient.from("material_download_logs").insert({
+        material_id: item.id,
+        material_title: item.title,
+        student_code: verifiedStudentId,
+        student_name: linkedStudent.name,
+        class_name: linkedStudent.className,
+        classroom_id: linkedStudent.classroomId || null
+      }).select("*").single();
+      if (logResult.error) throw logResult.error;
+
+      setMaterialDownloadLogs((current) => [mapMaterialDownloadLogRow(logResult.data), ...current]);
+      await triggerFileDownload(data.signedUrl, item);
+      flash(`บันทึกการดาวน์โหลด ${item.title} แล้ว หากไฟล์ยังไม่ขึ้นให้ดูที่แถบดาวน์โหลดของเบราว์เซอร์`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "ดาวน์โหลดสื่อไม่สำเร็จ"));
       return false;
-    }
-
-    const verifiedStudentId = String(auth.data.user.user_metadata?.student_code || studentCodeFromEmail(auth.data.user.email) || studentCode).trim();
-    const verifiedStudentName = String(auth.data.user.user_metadata?.full_name || "นักเรียน");
-    const linkedStudent = students.find((student) => student.studentId === verifiedStudentId);
-    const classroomId = linkedStudent?.classroomId || workingClassroom?.id;
-
-    const { data, error } = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
-    if (error || !data?.signedUrl) {
+    } finally {
+      await authClient.auth.signOut();
       setBusy(false);
-      flash(error?.message || "สร้างลิงก์ดาวน์โหลดไม่สำเร็จ");
-      return false;
     }
-
-    const logResult = await (authClient as any).from("material_download_logs").insert({
-      material_id: item.id,
-      material_title: item.title,
-      student_code: verifiedStudentId,
-      student_name: verifiedStudentName,
-      class_name: linkedStudent?.className || item.className || activeClassName,
-      classroom_id: classroomId || null
-    }).select("*").single();
-    if (logResult.error) {
-      setBusy(false);
-      flash(logResult.error.message);
-      return false;
-    }
-
-    setMaterialDownloadLogs((current) => [mapMaterialDownloadLogRow(logResult.data), ...current]);
-    await triggerFileDownload(data.signedUrl, item);
-    setBusy(false);
-    flash(`บันทึกการดาวน์โหลด ${item.title} แล้ว หากไฟล์ยังไม่ขึ้นให้ดูที่แถบดาวน์โหลดของเบราว์เซอร์`);
-    return true;
   }
 
   async function addClassroom(draft: ClassroomDraft) {
@@ -472,57 +522,53 @@ function App() {
       display_name: displayName
     };
     setBusy(true);
-    const result = await (supabase as any).from("classrooms").insert(payload).select("*").single();
-    setBusy(false);
-    if (result.error) {
-      flash(result.error.message);
+    try {
+      const result = await supabase!.from("classrooms").insert(payload).select("*").single();
+      if (result.error) throw result.error;
+      const nextClassroom = mapClassroomRow(result.data);
+      setClassroomItems((current) => [...current, nextClassroom].sort(sortClassrooms));
+      setSelectedClassroomId(nextClassroom.id);
+      flash(`เพิ่มห้องเรียน ${displayName} แล้ว`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "เพิ่มห้องเรียนไม่สำเร็จ"));
       return false;
+    } finally {
+      setBusy(false);
     }
-    const nextClassroom = mapClassroomRow(result.data);
-    setClassroomItems((current) => [...current, nextClassroom].sort(sortClassrooms));
-    setSelectedClassroomId(nextClassroom.id);
-    flash(`เพิ่มห้องเรียน ${displayName} แล้ว`);
-    return true;
   }
 
   async function deleteClassroom(classroom: Classroom) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const client = supabase as any;
-    await client.from("announcements").delete().eq("classroom_id", classroom.id);
-    await client.from("material_download_logs").delete().eq("classroom_id", classroom.id);
-    await client.from("materials").delete().eq("classroom_id", classroom.id);
-    await client.from("score_assignments").delete().eq("classroom_id", classroom.id);
-    await client.from("students").delete().eq("classroom_id", classroom.id);
-    await client.from("submissions").delete().eq("classroom_id", classroom.id);
-    const result = await client.from("classrooms").delete().eq("id", classroom.id);
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    const nextClassrooms = classroomItems.filter((item) => item.id !== classroom.id);
-    const nextMaterials = materialItems.filter((item) => item.classroomId !== classroom.id);
-    const nextAnnouncements = announcementItems.filter((item) => item.classroomId !== classroom.id);
-    const nextDownloadLogs = materialDownloadLogs.filter((item) => item.classroomId !== classroom.id);
-    const nextStudents = students.filter((item) => item.classroomId !== classroom.id);
-    const nextAssignments = assignments.filter((item) => item.classroomId !== classroom.id);
-    const removedStudentIds = new Set(students.filter((item) => item.classroomId === classroom.id).map((item) => item.id));
-    const removedAssignmentIds = new Set(assignments.filter((item) => item.classroomId === classroom.id).map((item) => item.id));
-    const nextScores = scoreEntries.filter((item) => !removedStudentIds.has(item.studentRecordId) && !removedAssignmentIds.has(item.assignmentId));
-    const nextSubmissions = submissionItems.filter((item) => item.classroomId !== classroom.id);
-    setClassroomItems(nextClassrooms);
-    setMaterialItems(nextMaterials);
-    setAnnouncementItems(nextAnnouncements);
-    setMaterialDownloadLogs(nextDownloadLogs);
-    setStudents(nextStudents);
-    setAssignments(nextAssignments);
-    setScoreEntries(nextScores);
-    setSubmissionItems(nextSubmissions);
-    setSelectedClassroomId((current) => current === classroom.id ? nextClassrooms[0]?.id || "" : current);
-    flash(`ลบห้องเรียน ${classroom.displayName} แล้ว`);
+    try {
+      const client = supabase!;
+      const results = await Promise.all([
+        client.from("announcements").delete().eq("classroom_id", classroom.id),
+        client.from("material_download_logs").delete().eq("classroom_id", classroom.id),
+        client.from("materials").delete().eq("classroom_id", classroom.id),
+        client.from("score_assignments").delete().eq("classroom_id", classroom.id),
+        client.from("students").delete().eq("classroom_id", classroom.id),
+        client.from("submissions").delete().eq("classroom_id", classroom.id)
+      ]);
+      const relatedError = results.find((result) => result.error)?.error;
+      if (relatedError) throw relatedError;
+      const result = await client.from("classrooms").delete().eq("id", classroom.id);
+      if (result.error) throw result.error;
+      await loadClassroomData();
+      flash(`ลบห้องเรียน ${classroom.displayName} แล้ว`);
+    } catch (error) {
+      await loadClassroomData();
+      flash(userFacingError(error, "ลบห้องเรียนไม่สำเร็จ กรุณาตรวจข้อมูลอีกครั้ง"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function addStudent(draft: StudentDraft) {
     if (!selectedClassroom) return flashAndFail("เพิ่มหรือเลือกห้องเรียนก่อนเพิ่มรายชื่อ", flash);
-    if (!draft.studentId.trim()) return flashAndFail("กรอกรหัสนักเรียนก่อน", flash);
+    const codeError = validateStudentCode(draft.studentId);
+    if (codeError) return flashAndFail(codeError, flash);
     if (!draft.name.trim()) return flashAndFail("กรอกชื่อ-นามสกุลก่อน", flash);
     if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
     const payload = {
@@ -534,15 +580,18 @@ function App() {
       classroom_id: selectedClassroom.id
     };
     setBusy(true);
-    const result = await (supabase as any).from("students").insert(payload).select("*").single();
-    setBusy(false);
-    if (result.error) {
-      flash(result.error.message);
+    try {
+      const result = await supabase!.from("students").insert(payload).select("*").single();
+      if (result.error) throw result.error;
+      setStudents((current) => [...current, mapStudentRow(result.data)].sort(sortStudents));
+      flash(`เพิ่มรายชื่อ ${draft.name.trim()} แล้ว`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "เพิ่มรายชื่อนักเรียนไม่สำเร็จ"));
       return false;
+    } finally {
+      setBusy(false);
     }
-    setStudents((current) => [...current, mapStudentRow(result.data)].sort(sortStudents));
-    flash(`เพิ่มรายชื่อ ${draft.name.trim()} แล้ว`);
-    return true;
   }
 
   async function createStudentAccount(student: StudentRecord, password: string, options?: { silent?: boolean }) {
@@ -550,39 +599,31 @@ function App() {
       flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
       return false;
     }
+    const codeError = validateStudentCode(student.studentId);
+    if (codeError) {
+      flash(codeError);
+      return false;
+    }
     const initialPassword = password.trim() || defaultStudentPassword(student.studentId);
-    if (initialPassword.length < 6) {
-      flash("รหัสผ่านเริ่มต้นต้องมีอย่างน้อย 6 ตัวอักษร");
+    const passwordError = validateStudentPassword(initialPassword);
+    if (passwordError) {
+      flash(passwordError);
       return false;
     }
     setBusy(true);
-    const client = supabase as any;
-    const rpcPayload = {
-      p_student_record_id: student.id,
-      p_student_code: student.studentId,
-      p_full_name: student.name,
-      p_class_name: student.className,
-      p_classroom_id: student.classroomId || null,
-      p_password: initialPassword
-    };
-    const rpcResult = await client.rpc("create_student_account", rpcPayload);
-    if (rpcResult.error) {
+    try {
+      const payload = await createOrResetStudentAccount(student, initialPassword);
+      const authEmail = payload.email || studentCodeToEmail(student.studentId);
+      const accountCreatedAt = payload.accountCreatedAt || new Date().toISOString();
+      setStudents((current) => current.map((item) => item.id === student.id ? { ...item, authEmail, accountCreatedAt } : item));
+      if (!options?.silent) flash(`${payload.message || "บันทึกบัญชีนักเรียนแล้ว"} รหัสผ่านเริ่มต้น: ${initialPassword}`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "สร้างบัญชีนักเรียนไม่สำเร็จ"));
+      return false;
+    } finally {
       setBusy(false);
-      const message = rpcResult.error.message || "สร้างบัญชีนักเรียนไม่สำเร็จ";
-      flash(`สร้างบัญชีไม่สำเร็จ: ${message}`);
-      return false;
     }
-    setBusy(false);
-    const payload = rpcResult.data;
-    if (payload?.ok === false) {
-      flash(payload.message || "สร้างบัญชีนักเรียนไม่สำเร็จ");
-      return false;
-    }
-
-    const authEmail = payload?.email || studentCodeToEmail(student.studentId);
-    setStudents((current) => current.map((item) => item.id === student.id ? { ...item, authEmail, accountCreatedAt: new Date().toISOString() } : item));
-    if (!options?.silent) flash(`สร้างบัญชี ${student.studentId} แล้ว รหัสผ่านเริ่มต้น: ${initialPassword}`);
-    return true;
   }
 
   async function deleteStudentsBatch(targetStudents: StudentRecord[]) {
@@ -594,16 +635,19 @@ function App() {
     const ids = targetStudents.map((student) => student.id);
     const idSet = new Set(ids);
     setBusy(true);
-    const result = await (supabase as any).from("students").delete().in("id", ids);
-    setBusy(false);
-    if (result.error) {
-      flash(result.error.message);
+    try {
+      const result = await supabase!.from("students").delete().in("id", ids);
+      if (result.error) throw result.error;
+      setStudents((current) => current.filter((item) => !idSet.has(item.id)));
+      setScoreEntries((current) => current.filter((item) => !idSet.has(item.studentRecordId)));
+      flash(targetStudents.length === 1 ? `ลบรายชื่อ ${targetStudents[0].name} แล้ว` : `ลบรายชื่อ ${targetStudents.length} คนแล้ว`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "ลบรายชื่อนักเรียนไม่สำเร็จ"));
       return false;
+    } finally {
+      setBusy(false);
     }
-    setStudents((current) => current.filter((item) => !idSet.has(item.id)));
-    setScoreEntries((current) => current.filter((item) => !idSet.has(item.studentRecordId)));
-    flash(targetStudents.length === 1 ? `ลบรายชื่อ ${targetStudents[0].name} แล้ว` : `ลบรายชื่อ ${targetStudents.length} คนแล้ว`);
-    return true;
   }
 
   async function deleteStudent(student: StudentRecord) {
@@ -617,6 +661,11 @@ function App() {
     }
     if (!file) {
       flash("กรุณาเลือกไฟล์รายชื่อนักเรียน");
+      return false;
+    }
+    const fileError = validateRosterFile(file);
+    if (fileError) {
+      flash(fileError);
       return false;
     }
     if (!isSupabaseConfigured) {
@@ -636,89 +685,106 @@ function App() {
       return false;
     }
 
+    const client = supabase!;
+    const storagePath = `rosters/${selectedClassroom.id}/${Date.now()}-${storageSafeFileName(file.name)}`;
     setBusy(true);
-    const storagePath = `rosters/${Date.now()}-${storageSafeFileName(file.name)}`;
-    const upload = await (supabase as any).storage.from(STORAGE_BUCKET).upload(storagePath, file, {
-      contentType: file.type || "application/octet-stream",
-      upsert: false
-    });
-    if (upload.error) {
+    try {
+      const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
+        contentType: file.type || "application/octet-stream",
+        upsert: false
+      });
+      if (upload.error) throw upload.error;
+
+      const payload = rosterStudents.map((student) => ({
+        student_no: student.no,
+        student_code: student.studentId.trim(),
+        full_name: student.name.trim(),
+        gender: student.gender.trim(),
+        class_name: selectedClassroom.displayName,
+        classroom_id: selectedClassroom.id
+      }));
+      const invalidStudent = payload.find((student) => validateStudentCode(student.student_code));
+      if (invalidStudent) throw new Error(`รหัสนักเรียน ${invalidStudent.student_code || "ว่าง"} ไม่ถูกต้อง`);
+
+      const uploadRecord = await client.from("student_roster_uploads").insert({ class_name: selectedClassroom.displayName, classroom_id: selectedClassroom.id, file_path: storagePath, file_name: file.name, file_size: file.size }).select("id").single();
+      if (uploadRecord.error) {
+        await client.storage.from(STORAGE_BUCKET).remove([storagePath]);
+        throw uploadRecord.error;
+      }
+      const upsertStudents = await client.from("students").upsert(payload, { onConflict: "student_code" });
+      if (upsertStudents.error) {
+        await client.from("student_roster_uploads").delete().eq("id", uploadRecord.data.id);
+        await client.storage.from(STORAGE_BUCKET).remove([storagePath]);
+        throw upsertStudents.error;
+      }
+
+      await loadClassroomData();
+      flash(`นำเข้ารายชื่อ ${rosterStudents.length} คนจาก ${file.name} แล้ว พร้อมใช้งาน`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "นำเข้ารายชื่อนักเรียนไม่สำเร็จ"));
+      return false;
+    } finally {
       setBusy(false);
-      flash(upload.error.message);
-      return false;
     }
-
-    const payload = rosterStudents.map((student) => ({
-      student_no: student.no,
-      student_code: student.studentId,
-      full_name: student.name,
-      gender: student.gender,
-      class_name: selectedClassroom.displayName,
-      classroom_id: selectedClassroom.id
-    }));
-
-    const uploadRecord = await (supabase as any).from("student_roster_uploads").insert({ class_name: selectedClassroom.displayName, classroom_id: selectedClassroom.id, file_path: storagePath, file_name: file.name, file_size: file.size });
-    if (uploadRecord.error) {
-      setBusy(false);
-      await (supabase as any).storage.from(STORAGE_BUCKET).remove([storagePath]);
-      flash(uploadRecord.error.message);
-      return false;
-    }
-    const upsertStudents = await (supabase as any).from("students").upsert(payload, { onConflict: "student_code" });
-    setBusy(false);
-    if (upsertStudents.error) {
-      flash(upsertStudents.error.message);
-      return false;
-    }
-
-    await loadClassroomData();
-    flash(`นำเข้ารายชื่อ ${rosterStudents.length} คนจาก ${file.name} แล้ว พร้อมใช้งาน`);
-    return true;
   }
 
   async function addAssignment(draft: AssignmentDraft) {
     if (!draft.classroomIds.length) return flashAndFail("เลือกห้องเรียนอย่างน้อย 1 ห้องก่อนสร้างงานคะแนน", flash);
     if (!draft.title.trim()) return flashAndFail("กรอกชื่องานหรือแบบประเมินก่อน", flash);
     if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
-    const rawMax = positiveNumber(draft.rawMax, 10);
-    const finalMax = positiveNumber(draft.finalMax, rawMax);
+    const rawMax = Number(draft.rawMax);
+    const finalMax = Number(draft.finalMax);
+    if (!Number.isFinite(rawMax) || rawMax <= 0) return flashAndFail("คะแนนเต็มดิบต้องมากกว่า 0", flash);
+    if (!Number.isFinite(finalMax) || finalMax <= 0) return flashAndFail("คะแนนเก็บเต็มต้องมากกว่า 0", flash);
     const targetClassrooms = classroomItems.filter((classroom) => draft.classroomIds.includes(classroom.id));
     if (!targetClassrooms.length) return flashAndFail("ไม่พบห้องเรียนที่เลือก กรุณาเลือกใหม่", flash);
     const payload = targetClassrooms.map((classroom) => ({ title: draft.title.trim(), class_name: classroom.displayName, classroom_id: classroom.id, raw_max: rawMax, final_max: finalMax }));
     setBusy(true);
-    const result = await (supabase as any).from("score_assignments").insert(payload).select("*");
-    setBusy(false);
-    if (result.error) {
-      flash(result.error.message);
+    try {
+      const result = await supabase!.from("score_assignments").insert(payload).select("*");
+      if (result.error) throw result.error;
+      const createdAssignments = (result.data ?? []).map(mapAssignmentRow);
+      setAssignments((current) => [...current, ...createdAssignments]);
+      flash(`เพิ่มงานคะแนน "${draft.title.trim()}" ให้ ${createdAssignments.length} ห้องแล้ว`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "เพิ่มงานคะแนนไม่สำเร็จ"));
       return false;
+    } finally {
+      setBusy(false);
     }
-    const createdAssignments = ((result.data ?? []) as any[]).map(mapAssignmentRow);
-    setAssignments((current) => [...current, ...createdAssignments]);
-    flash(`เพิ่มงานคะแนน "${draft.title.trim()}" ให้ ${createdAssignments.length} ห้องแล้ว`);
-    return true;
   }
 
   async function deleteMaterialDownloadLog(log: MaterialDownloadLog) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const result = await (supabase as any).from("material_download_logs").delete().eq("id", log.id);
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    setMaterialDownloadLogs((current) => current.filter((item) => item.id !== log.id));
-    flash(`ลบประวัติการดาวน์โหลดของ ${log.studentName} แล้ว`);
+    try {
+      const result = await supabase!.from("material_download_logs").delete().eq("id", log.id);
+      if (result.error) throw result.error;
+      setMaterialDownloadLogs((current) => current.filter((item) => item.id !== log.id));
+      flash(`ลบประวัติการดาวน์โหลดของ ${log.studentName} แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "ลบประวัติการดาวน์โหลดไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function deleteAssignment(assignment: ScoreAssignment) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const result = await (supabase as any).from("score_assignments").delete().eq("id", assignment.id);
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    const nextAssignments = assignments.filter((item) => item.id !== assignment.id);
-    const nextEntries = scoreEntries.filter((item) => item.assignmentId !== assignment.id);
-    setAssignments(nextAssignments);
-    setScoreEntries(nextEntries);
-    flash(`ลบงานคะแนน "${assignment.title}" แล้ว`);
+    try {
+      const result = await supabase!.from("score_assignments").delete().eq("id", assignment.id);
+      if (result.error) throw result.error;
+      setAssignments((current) => current.filter((item) => item.id !== assignment.id));
+      setScoreEntries((current) => current.filter((item) => item.assignmentId !== assignment.id));
+      flash(`ลบงานคะแนน "${assignment.title}" แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "ลบงานคะแนนไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function moveAssignment(assignment: ScoreAssignment, direction: -1 | 1) {
@@ -729,21 +795,24 @@ function App() {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     const target = ordered[targetIndex];
     setBusy(true);
-    const [currentResult, targetResult] = await Promise.all([
-      (supabase as any).from("score_assignments").update({ created_at: target.createdAt }).eq("id", assignment.id),
-      (supabase as any).from("score_assignments").update({ created_at: assignment.createdAt }).eq("id", target.id)
-    ]);
-    setBusy(false);
-    if (currentResult.error || targetResult.error) {
+    try {
+      const [currentResult, targetResult] = await Promise.all([
+        supabase!.from("score_assignments").update({ created_at: target.createdAt }).eq("id", assignment.id),
+        supabase!.from("score_assignments").update({ created_at: assignment.createdAt }).eq("id", target.id)
+      ]);
+      if (currentResult.error || targetResult.error) throw currentResult.error || targetResult.error;
+      setAssignments((current) => current.map((item) => {
+        if (item.id === assignment.id) return { ...item, createdAt: target.createdAt };
+        if (item.id === target.id) return { ...item, createdAt: assignment.createdAt };
+        return item;
+      }));
+      flash(`ย้าย "${assignment.title}" ${direction < 0 ? "ก่อนหน้า" : "ถัดไป"}แล้ว`);
+    } catch (error) {
       await loadClassroomData();
-      return flash(currentResult.error?.message || targetResult.error?.message || "เปลี่ยนลำดับงานไม่สำเร็จ");
+      flash(userFacingError(error, "เปลี่ยนลำดับงานไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
     }
-    setAssignments((current) => current.map((item) => {
-      if (item.id === assignment.id) return { ...item, createdAt: target.createdAt };
-      if (item.id === target.id) return { ...item, createdAt: assignment.createdAt };
-      return item;
-    }));
-    flash(`ย้าย "${assignment.title}" ${direction < 0 ? "ก่อนหน้า" : "ถัดไป"}แล้ว`);
   }
 
   function updateScoreDraft(assignment: ScoreAssignment, student: StudentRecord, value: string) {
@@ -775,11 +844,16 @@ function App() {
       };
     });
     setBusy(true);
-    const result = await (supabase as any).from("score_entries").upsert(payload, { onConflict: "assignment_id,student_id" });
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    await loadClassroomData();
-    flash(`บันทึกคะแนน "${assignment.title}" แล้ว`);
+    try {
+      const result = await supabase!.from("score_entries").upsert(payload, { onConflict: "assignment_id,student_id" });
+      if (result.error) throw result.error;
+      await loadClassroomData();
+      flash(`บันทึกคะแนน "${assignment.title}" แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "บันทึกคะแนนไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveAllScoreSheets() {
@@ -800,11 +874,16 @@ function App() {
       };
     }));
     setBusy(true);
-    const result = await (supabase as any).from("score_entries").upsert(payload, { onConflict: "assignment_id,student_id" });
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    await loadClassroomData();
-    flash(`บันทึกคะแนนทั้งห้อง ${activeStudents.length} คน จำนวน ${activeAssignments.length} งานแล้ว`);
+    try {
+      const result = await supabase!.from("score_entries").upsert(payload, { onConflict: "assignment_id,student_id" });
+      if (result.error) throw result.error;
+      await loadClassroomData();
+      flash(`บันทึกคะแนนทั้งห้อง ${activeStudents.length} คน จำนวน ${activeAssignments.length} งานแล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "บันทึกคะแนนทั้งห้องไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function updateSubmissionDraft(id: string, patch: Partial<SubmissionRecord>) {
@@ -817,76 +896,91 @@ function App() {
 
   async function saveSubmissionReview(item: SubmissionRecord) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    const rawScore = Math.max(0, Math.min(item.rawMax, item.rawScore));
+    const finalScore = Math.max(0, Math.min(item.finalMax, scaledScore(rawScore, item.rawMax, item.finalMax)));
     setBusy(true);
-    const result = await (supabase as any)
-      .from("submissions")
-      .update({
-        status: item.status,
-        raw_score: item.rawScore,
-        raw_max: item.rawMax,
-        final_score: scaledScore(item.rawScore, item.rawMax, item.finalMax),
-        final_max: item.finalMax
-      })
-      .eq("id", item.id);
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    flash(`บันทึกผลตรวจงานของ ${item.studentName} แล้ว`);
+    try {
+      const result = await supabase!
+        .from("submissions")
+        .update({ status: item.status, raw_score: rawScore, raw_max: item.rawMax, final_score: finalScore, final_max: item.finalMax })
+        .eq("id", item.id);
+      if (result.error) throw result.error;
+      setSubmissionItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, rawScore, finalScore } : entry));
+      flash(`บันทึกผลตรวจงานของ ${item.studentName} แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "บันทึกผลตรวจงานไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function deleteSubmissionRecord(item: SubmissionRecord) {
     if (!window.confirm(`ลบรายการส่งงาน "${item.assignmentTitle}" ของ ${item.studentName} พร้อมไฟล์แนบหรือไม่`)) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const client = supabase as any;
-    const result = await client.from("submissions").delete().eq("id", item.id);
-    if (result.error) {
+    try {
+      const client = supabase!;
+      const result = await client.from("submissions").delete().eq("id", item.id);
+      if (result.error) throw result.error;
+      const removed = item.filePath ? await client.storage.from(STORAGE_BUCKET).remove([item.filePath]) : null;
+      setSubmissionItems((current) => current.filter((submission) => submission.id !== item.id));
+      flash(removed?.error ? "ลบรายการแล้ว แต่ลบไฟล์แนบไม่สำเร็จ" : `ลบงานของ ${item.studentName} แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "ลบรายการส่งงานไม่สำเร็จ"));
+    } finally {
       setBusy(false);
-      return flash(result.error.message);
     }
-    let storageError: any = null;
-    if (item.filePath) {
-      const removed = await client.storage.from(STORAGE_BUCKET).remove([item.filePath]);
-      storageError = removed.error;
-    }
-    setSubmissionItems((current) => current.filter((submission) => submission.id !== item.id));
-    setBusy(false);
-    flash(storageError ? "ลบรายการแล้ว แต่ลบไฟล์แนบไม่สำเร็จ" : `ลบงานของ ${item.studentName} แล้ว`);
   }
 
   async function submitWork(file: File | null, assignmentId: string) {
     const assignment = activeAssignments.find((item) => item.id === assignmentId);
     if (!assignment) return flash("เลือกงานที่คุณต้องการส่งก่อน");
     if (!file) return flash("กรุณาเลือกไฟล์งาน");
+    const fileError = validateSubmissionFile(file);
+    if (fileError) return flash(fileError);
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    const studentCode = (currentStudent?.studentId || session?.studentCode || "").trim();
+    const codeError = validateStudentCode(studentCode);
+    if (codeError) return flash(codeError);
+    const studentName = (currentStudent?.name || session?.name || "").trim();
+    const classroomId = assignment.classroomId || workingClassroom?.id || currentStudent?.classroomId;
+    if (!classroomId) return flash("ไม่พบห้องเรียนของนักเรียน กรุณาติดต่อครู");
+    const storagePath = `submissions/${safeStorageSegment(studentCode)}/${Date.now()}-${storageSafeFileName(file.name)}`;
+    const client = supabase!;
     setBusy(true);
-    const storagePath = `submissions/${Date.now()}-${storageSafeFileName(file.name)}`;
-    const record = {
-      assignment_id: assignment.id,
-      assignment_title: assignment.title,
-      student_name: currentStudent?.name || session?.name || "นักเรียน",
-      student_code: currentStudent?.studentId || session?.studentCode || "student",
-      classroom_id: assignment.classroomId || workingClassroom?.id || currentStudent?.classroomId || null,
-      file_path: storagePath,
-      status: "รอตรวจ",
-      raw_score: 0,
-      raw_max: assignment.rawMax,
-      final_score: 0,
-      final_max: assignment.finalMax
-    };
-    const client = supabase as any;
-    const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
-      contentType: file.type || "application/octet-stream",
-      upsert: false
-    });
-    if (upload.error) {
+    try {
+      const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
+        contentType: file.type || "application/octet-stream",
+        upsert: false
+      });
+      if (upload.error) throw upload.error;
+
+      const result = await client.from("submissions").insert({
+        assignment_id: assignment.id,
+        assignment_title: assignment.title,
+        student_name: studentName,
+        student_code: studentCode,
+        classroom_id: classroomId,
+        file_path: storagePath,
+        status: "รอตรวจ",
+        raw_score: 0,
+        raw_max: assignment.rawMax,
+        final_score: 0,
+        final_max: assignment.finalMax
+      }).select("*").single();
+      if (result.error) {
+        await client.storage.from(STORAGE_BUCKET).remove([storagePath]);
+        throw result.error;
+      }
+      setSubmissionItems((current) => [mapSubmissionRow(result.data), ...current]);
+      flash(`ส่งงาน ${file.name} เรียบร้อย`);
+    } catch (error) {
+      flash(userFacingError(error, "ส่งงานไม่สำเร็จ"));
+      return false;
+    } finally {
       setBusy(false);
-      return flash(upload.error.message);
     }
-    const result = await client.from("submissions").insert(record).select("*").single();
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    setSubmissionItems((current) => [mapSubmissionRow(result.data), ...current]);
-    flash(`ส่งงาน ${file.name} เรียบร้อย`);
+    return true;
   }
 
   if (!session) {
@@ -1174,7 +1268,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
       onOpen(item);
       return;
     }
-    const result = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
+    const result = await supabase!.storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
     if (result.error || !result.data?.signedUrl) {
       flash(result.error?.message || "สร้างลิงก์ดาวน์โหลดไม่สำเร็จ");
       return;
@@ -1579,88 +1673,6 @@ function downloadRosterTemplate(kind: "excel" | "csv") {
   URL.revokeObjectURL(url);
 }
 
-function mapClassroomRow(row: any): Classroom {
-  return {
-    id: String(row.id),
-    academicYear: row.academic_year || row.academicYear || "",
-    level: row.level || "",
-    room: row.room || "",
-    subject: row.subject || "",
-    displayName: row.display_name || row.displayName || formatClassroomName({
-      academicYear: row.academic_year || row.academicYear || "",
-      level: row.level || "",
-      room: row.room || "",
-      subject: row.subject || ""
-    })
-  };
-}
-
-function mapMaterialRow(row: any): Material {
-  const type = (row.material_type || row.type || "PDF") as MaterialType;
-  return {
-    id: String(row.id),
-    title: row.title || "สื่อการสอน",
-    unit: row.unit || "สื่อเสริม",
-    level: row.level || "ม.1",
-    type,
-    date: formatDate(row.published_at || row.date || new Date().toISOString()),
-    filePath: row.file_path || row.filePath || "",
-    className: row.class_name || row.className || NO_CLASS_LABEL,
-    classroomId: row.classroom_id || row.classroomId || undefined,
-    accent: accentForType(type)
-  };
-}
-
-function mapAnnouncementRow(row: any): Announcement {
-  return {
-    id: String(row.id),
-    title: row.title || "ประกาศ",
-    body: row.body || "",
-    className: row.class_name || row.className || NO_CLASS_LABEL,
-    classroomId: row.classroom_id || row.classroomId || undefined,
-    publishedAt: formatDate(row.published_at || row.publishedAt || new Date().toISOString())
-  };
-}
-
-function mapMaterialDownloadLogRow(row: any): MaterialDownloadLog {
-  return {
-    id: String(row.id),
-    materialId: row.material_id || row.materialId || "",
-    materialTitle: row.material_title || row.materialTitle || "สื่อการสอน",
-    studentId: row.student_code || row.studentId || "",
-    studentName: row.student_name || row.studentName || "นักเรียน",
-    className: row.class_name || row.className || NO_CLASS_LABEL,
-    classroomId: row.classroom_id || row.classroomId || undefined,
-    downloadedAt: formatDate(row.downloaded_at || row.downloadedAt || new Date().toISOString())
-  };
-}
-
-function mapStudentRow(row: any): StudentRecord {
-  return {
-    id: String(row.id),
-    no: Number(row.student_no ?? row.no ?? 0),
-    studentId: row.student_code || row.studentId || "",
-    name: row.full_name || row.name || "",
-    gender: row.gender || "",
-    className: row.class_name || row.className || NO_CLASS_LABEL,
-    classroomId: row.classroom_id || row.classroomId || undefined,
-    authEmail: row.auth_email || row.authEmail || undefined,
-    accountCreatedAt: row.account_created_at || row.accountCreatedAt || undefined
-  };
-}
-
-function mapAssignmentRow(row: any): ScoreAssignment {
-  return {
-    id: String(row.id),
-    title: row.title || "งานคะแนน",
-    className: row.class_name || row.className || NO_CLASS_LABEL,
-    classroomId: row.classroom_id || row.classroomId || undefined,
-    rawMax: Number(row.raw_max ?? row.rawMax ?? 10),
-    finalMax: Number(row.final_max ?? row.finalMax ?? 10),
-    createdAt: row.created_at || row.createdAt || new Date().toISOString()
-  };
-}
-
 function gradeLevelFromText(...values: Array<string | undefined>) {
   const match = values.filter(Boolean).join(" ").match(/ม\.?\s*([1-6])/i);
   return match ? `ม.${match[1]}` : undefined;
@@ -1674,45 +1686,6 @@ function orderAssignments(items: ScoreAssignment[]) {
     const safeB = Number.isFinite(bTime) ? bTime : 0;
     return safeA - safeB || a.title.localeCompare(b.title, "th");
   });
-}
-
-function mapScoreEntryRow(row: any): ScoreEntry {
-  return {
-    id: String(row.id),
-    assignmentId: row.assignment_id || row.assignmentId || "",
-    studentRecordId: row.student_id || row.studentRecordId || "",
-    studentId: row.student_code || row.studentId || "",
-    rawScore: Number(row.raw_score ?? row.rawScore ?? 0),
-    rawMax: Number(row.raw_max ?? row.rawMax ?? 10),
-    finalScore: Number(row.final_score ?? row.finalScore ?? 0),
-    finalMax: Number(row.final_max ?? row.finalMax ?? 10)
-  };
-}
-
-function mapSubmissionRow(row: any): SubmissionRecord {
-  const rawScore = Number(row.raw_score ?? row.rawScore ?? 0);
-  const rawMax = Number(row.raw_max ?? row.rawMax ?? 10);
-  const finalMax = Number(row.final_max ?? row.finalMax ?? 10);
-  return {
-    id: String(row.id),
-    assignmentId: row.assignment_id || row.assignmentId || undefined,
-    assignmentTitle: row.assignment_title || row.assignmentTitle || "งานที่ส่ง",
-    studentName: row.student_name || row.studentName || "นักเรียน",
-    studentId: row.student_code || row.studentId || "",
-    classroomId: row.classroom_id || row.classroomId || undefined,
-    filePath: row.file_path || row.filePath || undefined,
-    status: (row.status || "รอตรวจ") as SubmissionStatus,
-    submittedAt: formatDate(row.submitted_at || row.submittedAt || new Date().toISOString()),
-    rawScore,
-    rawMax,
-    finalScore: Number(row.final_score ?? row.finalScore ?? scaledScore(rawScore, rawMax, finalMax)),
-    finalMax
-  };
-}
-
-function isLegacyDemoSubmission(item: SubmissionRecord) {
-  const compactName = item.studentName.replace(/\s+/g, "");
-  return compactName === "สมชายดีมาก" && item.studentId.trim().toLowerCase() === "student";
 }
 
 function buildScoreEntry(assignment: ScoreAssignment, student: StudentRecord, rawScore: number): ScoreEntry {
@@ -1756,30 +1729,8 @@ function numericInputValue(value: number) {
   return value === 0 ? "" : formatScore(value);
 }
 
-function formatDate(input: string) {
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return input;
-  return date.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
-}
-
 function safeFileName(name: string) {
   return name.replace(/[^\w.\-\u0E00-\u0E7F]+/g, "-");
-}
-
-function storageSafeFileName(name: string) {
-  const trimmed = name.trim();
-  const extensionMatch = trimmed.match(/\.[A-Za-z0-9]{1,10}$/);
-  const extension = extensionMatch ? extensionMatch[0].toLowerCase() : "";
-  const base = trimmed
-    .replace(/\.[^.]+$/, "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Za-z0-9_-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .toLowerCase();
-
-  return `${base || "file"}${extension}`;
 }
 
 async function parseRosterFile(file: File): Promise<RosterStudent[]> {
@@ -1951,12 +1902,6 @@ function studentCodeFromEmail(email?: string) {
 
 function defaultStudentPassword(studentCode: string) {
   return `${studentCode.trim()}@2569`;
-}
-
-function accentForType(type: MaterialType): Material["accent"] {
-  if (type === "VIDEO") return "blue";
-  if (type === "IMG") return "coral";
-  return "green";
 }
 
 function sortStudents(a: StudentRecord, b: StudentRecord) {

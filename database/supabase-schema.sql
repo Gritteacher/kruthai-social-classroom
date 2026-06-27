@@ -168,92 +168,375 @@ alter table public.announcements enable row level security;
 alter table public.student_roster_uploads enable row level security;
 alter table public.material_download_logs enable row level security;
 
-drop policy if exists "profiles can read own profile" on public.profiles;
-create policy "profiles can read own profile" on public.profiles for select to authenticated using (auth.uid() = id);
+create or replace function public.is_teacher()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'teacher'
+  );
+$$;
 
-drop policy if exists "classroom materials readable" on public.materials;
-drop policy if exists "classroom materials insertable" on public.materials;
-drop policy if exists "classroom materials updateable" on public.materials;
-drop policy if exists "classroom materials deleteable" on public.materials;
-create policy "classroom materials readable" on public.materials for select to authenticated using (true);
-create policy "classroom materials insertable" on public.materials for insert to authenticated with check (true);
-create policy "classroom materials updateable" on public.materials for update to authenticated using (true) with check (true);
-create policy "classroom materials deleteable" on public.materials for delete to authenticated using (true);
+create or replace function public.current_student_code()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select nullif(trim(student_code), '')
+  from public.profiles
+  where id = auth.uid() and role = 'student'
+  limit 1;
+$$;
 
-drop policy if exists "classrooms readable" on public.classrooms;
-drop policy if exists "classrooms insertable" on public.classrooms;
-drop policy if exists "classrooms updateable" on public.classrooms;
-drop policy if exists "classrooms deleteable" on public.classrooms;
-create policy "classrooms readable" on public.classrooms for select to authenticated using (true);
-create policy "classrooms insertable" on public.classrooms for insert to authenticated with check (true);
-create policy "classrooms updateable" on public.classrooms for update to authenticated using (true) with check (true);
-create policy "classrooms deleteable" on public.classrooms for delete to authenticated using (true);
+create or replace function public.current_student_name()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select s.full_name
+  from public.students s
+  where s.student_code = public.current_student_code()
+  limit 1;
+$$;
 
-drop policy if exists "students readable" on public.students;
-drop policy if exists "students insertable" on public.students;
-drop policy if exists "students updateable" on public.students;
-drop policy if exists "students deleteable" on public.students;
-create policy "students readable" on public.students for select to authenticated using (true);
-create policy "students insertable" on public.students for insert to authenticated with check (true);
-create policy "students updateable" on public.students for update to authenticated using (true) with check (true);
-create policy "students deleteable" on public.students for delete to authenticated using (true);
+create or replace function public.user_classroom_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select s.classroom_id
+  from public.students s
+  where s.student_code = public.current_student_code()
+  limit 1;
+$$;
 
-drop policy if exists "score assignments readable" on public.score_assignments;
-drop policy if exists "score assignments insertable" on public.score_assignments;
-drop policy if exists "score assignments updateable" on public.score_assignments;
-drop policy if exists "score assignments deleteable" on public.score_assignments;
-create policy "score assignments readable" on public.score_assignments for select to authenticated using (true);
-create policy "score assignments insertable" on public.score_assignments for insert to authenticated with check (true);
-create policy "score assignments updateable" on public.score_assignments for update to authenticated using (true) with check (true);
-create policy "score assignments deleteable" on public.score_assignments for delete to authenticated using (true);
+create or replace function public.user_classroom_level()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select c.level
+  from public.classrooms c
+  where c.id = public.user_classroom_id()
+  limit 1;
+$$;
 
-drop policy if exists "score entries readable" on public.score_entries;
-drop policy if exists "score entries insertable" on public.score_entries;
-drop policy if exists "score entries updateable" on public.score_entries;
-drop policy if exists "score entries deleteable" on public.score_entries;
-create policy "score entries readable" on public.score_entries for select to authenticated using (true);
-create policy "score entries insertable" on public.score_entries for insert to authenticated with check (true);
-create policy "score entries updateable" on public.score_entries for update to authenticated using (true) with check (true);
-create policy "score entries deleteable" on public.score_entries for delete to authenticated using (true);
+create or replace function public.can_access_material_file(object_name text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select public.is_teacher() or exists (
+    select 1
+    from public.materials m
+    where m.file_path = object_name
+      and (
+        m.classroom_id = public.user_classroom_id()
+        or (m.classroom_id is null and m.level = public.user_classroom_level())
+      )
+  );
+$$;
 
-drop policy if exists "submissions readable" on public.submissions;
-drop policy if exists "submissions insertable" on public.submissions;
-drop policy if exists "submissions updateable" on public.submissions;
-drop policy if exists "submissions deleteable" on public.submissions;
-create policy "submissions readable" on public.submissions for select to authenticated using (true);
-create policy "submissions insertable" on public.submissions for insert to authenticated with check (true);
-create policy "submissions updateable" on public.submissions for update to authenticated using (true) with check (true);
-create policy "submissions deleteable" on public.submissions for delete to authenticated using (true);
+create or replace function public.can_access_submission_file(object_name text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select public.is_teacher() or exists (
+    select 1
+    from public.submissions submission
+    where submission.file_path = object_name
+      and submission.student_code = public.current_student_code()
+  );
+$$;
 
-drop policy if exists "scores readable" on public.scores;
-drop policy if exists "scores insertable" on public.scores;
-drop policy if exists "scores updateable" on public.scores;
-create policy "scores readable" on public.scores for select to authenticated using (true);
-create policy "scores insertable" on public.scores for insert to authenticated with check (true);
-create policy "scores updateable" on public.scores for update to authenticated using (true) with check (true);
+revoke all on function public.is_teacher() from public;
+revoke all on function public.current_student_code() from public;
+revoke all on function public.current_student_name() from public;
+revoke all on function public.user_classroom_id() from public;
+revoke all on function public.user_classroom_level() from public;
+revoke all on function public.can_access_material_file(text) from public;
+revoke all on function public.can_access_submission_file(text) from public;
+grant execute on function public.is_teacher() to authenticated;
+grant execute on function public.current_student_code() to authenticated;
+grant execute on function public.current_student_name() to authenticated;
+grant execute on function public.user_classroom_id() to authenticated;
+grant execute on function public.user_classroom_level() to authenticated;
+grant execute on function public.can_access_material_file(text) to authenticated;
+grant execute on function public.can_access_submission_file(text) to authenticated;
 
-drop policy if exists "announcements readable" on public.announcements;
-drop policy if exists "announcements insertable" on public.announcements;
-drop policy if exists "announcements updateable" on public.announcements;
-drop policy if exists "announcements deleteable" on public.announcements;
-create policy "announcements readable" on public.announcements for select to authenticated using (true);
-create policy "announcements insertable" on public.announcements for insert to authenticated with check (true);
-create policy "announcements updateable" on public.announcements for update to authenticated using (true) with check (true);
-create policy "announcements deleteable" on public.announcements for delete to authenticated using (true);
+create or replace function public.guard_student_profile_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if current_user in ('postgres', 'service_role', 'supabase_admin')
+    or coalesce(auth.jwt() ->> 'role', '') = 'service_role'
+    or public.is_teacher() then
+    return new;
+  end if;
 
-drop policy if exists "rosters insertable" on public.student_roster_uploads;
-drop policy if exists "rosters readable" on public.student_roster_uploads;
-create policy "rosters insertable" on public.student_roster_uploads for insert to authenticated with check (true);
-create policy "rosters readable" on public.student_roster_uploads for select to authenticated using (true);
+  if auth.uid() <> old.id
+    or new.id is distinct from old.id
+    or new.role is distinct from old.role
+    or new.student_code is distinct from old.student_code
+    or new.class_name is distinct from old.class_name
+    or new.school_name is distinct from old.school_name then
+    raise exception 'ไม่สามารถเปลี่ยนข้อมูลสิทธิ์หรือห้องเรียนได้';
+  end if;
 
-drop policy if exists "material download logs readable" on public.material_download_logs;
-drop policy if exists "material download logs insertable" on public.material_download_logs;
-drop policy if exists "material download logs deleteable" on public.material_download_logs;
-create policy "material download logs readable" on public.material_download_logs for select to authenticated using (true);
-create policy "material download logs insertable" on public.material_download_logs for insert to authenticated with check (true);
-create policy "material download logs deleteable" on public.material_download_logs for delete to authenticated using (
-  exists (select 1 from public.profiles where id = auth.uid() and role = 'teacher')
+  return new;
+end;
+$$;
+
+drop trigger if exists guard_student_profile_update on public.profiles;
+create trigger guard_student_profile_update
+before update on public.profiles
+for each row execute function public.guard_student_profile_update();
+revoke all on function public.guard_student_profile_update() from public, authenticated;
+
+create or replace function public.guard_student_submission_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if current_user in ('postgres', 'service_role', 'supabase_admin')
+    or coalesce(auth.jwt() ->> 'role', '') = 'service_role'
+    or public.is_teacher() then
+    return new;
+  end if;
+
+  if old.student_code <> public.current_student_code()
+    or new.student_code is distinct from old.student_code
+    or new.student_name is distinct from old.student_name
+    or new.classroom_id is distinct from old.classroom_id
+    or new.assignment_id is distinct from old.assignment_id
+    or new.assignment_title is distinct from old.assignment_title
+    or new.submitted_at is distinct from old.submitted_at
+    or new.status is distinct from old.status
+    or new.raw_score is distinct from old.raw_score
+    or new.raw_max is distinct from old.raw_max
+    or new.final_score is distinct from old.final_score
+    or new.final_max is distinct from old.final_max
+    or (
+      new.file_path is distinct from old.file_path
+      and coalesce(new.file_path, '') not like 'submissions/' || public.current_student_code() || '/%'
+    ) then
+    raise exception 'นักเรียนแก้ไขข้อมูลการตรวจหรือคะแนนไม่ได้';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists guard_student_submission_update on public.submissions;
+create trigger guard_student_submission_update
+before update on public.submissions
+for each row execute function public.guard_student_submission_update();
+revoke all on function public.guard_student_submission_update() from public, authenticated;
+
+do $$
+declare
+  policy_record record;
+begin
+  for policy_record in
+    select schemaname, tablename, policyname
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = any (array[
+        'profiles', 'classrooms', 'students', 'materials', 'announcements',
+        'score_assignments', 'score_entries', 'submissions', 'scores',
+        'student_roster_uploads', 'material_download_logs'
+      ])
+  loop
+    execute format('drop policy if exists %I on %I.%I', policy_record.policyname, policy_record.schemaname, policy_record.tablename);
+  end loop;
+end;
+$$;
+
+create policy "profiles select own or teacher" on public.profiles
+for select to authenticated
+using (auth.uid() = id or (public.is_teacher() and role = 'student'));
+create policy "profiles update own" on public.profiles
+for update to authenticated
+using (auth.uid() = id)
+with check (auth.uid() = id);
+
+create policy "classrooms select related" on public.classrooms
+for select to authenticated
+using (public.is_teacher() or id = public.user_classroom_id());
+create policy "classrooms insert teacher" on public.classrooms
+for insert to authenticated with check (public.is_teacher());
+create policy "classrooms update teacher" on public.classrooms
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "classrooms delete teacher" on public.classrooms
+for delete to authenticated using (public.is_teacher());
+
+create policy "students select own or teacher" on public.students
+for select to authenticated
+using (public.is_teacher() or student_code = public.current_student_code());
+create policy "students insert teacher" on public.students
+for insert to authenticated with check (public.is_teacher());
+create policy "students update teacher" on public.students
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "students delete teacher" on public.students
+for delete to authenticated using (public.is_teacher());
+
+create policy "materials select related" on public.materials
+for select to authenticated
+using (
+  public.is_teacher()
+  or classroom_id = public.user_classroom_id()
+  or (classroom_id is null and level = public.user_classroom_level())
 );
+create policy "materials insert teacher" on public.materials
+for insert to authenticated with check (public.is_teacher());
+create policy "materials update teacher" on public.materials
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "materials delete teacher" on public.materials
+for delete to authenticated using (public.is_teacher());
+
+create policy "announcements select related" on public.announcements
+for select to authenticated
+using (public.is_teacher() or classroom_id = public.user_classroom_id());
+create policy "announcements insert teacher" on public.announcements
+for insert to authenticated with check (public.is_teacher());
+create policy "announcements update teacher" on public.announcements
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "announcements delete teacher" on public.announcements
+for delete to authenticated using (public.is_teacher());
+
+create policy "score assignments select related" on public.score_assignments
+for select to authenticated
+using (public.is_teacher() or classroom_id = public.user_classroom_id());
+create policy "score assignments insert teacher" on public.score_assignments
+for insert to authenticated with check (public.is_teacher());
+create policy "score assignments update teacher" on public.score_assignments
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "score assignments delete teacher" on public.score_assignments
+for delete to authenticated using (public.is_teacher());
+
+create policy "score entries select own or teacher" on public.score_entries
+for select to authenticated
+using (public.is_teacher() or student_code = public.current_student_code());
+create policy "score entries insert teacher" on public.score_entries
+for insert to authenticated with check (public.is_teacher());
+create policy "score entries update teacher" on public.score_entries
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "score entries delete teacher" on public.score_entries
+for delete to authenticated using (public.is_teacher());
+
+create policy "submissions select own or teacher" on public.submissions
+for select to authenticated
+using (public.is_teacher() or student_code = public.current_student_code());
+create policy "submissions insert own or teacher" on public.submissions
+for insert to authenticated
+with check (
+  public.is_teacher()
+  or (
+    student_code = public.current_student_code()
+    and student_name = public.current_student_name()
+    and classroom_id = public.user_classroom_id()
+    and file_path like 'submissions/' || public.current_student_code() || '/%'
+    and status = 'รอตรวจ'
+    and raw_score = 0
+    and final_score = 0
+    and exists (
+      select 1 from public.score_assignments assignment
+      where assignment.id = submissions.assignment_id
+        and assignment.classroom_id = public.user_classroom_id()
+        and assignment.raw_max = submissions.raw_max
+        and assignment.final_max = submissions.final_max
+    )
+  )
+);
+create policy "submissions update own or teacher" on public.submissions
+for update to authenticated
+using (public.is_teacher() or student_code = public.current_student_code())
+with check (public.is_teacher() or student_code = public.current_student_code());
+create policy "submissions delete teacher" on public.submissions
+for delete to authenticated using (public.is_teacher());
+
+create policy "legacy scores select own or teacher" on public.scores
+for select to authenticated
+using (public.is_teacher() or student_code = public.current_student_code());
+create policy "legacy scores insert teacher" on public.scores
+for insert to authenticated with check (public.is_teacher());
+create policy "legacy scores update teacher" on public.scores
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "legacy scores delete teacher" on public.scores
+for delete to authenticated using (public.is_teacher());
+
+create policy "rosters select teacher" on public.student_roster_uploads
+for select to authenticated using (public.is_teacher());
+create policy "rosters insert teacher" on public.student_roster_uploads
+for insert to authenticated with check (public.is_teacher());
+create policy "rosters update teacher" on public.student_roster_uploads
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "rosters delete teacher" on public.student_roster_uploads
+for delete to authenticated using (public.is_teacher());
+
+create policy "download logs select own or teacher" on public.material_download_logs
+for select to authenticated
+using (public.is_teacher() or student_code = public.current_student_code());
+create policy "download logs insert own" on public.material_download_logs
+for insert to authenticated
+with check (
+  student_code = public.current_student_code()
+  and student_name = public.current_student_name()
+  and classroom_id = public.user_classroom_id()
+  and exists (
+    select 1 from public.materials material
+    where material.id = material_download_logs.material_id
+      and (
+        material.classroom_id = public.user_classroom_id()
+        or (material.classroom_id is null and material.level = public.user_classroom_level())
+      )
+  )
+);
+create policy "download logs delete teacher" on public.material_download_logs
+for delete to authenticated using (public.is_teacher());
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'score_entries_raw_score_within_max' and conrelid = 'public.score_entries'::regclass) then
+    alter table public.score_entries
+      add constraint score_entries_raw_score_within_max check (raw_score <= raw_max) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'score_entries_final_score_within_max' and conrelid = 'public.score_entries'::regclass) then
+    alter table public.score_entries
+      add constraint score_entries_final_score_within_max check (final_score <= final_max) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'submissions_raw_score_within_max' and conrelid = 'public.submissions'::regclass) then
+    alter table public.submissions
+      add constraint submissions_raw_score_within_max check (raw_score <= raw_max) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'submissions_final_score_within_max' and conrelid = 'public.submissions'::regclass) then
+    alter table public.submissions
+      add constraint submissions_final_score_within_max check (final_score <= final_max) not valid;
+  end if;
+end;
+$$;
 
 create or replace function public.create_student_account(
   p_student_record_id uuid,
@@ -280,7 +563,8 @@ begin
   from public.profiles
   where id = auth.uid();
 
-  if coalesce(v_caller_role, '') <> 'teacher' then
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role'
+    and coalesce(v_caller_role, '') <> 'teacher' then
     raise exception 'เฉพาะบัญชีครูเท่านั้นที่สร้างบัญชีนักเรียนได้';
   end if;
 
@@ -437,14 +721,59 @@ end;
 $$;
 
 revoke all on function public.create_student_account(uuid, text, text, text, uuid, text) from public;
-grant execute on function public.create_student_account(uuid, text, text, text, uuid, text) to authenticated;
+revoke all on function public.create_student_account(uuid, text, text, text, uuid, text) from authenticated;
+grant execute on function public.create_student_account(uuid, text, text, text, uuid, text) to service_role;
+comment on function public.create_student_account(uuid, text, text, text, uuid, text)
+is 'Legacy admin fallback only. The application creates student accounts through the authenticated Netlify Function.';
 notify pgrst, 'reload schema';
 
 drop policy if exists "classroom files readable" on storage.objects;
 drop policy if exists "classroom files uploadable" on storage.objects;
 drop policy if exists "classroom files updateable" on storage.objects;
 drop policy if exists "classroom files deleteable" on storage.objects;
-create policy "classroom files readable" on storage.objects for select to authenticated using (bucket_id = 'classroom-files');
-create policy "classroom files uploadable" on storage.objects for insert to authenticated with check (bucket_id = 'classroom-files');
-create policy "classroom files updateable" on storage.objects for update to authenticated using (bucket_id = 'classroom-files') with check (bucket_id = 'classroom-files');
-create policy "classroom files deleteable" on storage.objects for delete to authenticated using (bucket_id = 'classroom-files');
+drop policy if exists "classroom files select scoped" on storage.objects;
+drop policy if exists "classroom files insert scoped" on storage.objects;
+drop policy if exists "classroom files update teacher" on storage.objects;
+drop policy if exists "classroom files delete teacher" on storage.objects;
+
+create policy "classroom files select scoped" on storage.objects
+for select to authenticated
+using (
+  bucket_id = 'classroom-files'
+  and (
+    public.is_teacher()
+    or public.can_access_material_file(name)
+    or public.can_access_submission_file(name)
+    or (
+      (storage.foldername(name))[1] = 'submissions'
+      and (storage.foldername(name))[2] = public.current_student_code()
+    )
+  )
+);
+
+create policy "classroom files insert scoped" on storage.objects
+for insert to authenticated
+with check (
+  bucket_id = 'classroom-files'
+  and (
+    public.is_teacher()
+    or (
+      (storage.foldername(name))[1] = 'submissions'
+      and (storage.foldername(name))[2] = public.current_student_code()
+      and lower(storage.extension(name)) = any (array[
+        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+        'jpg', 'jpeg', 'png', 'webp', 'mp4', 'mov'
+      ])
+      and coalesce((metadata ->> 'size')::bigint, 0) between 1 and 26214400
+    )
+  )
+);
+
+create policy "classroom files update teacher" on storage.objects
+for update to authenticated
+using (bucket_id = 'classroom-files' and public.is_teacher())
+with check (bucket_id = 'classroom-files' and public.is_teacher());
+
+create policy "classroom files delete teacher" on storage.objects
+for delete to authenticated
+using (bucket_id = 'classroom-files' and public.is_teacher());
