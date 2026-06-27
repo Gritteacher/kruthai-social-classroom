@@ -1,0 +1,75 @@
+.account-toolbar {
+  display: grid;
+  gap: 12px;
+}
+
+.bulk-account-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.student-preview-head-action,
+.student-preview-row-action {
+  grid-template-columns: 42px 64px 130px minmax(220px, 1fr) 150px 140px 58px;
+}
+
+.check-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.check-cell input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--green-700);
+  cursor: pointer;
+}
+
+.check-cell input:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.student-preview-row-action strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-button {
+  justify-content: center;
+  min-width: 112px;
+}
+
+.icon-danger {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid #f3c6b9;
+  border-radius: 8px;
+  background: var(--surface-danger);
+  color: #d7421e;
+}
+
+.icon-danger svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (max-width: 620px) {
+  .student-preview-head-action,
+  .student-preview-row-action {
+    min-width: 820px;
+  }
+
+  .bulk-account-row > .template-button,
+  .bulk-account-row > .small-primary {
+    width: 100%;
+    justify-content: center;
+  }
+}

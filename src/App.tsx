@@ -11,6 +11,7 @@ import {
   Download,
   ExternalLink,
   Eye,
+  FileText,
   FileSpreadsheet,
   GraduationCap,
   Home,
@@ -27,7 +28,9 @@ import {
   Upload,
   User,
   UserPlus,
-  Users
+  Users,
+  Moon,
+  Sun
 } from "lucide-react";
 import { isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
 import type {
@@ -53,6 +56,7 @@ type StudentDraft = { no: string; studentId: string; name: string; gender: strin
 type RosterStudent = { no: number; studentId: string; name: string; gender: string };
 type AnnouncementDraft = { title: string; body: string };
 type AssignmentDraft = { title: string; rawMax: string; finalMax: string };
+type ThemeMode = "light" | "dark";
 
 const SCHOOL_LOGO = "/kruthai-logo.png";
 const SCHOOL_NAME = "โรงเรียนเทพศิรินทร์ นนทบุรี";
@@ -63,16 +67,6 @@ const gradeLevels = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"] as co
 const filters: Array<"ทั้งหมด" | MaterialType | (typeof gradeLevels)[number]> = ["ทั้งหมด", ...gradeLevels, "VIDEO", "PDF"];
 const materialTypes: MaterialType[] = ["PDF", "VIDEO", "IMG"];
 const submissionStatuses: SubmissionStatus[] = ["ยังไม่ส่ง", "ส่งแล้ว", "รอตรวจ", "ตรวจแล้ว", "ให้แก้ไข", "ส่งช้า"];
-const gradeBands = [
-  { min: 80, grade: "4" },
-  { min: 75, grade: "3.5" },
-  { min: 70, grade: "3" },
-  { min: 65, grade: "2.5" },
-  { min: 60, grade: "2" },
-  { min: 55, grade: "1.5" },
-  { min: 50, grade: "1" },
-  { min: 0, grade: "0" }
-] as const;
 
 const sessions: Record<Role, AppSession> = {
   teacher: { role: "teacher", name: "คุณครูไต๋", room: SCHOOL_NAME, school: "ห้องเรียนสังคมศึกษา" },
@@ -127,6 +121,7 @@ async function resolveAppSession(user: any, fallbackRole: Role): Promise<AppSess
 function App() {
   const [role, setRole] = useState<Role>("teacher");
   const [session, setSession] = useState<AppSession | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>(() => window.localStorage.getItem("classroom-theme") === "dark" ? "dark" : "light");
   const [view, setView] = useState<ViewKey>("home");
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
@@ -152,20 +147,27 @@ function App() {
   const activeStudents = session?.role === "teacher"
     ? (workingClassroom ? students.filter((student) => belongsToClass(student, workingClassroom)) : [])
     : currentStudent ? [currentStudent] : [];
-  const activeAssignments = workingClassroom ? assignments.filter((assignment) => belongsToClass(assignment, workingClassroom)) : [];
-  const activeMaterials = workingClassroom ? materialItems.filter((item) => belongsToClass(item, workingClassroom)) : session?.role === "teacher" ? [] : materialItems;
+  const activeAssignments = session?.role === "teacher"
+    ? (workingClassroom ? assignments.filter((assignment) => belongsToClass(assignment, workingClassroom)) : [])
+    : studentScopedItems(assignments, workingClassroom, currentStudent, session).length
+      ? studentScopedItems(assignments, workingClassroom, currentStudent, session)
+      : assignments;
+  const activeMaterials = materialItems;
   const activeSubmissions = session?.role === "teacher"
     ? (workingClassroom ? submissionItems.filter((submission) => belongsToClass(submission, workingClassroom)) : [])
     : submissionItems.filter((submission) => submission.studentId === session?.studentCode);
   const activeAnnouncements = workingClassroom ? announcementItems.filter((item) => belongsToClass(item, workingClassroom)) : [];
-  const activeDownloadLogs = session?.role === "teacher"
-    ? (workingClassroom ? materialDownloadLogs.filter((item) => belongsToClass(item, workingClassroom)) : [])
-    : materialDownloadLogs.filter((item) => item.studentId === session?.studentCode);
+  const activeDownloadLogs = session?.role === "teacher" ? materialDownloadLogs : materialDownloadLogs.filter((item) => item.studentId === session?.studentCode);
 
   const flash = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 3000);
   };
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("classroom-theme", theme);
+  }, [theme]);
 
   async function loadClassroomData(showToast = false) {
     setLoadingData(true);
@@ -287,12 +289,11 @@ function App() {
   }
 
   async function uploadMaterial({ file, title, unit, level, type }: MaterialUpload) {
-    if (!selectedClassroom) return flashAndFail("เลือกห้องเรียนก่อนอัปโหลดสื่อ", flash);
     if (!title.trim()) return flashAndFail("กรุณาใส่ชื่อสื่อการสอน", flash);
     if (!file) return flashAndFail("กรุณาเลือกไฟล์สื่อการสอน", flash);
     if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
     setBusy(true);
-    const storagePath = `materials/${Date.now()}-${safeFileName(file.name)}`;
+    const storagePath = `materials/${Date.now()}-${storageSafeFileName(file.name)}`;
     const client = supabase as any;
     const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
       contentType: file.type || mimeForMaterial(file.name, type),
@@ -310,8 +311,8 @@ function App() {
         unit: unit.trim() || "สื่อเสริม",
         level,
         material_type: type,
-        class_name: selectedClassroom.displayName,
-        classroom_id: selectedClassroom.id,
+        class_name: "ทุกห้อง",
+        classroom_id: null,
         file_path: storagePath
       })
       .select("*")
@@ -394,14 +395,28 @@ function App() {
   }
 
   async function downloadMaterial(item: Material, studentCode: string, password: string) {
-    if (!item.filePath) return flash("สื่อนี้ยังไม่มีไฟล์สำหรับดาวน์โหลด");
-    if (!supabaseUrl || !supabaseAnonKey || !isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
-    if (!studentCode.trim() || !password.trim()) return flash("กรอกรหัสนักเรียนและรหัสผ่านก่อนดาวน์โหลด");
+    if (!item.filePath) {
+      flash("สื่อนี้ยังไม่มีไฟล์สำหรับดาวน์โหลด");
+      return false;
+    }
+    if (!supabaseUrl || !supabaseAnonKey || !isSupabaseConfigured) {
+      flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+      return false;
+    }
+    if (!studentCode.trim() || !password.trim()) {
+      flash("กรอกรหัสนักเรียนและรหัสผ่านก่อนดาวน์โหลด");
+      return false;
+    }
 
+    setBusy(true);
     const authClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
     const email = normalizeLoginIdentifier(studentCode, "student");
     const auth = await authClient.auth.signInWithPassword({ email, password });
-    if (auth.error || !auth.data.user) return flash(auth.error?.message || "ตรวจสอบตัวตนไม่สำเร็จ");
+    if (auth.error || !auth.data.user) {
+      setBusy(false);
+      flash(auth.error?.message || "ตรวจสอบตัวตนไม่สำเร็จ");
+      return false;
+    }
 
     const verifiedStudentId = String(auth.data.user.user_metadata?.student_code || studentCodeFromEmail(auth.data.user.email) || studentCode).trim();
     const verifiedStudentName = String(auth.data.user.user_metadata?.full_name || "นักเรียน");
@@ -409,7 +424,11 @@ function App() {
     const classroomId = linkedStudent?.classroomId || workingClassroom?.id;
 
     const { data, error } = await (supabase as any).storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
-    if (error || !data?.signedUrl) return flash(error?.message || "สร้างลิงก์ดาวน์โหลดไม่สำเร็จ");
+    if (error || !data?.signedUrl) {
+      setBusy(false);
+      flash(error?.message || "สร้างลิงก์ดาวน์โหลดไม่สำเร็จ");
+      return false;
+    }
 
     const logResult = await (authClient as any).from("material_download_logs").insert({
       material_id: item.id,
@@ -419,16 +438,17 @@ function App() {
       class_name: linkedStudent?.className || item.className || activeClassName,
       classroom_id: classroomId || null
     }).select("*").single();
-    if (logResult.error) return flash(logResult.error.message);
+    if (logResult.error) {
+      setBusy(false);
+      flash(logResult.error.message);
+      return false;
+    }
 
     setMaterialDownloadLogs((current) => [mapMaterialDownloadLogRow(logResult.data), ...current]);
-    const anchor = document.createElement("a");
-    anchor.href = data.signedUrl;
-    anchor.download = safeFileName(item.title);
-    anchor.rel = "noopener";
-    anchor.target = "_blank";
-    anchor.click();
-    flash(`บันทึกการดาวน์โหลด ${item.title} แล้ว`);
+    await triggerFileDownload(data.signedUrl, item);
+    setBusy(false);
+    flash(`บันทึกการดาวน์โหลด ${item.title} แล้ว หากไฟล์ยังไม่ขึ้นให้ดูที่แถบดาวน์โหลดของเบราว์เซอร์`);
+    return true;
   }
 
   async function addClassroom(draft: ClassroomDraft) {
@@ -519,10 +539,16 @@ function App() {
     return true;
   }
 
-  async function createStudentAccount(student: StudentRecord, password: string) {
-    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  async function createStudentAccount(student: StudentRecord, password: string, options?: { silent?: boolean }) {
+    if (!isSupabaseConfigured) {
+      flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+      return false;
+    }
     const initialPassword = password.trim() || defaultStudentPassword(student.studentId);
-    if (initialPassword.length < 6) return flash("รหัสผ่านเริ่มต้นต้องมีอย่างน้อย 6 ตัวอักษร");
+    if (initialPassword.length < 6) {
+      flash("รหัสผ่านเริ่มต้นต้องมีอย่างน้อย 6 ตัวอักษร");
+      return false;
+    }
     setBusy(true);
     const client = supabase as any;
     const rpcPayload = {
@@ -541,7 +567,8 @@ function App() {
       const accessToken = auth.data.session?.access_token;
       if (!accessToken) {
         setBusy(false);
-        return flash("กรุณาเข้าสู่ระบบครูใหม่อีกครั้งก่อนสร้างบัญชีนักเรียน");
+        flash("กรุณาเข้าสู่ระบบครูใหม่อีกครั้งก่อนสร้างบัญชีนักเรียน");
+        return false;
       }
 
       const response = await fetch("/.netlify/functions/create-student-account", {
@@ -559,29 +586,46 @@ function App() {
       payload = await response.json().catch(() => ({}));
       setBusy(false);
       if (!response.ok || !payload?.ok) {
-        return flash(payload?.message || "ระบบยังไม่พร้อมสร้างบัญชีนักเรียน กรุณารัน schema ล่าสุดใน Supabase แล้วลองอีกครั้ง");
+        flash(payload?.message || "ระบบยังไม่พร้อมสร้างบัญชีนักเรียน กรุณารัน schema ล่าสุดใน Supabase แล้วลองอีกครั้ง");
+        return false;
       }
     } else {
       setBusy(false);
-      if (payload?.ok === false) return flash(payload.message || "สร้างบัญชีนักเรียนไม่สำเร็จ");
+      if (payload?.ok === false) {
+        flash(payload.message || "สร้างบัญชีนักเรียนไม่สำเร็จ");
+        return false;
+      }
     }
 
     const authEmail = payload?.email || studentCodeToEmail(student.studentId);
     setStudents((current) => current.map((item) => item.id === student.id ? { ...item, authEmail, accountCreatedAt: new Date().toISOString() } : item));
-    flash(`สร้างบัญชี ${student.studentId} แล้ว รหัสผ่านเริ่มต้น: ${initialPassword}`);
+    if (!options?.silent) flash(`สร้างบัญชี ${student.studentId} แล้ว รหัสผ่านเริ่มต้น: ${initialPassword}`);
+    return true;
+  }
+
+  async function deleteStudentsBatch(targetStudents: StudentRecord[]) {
+    if (!targetStudents.length) return false;
+    if (!isSupabaseConfigured) {
+      flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+      return false;
+    }
+    const ids = targetStudents.map((student) => student.id);
+    const idSet = new Set(ids);
+    setBusy(true);
+    const result = await (supabase as any).from("students").delete().in("id", ids);
+    setBusy(false);
+    if (result.error) {
+      flash(result.error.message);
+      return false;
+    }
+    setStudents((current) => current.filter((item) => !idSet.has(item.id)));
+    setScoreEntries((current) => current.filter((item) => !idSet.has(item.studentRecordId)));
+    flash(targetStudents.length === 1 ? `ลบรายชื่อ ${targetStudents[0].name} แล้ว` : `ลบรายชื่อ ${targetStudents.length} คนแล้ว`);
+    return true;
   }
 
   async function deleteStudent(student: StudentRecord) {
-    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
-    setBusy(true);
-    const result = await (supabase as any).from("students").delete().eq("id", student.id);
-    setBusy(false);
-    if (result.error) return flash(result.error.message);
-    const nextStudents = students.filter((item) => item.id !== student.id);
-    const nextScores = scoreEntries.filter((item) => item.studentRecordId !== student.id);
-    setStudents(nextStudents);
-    setScoreEntries(nextScores);
-    flash(`ลบรายชื่อ ${student.name} แล้ว`);
+    await deleteStudentsBatch([student]);
   }
 
   async function uploadRosterFile(file: File | null) {
@@ -611,7 +655,7 @@ function App() {
     }
 
     setBusy(true);
-    const storagePath = `rosters/${Date.now()}-${safeFileName(file.name)}`;
+    const storagePath = `rosters/${Date.now()}-${storageSafeFileName(file.name)}`;
     const upload = await (supabase as any).storage.from(STORAGE_BUCKET).upload(storagePath, file, {
       contentType: file.type || "application/octet-stream",
       upsert: false
@@ -750,13 +794,13 @@ function App() {
     if (!file) return flash("กรุณาเลือกไฟล์งาน");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
-    const storagePath = `submissions/${Date.now()}-${safeFileName(file.name)}`;
+    const storagePath = `submissions/${Date.now()}-${storageSafeFileName(file.name)}`;
     const record = {
       assignment_id: assignment.id,
       assignment_title: assignment.title,
-      student_name: session?.name || "นักเรียน",
-      student_code: session?.studentCode || "student",
-      classroom_id: workingClassroom?.id,
+      student_name: currentStudent?.name || session?.name || "นักเรียน",
+      student_code: currentStudent?.studentId || session?.studentCode || "student",
+      classroom_id: assignment.classroomId || workingClassroom?.id || currentStudent?.classroomId || null,
       file_path: storagePath,
       status: "รอตรวจ",
       raw_score: 0,
@@ -791,7 +835,7 @@ function App() {
           <img className="side-logo" src={SCHOOL_LOGO} alt="โลโก้โรงเรียน" />
           <div>
             <strong>ห้องเรียนสังคมครูไต๋</strong>
-            <small>{session.role === "teacher" ? "พื้นที่ครู" : "พื้นที่นักเรียน"}</small>
+            <small>{session.role === "teacher" ? "พื้นที่ครู" : session.name}</small>
           </div>
         </div>
         <nav>{nav.map((item) => <NavButton key={item.key} item={item} active={view === item.key} onClick={() => setView(item.key)} />)}</nav>
@@ -799,7 +843,14 @@ function App() {
       </aside>
       <main className="workspace">
         <header className="top-bar">
-          <div>
+          <div className="top-title-block">
+            <div className="mobile-head-brand">
+                <img src={SCHOOL_LOGO} alt="โลโก้โรงเรียน" />
+              <div>
+                <strong>ห้องเรียนสังคมครูไต๋</strong>
+                <small>{session.role === "teacher" ? "พื้นที่ครู" : session.name}</small>
+              </div>
+            </div>
             <p className="eyebrow">{session.role === "teacher" ? session.school : `สวัสดี ${session.name}`}</p>
             <h2>{session.role === "teacher" ? activeClassName : session.room}</h2>
           </div>
@@ -807,17 +858,18 @@ function App() {
             {session.role === "teacher" && <TeacherClassroomSelector classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onChange={setSelectedClassroomId} />}
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
             <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
-            <button className="mobile-logout-button" onClick={logout}><LogOut aria-hidden />ออกจากระบบ</button>
+            <button className="theme-toggle-button" type="button" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title="เปลี่ยนธีม">{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}<span>{theme === "light" ? "โทนมืด" : "โทนสว่าง"}</span></button>
+            <button className="mobile-logout-button" onClick={logout} title="ออกจากระบบ"><LogOut aria-hidden /><span>ออกจากระบบ</span></button>
             <button className="avatar-button" onClick={logout}>{session.role === "teacher" ? "ค" : "น"}</button>
           </div>
         </header>
         <section className="content-area">
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
-          {view === "home" && <HomeView session={session} setView={setView} flash={flash} materials={activeMaterials} students={activeStudents} submissions={activeSubmissions} assignments={activeAssignments} announcements={activeAnnouncements} activeClassName={activeClassName} selectedClassroom={workingClassroom} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
+          {view === "home" && <HomeView session={session} setView={setView} flash={flash} materials={activeMaterials} students={activeStudents} submissions={activeSubmissions} assignments={activeAssignments} entries={scoreEntries} announcements={activeAnnouncements} activeClassName={activeClassName} selectedClassroom={workingClassroom} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} />}
           {view === "scores" && <ScoresView role={session.role} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} />}
           {view === "work" && <WorkView role={session.role} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} openSubmission={openSubmissionFile} />}
-          {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
+          {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
         </section>
       </main>
@@ -884,21 +936,20 @@ function TeacherClassroomSelector({ classrooms, selectedClassroomId, onChange }:
   );
 }
 
-function HomeView({ session, setView, flash, materials, students, submissions, assignments, announcements, activeClassName, selectedClassroom, busy, addAnnouncement, deleteAnnouncement }: { session: AppSession; setView: (view: ViewKey) => void; flash: (message: string) => void; materials: Material[]; students: StudentRecord[]; submissions: SubmissionRecord[]; assignments: ScoreAssignment[]; announcements: Announcement[]; activeClassName: string; selectedClassroom?: Classroom; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void }) {
+function HomeView({ session, setView, flash, materials, students, submissions, assignments, entries, announcements, activeClassName, selectedClassroom, busy, addAnnouncement, deleteAnnouncement }: { session: AppSession; setView: (view: ViewKey) => void; flash: (message: string) => void; materials: Material[]; students: StudentRecord[]; submissions: SubmissionRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; announcements: Announcement[]; activeClassName: string; selectedClassroom?: Classroom; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void }) {
   const isTeacher = session.role === "teacher";
+  if (!isTeacher) {
+    return <div className="page-stack"><StudentHome setView={setView} flash={flash} materials={materials} assignments={assignments} entries={entries} students={students} announcements={announcements} /></div>;
+  }
   const waiting = submissions.filter((item) => item.status !== "ตรวจแล้ว").length;
-  const stats = isTeacher
-    ? [["นักเรียนทั้งหมด", String(students.length), "green"], ["งานรอตรวจ", String(waiting), "coral"], ["สื่อการสอน", String(materials.length), "amber"]]
-    : [["สื่อที่เปิดได้", String(materials.length), "green"], ["งานที่ส่ง", String(submissions.length), "blue"], ["รายการคะแนน", String(assignments.length), "amber"]];
+  const stats = [["นักเรียนทั้งหมด", String(students.length), "green"], ["งานรอตรวจ", String(waiting), "coral"], ["สื่อการสอน", String(materials.length), "amber"]];
   return (
     <div className="page-stack">
       <section className="hero-strip">
-        <div><p className="eyebrow">{session.school}</p><h1>{isTeacher ? "เมนูหลัก" : "บทเรียนล่าสุด"}</h1></div>
+        <div><p className="eyebrow">{session.school}</p><h1>เมนูหลัก</h1></div>
       </section>
       <div className="stat-grid">{stats.map(([label, value, tone]) => <article className={`stat-card tone-${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
-      {isTeacher
-        ? <TeacherHome setView={setView} submissions={submissions} announcements={announcements} activeClassName={activeClassName} selectedClassroom={selectedClassroom} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />
-        : <StudentHome setView={setView} flash={flash} materials={materials} announcements={announcements} />}
+      <TeacherHome setView={setView} submissions={submissions} announcements={announcements} activeClassName={activeClassName} selectedClassroom={selectedClassroom} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />
     </div>
   );
 }
@@ -906,20 +957,87 @@ function HomeView({ session, setView, flash, materials, students, submissions, a
 function TeacherHome({ setView, submissions, announcements, activeClassName, selectedClassroom, busy, addAnnouncement, deleteAnnouncement }: { setView: (view: ViewKey) => void; submissions: SubmissionRecord[]; announcements: Announcement[]; activeClassName: string; selectedClassroom?: Classroom; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void }) {
   const [draft, setDraft] = useState<AnnouncementDraft>({ title: "", body: "" });
   const tools = [["อัปโหลดสื่อการสอน", Upload, "materials"], ["จัดการคะแนน", BarChart3, "scores"], ["ตรวจงานนักเรียน", ClipboardCheck, "work"], ["เพิ่มรายชื่อ", FileSpreadsheet, "students"]] as const;
+
   async function publishAnnouncement() {
     const ok = await addAnnouncement(draft);
     if (!ok) return;
     setDraft({ title: "", body: "" });
   }
-  return <div className="two-column"><section className="panel"><SectionTitle title="งานของครู" note={activeClassName} /><div className="action-grid">{tools.map(([label, Icon, view]) => <button className="tool-tile" key={label} onClick={() => setView(view)}><Icon aria-hidden /><span>{label}</span></button>)}</div><div className="announcement-form">{selectedClassroom ? <><SectionTitle title="ประกาศถึงห้องนี้" note={selectedClassroom.displayName} /><div className="form-grid"><label className="field">หัวข้อประกาศ<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น แจ้งงานสัปดาห์นี้" /></label><label className="field full-span">รายละเอียด<textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} placeholder="พิมพ์ข้อความประกาศถึงนักเรียนในห้องนี้" rows={4} /></label></div><button className="primary-button" disabled={busy} onClick={publishAnnouncement}><Megaphone aria-hidden />เผยแพร่ประกาศ</button></> : <EmptyState title="ยังไม่ได้เลือกห้องเรียน" body="เลือกห้องเรียนด้านบนก่อนจึงจะประกาศได้" />}</div></section><section className="panel"><SectionTitle title="งานรอตรวจ" note={`${submissions.length} รายการ`} />{submissions.length ? <SubmissionList items={submissions.slice(0, 3)} compact /> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนส่งงาน รายการจะมาแสดงตรงนี้" />}<SectionTitle title="ประกาศล่าสุด" note={`${announcements.length} รายการ`} />{announcements.length ? <div className="announcement-list">{announcements.slice(0, 4).map((item) => <article className="announcement-card" key={item.id}><div><strong>{item.title}</strong><span>{item.publishedAt}</span><p>{item.body}</p></div><button className="icon-danger" disabled={busy} onClick={() => deleteAnnouncement(item)} title="ลบประกาศ"><Trash2 aria-hidden /></button></article>)}</div> : <EmptyState title="ยังไม่มีประกาศ" body="ประกาศของห้องที่เลือกจะแสดงตรงนี้" />}</section></div>;
+
+  return (
+    <div className="teacher-home-layout">
+      <section className="panel teacher-actions-panel">
+        <SectionTitle title="งานของครู" note={activeClassName} />
+        <div className="action-grid">
+          {tools.map(([label, Icon, view]) => (
+            <button className="tool-tile" key={label} onClick={() => setView(view)}>
+              <Icon aria-hidden />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel announcement-compose-panel">
+        {selectedClassroom ? (
+          <>
+            <SectionTitle title="ประกาศถึงห้องนี้" note={selectedClassroom.displayName} />
+            <div className="form-grid announcement-compose-grid">
+              <label className="field">
+                หัวข้อประกาศ
+                <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น แจ้งงานสัปดาห์นี้" />
+              </label>
+              <label className="field full-span">
+                รายละเอียด
+                <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} placeholder="พิมพ์ข้อความประกาศถึงนักเรียนในห้องนี้" rows={5} />
+              </label>
+            </div>
+            <div className="form-actions">
+              <button className="primary-button" disabled={busy} onClick={publishAnnouncement}>
+                <Megaphone aria-hidden />
+                เผยแพร่ประกาศ
+              </button>
+            </div>
+          </>
+        ) : (
+          <EmptyState title="ยังไม่ได้เลือกห้องเรียน" body="เลือกห้องเรียนด้านบนก่อนจึงจะประกาศได้" />
+        )}
+      </section>
+
+      <section className="panel teacher-overview-panel">
+        <SectionTitle title="งานรอตรวจ" note={`${submissions.length} รายการ`} />
+        {submissions.length ? <SubmissionList items={submissions.slice(0, 3)} compact /> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนส่งงาน รายการจะมาแสดงตรงนี้" />}
+        <SectionTitle title="ประกาศล่าสุด" note={`${announcements.length} รายการ`} />
+        {announcements.length ? (
+          <div className="announcement-list">
+            {announcements.slice(0, 4).map((item) => (
+              <article className="announcement-card" key={item.id}>
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>{item.publishedAt}</span>
+                  <p>{item.body}</p>
+                </div>
+                <button className="icon-danger" disabled={busy} onClick={() => deleteAnnouncement(item)} title="ลบประกาศ">
+                  <Trash2 aria-hidden />
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="ยังไม่มีประกาศ" body="ประกาศของห้องที่เลือกจะแสดงตรงนี้" />
+        )}
+      </section>
+    </div>
+  );
 }
 
-function StudentHome({ setView, flash, materials, announcements }: { setView: (view: ViewKey) => void; flash: (message: string) => void; materials: Material[]; announcements: Announcement[] }) {
-  const quick = [["สื่อการสอน", BookOpen, "materials"], ["ส่งงาน", CloudUpload, "work"], ["คะแนนของฉัน", BarChart3, "scores"], ["ประกาศ", Megaphone, "home"]] as const;
-  return <div className="two-column"><section className="panel"><SectionTitle title="ทางลัด" note="เลือกเมนูที่ต้องการ" /><div className="quick-grid">{quick.map(([label, Icon, view]) => <button className="quick-button" key={label} onClick={() => view === "home" ? flash(announcements.length ? `มีประกาศ ${announcements.length} รายการ` : "ยังไม่มีประกาศใหม่") : setView(view)}><Icon aria-hidden /><span>{label}</span></button>)}</div><SectionTitle title="ประกาศ" note={`${announcements.length} รายการ`} />{announcements.length ? <div className="announcement-list">{announcements.slice(0, 4).map((item) => <article className="announcement-card announcement-card-student" key={item.id}><div><strong>{item.title}</strong><span>{item.publishedAt}</span><p>{item.body}</p></div></article>)}</div> : <EmptyState title="ยังไม่มีประกาศ" body="เมื่อคุณครูประกาศ ระบบจะแสดงที่นี่" />}</section><section className="panel"><SectionTitle title="สื่อล่าสุด" note={`${materials.length} รายการ`} />{materials.length ? <div className="mini-list">{materials.slice(0, 3).map((item) => <div key={item.id}><strong>{item.title}</strong><span>{item.level} · {item.type}</span></div>)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="รอคุณครูอัปโหลดสื่อ" />}</section></div>;
+function StudentHome({ setView, flash, materials, assignments, entries, students, announcements }: { setView: (view: ViewKey) => void; flash: (message: string) => void; materials: Material[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; students: StudentRecord[]; announcements: Announcement[] }) {
+  const score = scoreSummaryForStudent(students[0], entries);
+  const latestAnnouncement = announcements[0]?.title || "ยังไม่มีประกาศใหม่";
+  return <><section className="student-home-grid"><button className="student-home-card score-home-card" onClick={() => setView("scores")}><div className="score-ring home-score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${score.ringPercent * 3.6}deg, var(--ring-track) ${score.ringPercent * 3.6}deg 360deg)` }}><div><strong>{formatScore(score.totalFinal)}</strong><span>คะแนน</span></div></div></button><button className="student-home-card" onClick={() => setView("materials")}><BookOpen aria-hidden /><span>{materials.length} ไฟล์</span><strong>สื่อการสอน</strong><small>เปิดดูและดาวน์โหลดสื่อ</small></button><button className="student-home-card announcement-home-card" onClick={() => flash(announcements.length ? `มีประกาศ ${announcements.length} รายการ` : "ยังไม่มีประกาศใหม่")}><Megaphone aria-hidden /><span>{announcements.length} รายการ</span><strong>ประกาศ</strong><small>{latestAnnouncement}</small></button></section><div className="two-column student-home-lists"><section className="panel announcement-panel-red"><SectionTitle title="ประกาศ" note={`${announcements.length} รายการ`} />{announcements.length ? <div className="announcement-list">{announcements.slice(0, 4).map((item) => <article className="announcement-card announcement-card-student" key={item.id}><div><strong>{item.title}</strong><span>{item.publishedAt}</span><p>{item.body}</p></div></article>)}</div> : <EmptyState title="ยังไม่มีประกาศ" body="เมื่อคุณครูประกาศ ระบบจะแสดงที่นี่" />}</section><section className="panel"><SectionTitle title="สื่อล่าสุด" note={`${materials.length} รายการ`} />{materials.length ? <div className="mini-list">{materials.slice(0, 3).map((item) => <div key={item.id}><strong>{item.title}</strong><span>{item.level} · {item.type}</span></div>)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="รอคุณครูอัปโหลดสื่อ" />}</section></div></>;
 }
 
-function MaterialsView({ role, session, currentStudent, materials: items, logs, busy, flash, onOpen, onDownload, onUpload, onDelete }: { role: Role; session: AppSession; currentStudent?: StudentRecord; materials: Material[]; logs: MaterialDownloadLog[]; busy: boolean; flash: (message: string) => void; onOpen: (item: Material) => void; onDownload: (item: Material, studentCode: string, password: string) => void; onUpload: (input: MaterialUpload) => Promise<boolean>; onDelete: (item: Material) => void }) {
+function MaterialsView({ role, session, currentStudent, materials: items, logs, busy, flash, onOpen, onDownload, onUpload, onDelete }: { role: Role; session: AppSession; currentStudent?: StudentRecord; materials: Material[]; logs: MaterialDownloadLog[]; busy: boolean; flash: (message: string) => void; onOpen: (item: Material) => void; onDownload: (item: Material, studentCode: string, password: string) => Promise<boolean>; onUpload: (input: MaterialUpload) => Promise<boolean>; onDelete: (item: Material) => void }) {
   const [filter, setFilter] = useState<(typeof filters)[number]>("ทั้งหมด");
   const [query, setQuery] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -984,30 +1102,31 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
     };
   }, [items]);
 
-  function directDownload(item: Material) {
+  async function directDownload(item: Material) {
     const url = previewUrls[item.id];
     if (!url) {
       onOpen(item);
       return;
     }
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = safeFileName(item.title);
-    anchor.target = "_blank";
-    anchor.rel = "noopener";
-    anchor.click();
+    await triggerFileDownload(url, item);
   }
 
-  function submitDownload(item: Material) {
+  function chooseDownloadTarget(item: Material) {
+    setDownloadTargetId(item.id);
+  }
+
+  async function submitDownload(item: Material) {
     if (role === "teacher") {
-      directDownload(item);
+      void directDownload(item);
       return;
     }
-    onDownload(item, downloadStudentId, downloadPassword);
+    const ok = await onDownload(item, downloadStudentId, downloadPassword);
+    if (!ok) return;
     setDownloadPassword("");
     setDownloadTargetId("");
   }
 
+  const downloadTarget = items.find((entry) => entry.id === downloadTargetId);
   return (
     <div className="page-stack">
       <PageHeader title="สื่อการสอน" eyebrow="คลังสื่อการสอน" />
@@ -1029,13 +1148,10 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
           <button className="primary-button full-button" disabled={busy} onClick={saveMaterial}><Upload aria-hidden />{busy ? "กำลังอัปโหลด" : "อัปโหลดสื่อการสอน"}</button>
         </section>
       )}
-      {downloadTargetId && role === "student" && <section className="panel compact-form"><SectionTitle title="ยืนยันการดาวน์โหลด" note="กรอกรหัสนักเรียนและรหัสผ่านทุกครั้งก่อนดาวน์โหลด" /><div className="form-grid"><label className="field">รหัสนักเรียน<input value={downloadStudentId} onChange={(event) => setDownloadStudentId(event.target.value)} placeholder="เช่น 65001" /></label><label className="field">รหัสผ่าน<input type="password" value={downloadPassword} onChange={(event) => setDownloadPassword(event.target.value)} placeholder="รหัสผ่านนักเรียน" /></label></div><div className="form-actions"><button className="primary-button" disabled={busy} onClick={() => {
-        const item = items.find((entry) => entry.id === downloadTargetId);
-        if (item) submitDownload(item);
-      }}><Download aria-hidden />ยืนยันดาวน์โหลด</button><button className="template-button" type="button" onClick={() => setDownloadTargetId("")}>ยกเลิก</button></div></section>}
-      {filtered.length ? <div className="material-grid">{filtered.map((item) => <MaterialCard key={item.id} item={item} role={role} previewUrl={previewUrls[item.id]} downloadCount={logs.filter((log) => log.materialId === item.id).length} onOpen={() => onOpen(item)} onDownload={() => role === "student" ? setDownloadTargetId(item.id) : directDownload(item)} onDelete={() => onDelete(item)} />)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="เมื่ออัปโหลดไฟล์แล้ว รายการจะมาแสดงในหน้านี้" />}
+      {downloadTarget && role === "student" && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="download-dialog-title"><section id="material-download-confirm" className="panel compact-form download-confirm-panel"><SectionTitle title="ยืนยันการดาวน์โหลด" note={downloadTarget.title} /><p className="modal-copy">กรอกรหัสนักเรียนและรหัสผ่านก่อนดาวน์โหลด ระบบจะบันทึกประวัติการดาวน์โหลดให้ครูเห็น</p><div className="form-grid"><label className="field">รหัสนักเรียน<input value={downloadStudentId} onChange={(event) => setDownloadStudentId(event.target.value)} placeholder="เช่น 65001" /></label><label className="field">รหัสผ่าน<input type="password" value={downloadPassword} onChange={(event) => setDownloadPassword(event.target.value)} placeholder="รหัสผ่านนักเรียน" /></label></div><div className="form-actions"><button className="primary-button" disabled={busy} onClick={() => void submitDownload(downloadTarget)}><Download aria-hidden />{busy ? "กำลังดาวน์โหลด" : "ยืนยันดาวน์โหลด"}</button><button className="template-button" type="button" onClick={() => setDownloadTargetId("")}>ยกเลิก</button></div></section></div>}
+      {filtered.length ? <div className="material-grid">{filtered.map((item) => <MaterialCard key={item.id} item={item} role={role} previewUrl={previewUrls[item.id]} downloadCount={logs.filter((log) => log.materialId === item.id).length} onOpen={() => onOpen(item)} onDownload={() => role === "student" ? chooseDownloadTarget(item) : void directDownload(item)} onDelete={() => onDelete(item)} />)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="เมื่ออัปโหลดไฟล์แล้ว รายการจะมาแสดงในหน้านี้" />}
       <section className="panel">
-        <SectionTitle title={role === "teacher" ? "ประวัติดาวน์โหลดของห้องนี้" : "ประวัติดาวน์โหลดของฉัน"} note={`${logs.length} รายการ`} />
+        <SectionTitle title={role === "teacher" ? "ประวัติดาวน์โหลดทั้งหมด" : "ประวัติดาวน์โหลดของฉัน"} note={`${logs.length} รายการ`} />
         {logs.length ? <div className="download-log-table"><div className="download-log-head"><span>สื่อ</span><span>นักเรียน</span><span>วันที่</span></div>{logs.map((log) => <div className="download-log-row" key={log.id}><strong>{log.materialTitle}</strong><span>{log.studentName} · {log.studentId}</span><span>{log.downloadedAt}</span></div>)}</div> : <EmptyState title="ยังไม่มีประวัติดาวน์โหลด" body="เมื่อมีการดาวน์โหลดสื่อ ระบบจะบันทึกไว้ที่นี่" />}
       </section>
     </div>
@@ -1107,12 +1223,10 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   const studentEntries = student ? entries.filter((entry) => entry.studentRecordId === student.id) : [];
   const totalFinal = studentEntries.reduce((sum, entry) => sum + entry.finalScore, 0);
   const totalMax = studentEntries.reduce((sum, entry) => sum + entry.finalMax, 0);
-  const overallPercent = totalMax > 0 ? Math.round((totalFinal / totalMax) * 10000) / 100 : 0;
-  const grade = gradeFromPercent(overallPercent);
-  return <div className="page-stack"><PageHeader title="คะแนนของฉัน" eyebrow={student?.name || "ยังไม่มีข้อมูลนักเรียน"} />{studentEntries.length ? <><section className="panel score-overview"><SectionTitle title="คะแนนทั้งหมด" note={`รวม ${studentEntries.length} รายการ`} /><div className="score-overview-layout"><div className="score-ring" style={{ background: `conic-gradient(#17652a 0deg ${Math.max(0, Math.min(360, overallPercent * 3.6))}deg, #dce7d8 ${Math.max(0, Math.min(360, overallPercent * 3.6))}deg 360deg)` }}><div><strong>{formatScore(overallPercent)}</strong><span>/ 100</span></div></div><div className="score-overview-copy"><div className="grade-badge"><strong>เกรด {grade}</strong><span>คะแนนรวม {formatScore(totalFinal)} / {formatScore(totalMax)}</span></div><p>วงกลมนี้คำนวณจากคะแนนทั้งหมดของคุณเทียบเต็มร้อย และแปลงเป็นเกรดตามเกณฑ์ที่ครูกำหนด</p></div></div></section><section className="panel"><SectionTitle title="คะแนนทั้งหมด" note={`${studentEntries.length} รายการ`} /><div className="score-summary-table"><div className="score-summary-head"><span>งานคะแนน</span><span>คะแนนดิบ</span><span>คะแนนเก็บ</span><span>สถานะ</span></div>{studentEntries.map((entry) => {
+  const ringPercent = totalMax > 0 ? Math.max(0, Math.min(100, (totalFinal / totalMax) * 100)) : 0;
+  return <div className="page-stack"><PageHeader title="คะแนนของฉัน" eyebrow={student?.name || "ยังไม่มีข้อมูลนักเรียน"} />{studentEntries.length ? <><section className="panel score-overview student-score-simple"><SectionTitle title="คะแนนทั้งหมด" note={`รวม ${studentEntries.length} รายการ`} /><div className="score-overview-layout"><div className="score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${ringPercent * 3.6}deg, var(--ring-track) ${ringPercent * 3.6}deg 360deg)` }}><div><strong>{formatScore(totalFinal)}</strong><span>คะแนน</span></div></div><div className="score-overview-copy"><p>คะแนนสะสมจากงานที่ครูบันทึกแล้ว</p></div></div></section><section className="panel"><SectionTitle title="คะแนนทั้งหมด" note={`${studentEntries.length} รายการ`} /><div className="score-summary-table student-score-table"><div className="score-summary-head"><span>งานคะแนน</span><span>คะแนนที่ได้</span></div>{studentEntries.map((entry) => {
     const assignment = assignments.find((item) => item.id === entry.assignmentId);
-    const percent = entry.finalMax > 0 ? (entry.finalScore / entry.finalMax) * 100 : 0;
-    return <div className="score-summary-row static" key={entry.id}><strong>{assignment?.title || "งานคะแนน"}</strong><span>{formatScore(entry.rawScore)} / {formatScore(entry.rawMax)}</span><span>{formatScore(entry.finalScore)} / {formatScore(entry.finalMax)}</span><span className={`status-pill ${percent >= 50 ? "pass" : "pending"}`}>เกรด {gradeFromPercent(percent)}</span></div>;
+    return <div className="score-summary-row static" key={entry.id}><strong>{assignment?.title || "งานคะแนน"}</strong><span>{formatScore(entry.finalScore)} คะแนน</span></div>;
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
@@ -1200,11 +1314,18 @@ function ReviewCard({ item, previewUrl, busy, updateSubmission, saveSubmission, 
   );
 }
 
-function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, students, busy, addClassroom, deleteClassroom, selectClassroom, addStudent, deleteStudent, uploadRosterFile, createStudentAccount }: { classrooms: Classroom[]; selectedClassroom?: Classroom; selectedClassroomId: string; students: StudentRecord[]; busy: boolean; addClassroom: (draft: ClassroomDraft) => Promise<boolean>; deleteClassroom: (classroom: Classroom) => void; selectClassroom: (id: string) => void; addStudent: (draft: StudentDraft) => Promise<boolean>; deleteStudent: (student: StudentRecord) => void; uploadRosterFile: (file: File | null) => Promise<boolean>; createStudentAccount: (student: StudentRecord, password: string) => void }) {
+function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, students, busy, flash, addClassroom, deleteClassroom, selectClassroom, addStudent, deleteStudent, deleteStudents, uploadRosterFile, createStudentAccount }: { classrooms: Classroom[]; selectedClassroom?: Classroom; selectedClassroomId: string; students: StudentRecord[]; busy: boolean; flash: (message: string) => void; addClassroom: (draft: ClassroomDraft) => Promise<boolean>; deleteClassroom: (classroom: Classroom) => void; selectClassroom: (id: string) => void; addStudent: (draft: StudentDraft) => Promise<boolean>; deleteStudent: (student: StudentRecord) => void; deleteStudents: (students: StudentRecord[]) => Promise<boolean>; uploadRosterFile: (file: File | null) => Promise<boolean>; createStudentAccount: (student: StudentRecord, password: string, options?: { silent?: boolean }) => Promise<boolean> }) {
   const [file, setFile] = useState<File | null>(null);
   const [classDraft, setClassDraft] = useState<ClassroomDraft>({ academicYear: "2569", level: "ม.1", room: "", subject: "สังคมศึกษา" });
   const [draft, setDraft] = useState<StudentDraft>({ no: "", studentId: "", name: "", gender: "" });
   const [accountPassword, setAccountPassword] = useState("");
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const selectedStudents = students.filter((student) => selectedStudentIds.includes(student.id));
+  const selectedStudentsWithoutAccounts = selectedStudents.filter((student) => !student.authEmail && !student.accountCreatedAt);
+  const allStudentsChecked = students.length > 0 && students.every((student) => selectedStudentIds.includes(student.id));
+  useEffect(() => {
+    setSelectedStudentIds((current) => current.filter((id) => students.some((student) => student.id === id)));
+  }, [students]);
   async function saveClassroom() {
     const ok = await addClassroom(classDraft);
     if (!ok) return;
@@ -1220,6 +1341,34 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
     if (!ok) return;
     setFile(null);
   }
+  function toggleStudentSelection(student: StudentRecord) {
+    setSelectedStudentIds((current) => current.includes(student.id) ? current.filter((id) => id !== student.id) : [...current, student.id]);
+  }
+  function toggleAllStudents() {
+    setSelectedStudentIds(allStudentsChecked ? [] : students.map((student) => student.id));
+  }
+  async function createSelectedStudentAccounts() {
+    if (!selectedStudentsWithoutAccounts.length) {
+      flash("เลือกนักเรียนที่ยังไม่สร้างบัญชีก่อน");
+      return;
+    }
+    let successCount = 0;
+    for (const student of selectedStudentsWithoutAccounts) {
+      const ok = await createStudentAccount(student, accountPassword, { silent: true });
+      if (ok) successCount += 1;
+    }
+    setSelectedStudentIds([]);
+    flash(successCount === selectedStudentsWithoutAccounts.length ? `สร้างบัญชีนักเรียน ${successCount} คนเรียบร้อย` : `สร้างบัญชีสำเร็จ ${successCount} จาก ${selectedStudentsWithoutAccounts.length} คน`);
+  }
+  async function deleteSelectedStudents() {
+    if (!selectedStudents.length) {
+      flash("เลือกรายชื่อที่ต้องการลบก่อน");
+      return;
+    }
+    if (!window.confirm(`ลบรายชื่อ ${selectedStudents.length} คนออกจากห้องนี้?`)) return;
+    const ok = await deleteStudents(selectedStudents);
+    if (ok) setSelectedStudentIds([]);
+  }
   return (
     <div className="page-stack">
       <PageHeader title="รายชื่อนักเรียน" eyebrow={selectedClassroom?.displayName || NO_CLASS_LABEL} />
@@ -1234,7 +1383,7 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
         <button className="primary-button" disabled={busy} onClick={saveClassroom}><Plus aria-hidden />เพิ่มห้องเรียน</button>
         {classrooms.length ? <div className="classroom-list">{classrooms.map((classroom) => <div className={`classroom-chip ${selectedClassroomId === classroom.id ? "active" : ""}`} key={classroom.id}><button type="button" onClick={() => selectClassroom(classroom.id)}><strong>{classroom.displayName}</strong><span>ปีการศึกษา {classroom.academicYear}</span></button><button className="icon-danger" disabled={busy} onClick={() => deleteClassroom(classroom)} title="ลบห้องเรียน"><Trash2 aria-hidden /></button></div>)}</div> : <EmptyState title="ยังไม่มีห้องเรียน" body="เพิ่มห้องเรียนก่อน แล้วจึงเพิ่มรายชื่อหรือคะแนนของห้องนั้น" />}
       </section>
-      <UploadPanel file={file} setFile={setFile} accept=".xlsx,.csv,.xls" label="อัปโหลดรายชื่อนักเรียน" help="รองรับไฟล์ .xlsx, .csv, .xls ขนาดไม่เกิน 5MB และจะแสดงรายชื่อทันทีหลังอัปโหลด" />
+      <UploadPanel file={file} setFile={setFile} accept=".xlsx,.csv,.xls" label="อัปโหลดรายชื่อนักเรียน" help="รองรับคอลัมน์ เลขที่, เลขประจำตัว, คำนำหน้า, ชื่อ, สกุล และไฟล์ขนาดไม่เกิน 5MB" />
       <button className="primary-button full-button" disabled={busy} onClick={saveRoster}><CheckCircle2 aria-hidden />{busy ? "กำลังนำเข้ารายชื่อ" : "นำเข้ารายชื่อจากไฟล์"}</button>
       <section className="panel compact-form">
         <SectionTitle title="เพิ่มรายชื่อนักเรียน" note={selectedClassroom?.displayName || "เลือกห้องเรียนก่อน"} />
@@ -1244,16 +1393,21 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
           <label className="field">ชื่อ-นามสกุล<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
           <label className="field">เพศ / หมายเหตุ<input value={draft.gender} onChange={(event) => setDraft({ ...draft, gender: event.target.value })} /></label>
         </div>
-        <div className="form-actions"><button className="primary-button" disabled={busy} onClick={saveStudent}><Plus aria-hidden />เพิ่มรายชื่อ</button><button className="template-button" onClick={() => downloadRosterTemplate("csv")}><Download aria-hidden />CSV Template</button></div>
+        <div className="form-actions"><button className="primary-button" disabled={busy} onClick={saveStudent}><Plus aria-hidden />เพิ่มรายชื่อ</button><button className="template-button" onClick={() => downloadRosterTemplate("csv")}><Download aria-hidden />ดาวน์โหลดแม่แบบ CSV</button></div>
       </section>
       <section className="panel">
         <SectionTitle title="รายชื่อในห้องนี้" note={`${students.length} คน`} />
         <div className="account-toolbar">
           <label className="field">รหัสผ่านเริ่มต้นสำหรับบัญชีใหม่<input type="text" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} placeholder="เว้นว่าง = รหัสนักเรียน@2569" /></label>
+          <div className="bulk-account-row">
+            <button className="template-button" type="button" disabled={busy || !students.length} onClick={toggleAllStudents}><CheckCircle2 aria-hidden />{allStudentsChecked ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมด"}</button>
+            <button className="small-primary" type="button" disabled={busy || !selectedStudentsWithoutAccounts.length} onClick={createSelectedStudentAccounts}><UserPlus aria-hidden />สร้างบัญชีที่เลือก ({selectedStudentsWithoutAccounts.length})</button>
+            <button className="danger-button" type="button" disabled={busy || !selectedStudents.length} onClick={deleteSelectedStudents}><Trash2 aria-hidden />ลบที่เลือก ({selectedStudents.length})</button>
+          </div>
         </div>
-        {students.length ? <div className="student-preview"><div className="student-preview-head"><span>เลขที่</span><span>รหัสนักเรียน</span><span>ชื่อ-นามสกุล</span><span>บัญชี</span><span></span><span></span></div>{students.map((student) => {
+        {students.length ? <div className="student-preview"><div className="student-preview-head student-preview-head-action"><span className="check-cell"><input type="checkbox" aria-label="เลือกรายชื่อทั้งหมด" checked={allStudentsChecked} disabled={busy || !students.length} onChange={toggleAllStudents} /></span><span>เลขที่</span><span>รหัสนักเรียน</span><span>ชื่อ-นามสกุล</span><span>บัญชี</span><span></span><span></span></div>{students.map((student) => {
           const hasAccount = Boolean(student.authEmail || student.accountCreatedAt);
-          return <div className="student-preview-row student-preview-row-action" key={student.id}><span>{student.no}</span><span>{student.studentId}</span><strong>{student.name}</strong><span className={`status-pill ${hasAccount ? "pass" : "pending"}`}>{hasAccount ? "มีบัญชีแล้ว" : "ยังไม่สร้าง"}</span><button className="small-primary account-button" disabled={busy} onClick={() => createStudentAccount(student, accountPassword)} title="สร้างหรือรีเซ็ตรหัสบัญชีนักเรียน"><UserPlus aria-hidden />บัญชี</button><button className="icon-danger" disabled={busy} onClick={() => deleteStudent(student)} title="ลบรายชื่อ"><Trash2 aria-hidden /></button></div>;
+          return <div className="student-preview-row student-preview-row-action" key={student.id}><label className="check-cell"><input type="checkbox" aria-label={`เลือก ${student.name}`} checked={selectedStudentIds.includes(student.id)} disabled={busy} onChange={() => toggleStudentSelection(student)} /></label><span>{student.no}</span><span>{student.studentId}</span><strong>{student.name}</strong><span className={`status-pill ${hasAccount ? "pass" : "pending"}`}>{hasAccount ? "มีบัญชีแล้ว" : "ยังไม่สร้าง"}</span><button className="small-primary account-button" disabled={busy} onClick={() => createStudentAccount(student, accountPassword)} title="สร้างหรือรีเซ็ตรหัสบัญชีนักเรียน"><UserPlus aria-hidden />บัญชี</button><button className="icon-danger" disabled={busy} onClick={() => deleteStudent(student)} title="ลบรายชื่อ"><Trash2 aria-hidden /></button></div>;
         })}</div> : <EmptyState title="ยังไม่มีรายชื่อ" body="เพิ่มรายชื่อด้วยฟอร์มด้านบน หรืออัปโหลดไฟล์เก็บไว้ก่อน" />}
       </section>
     </div>
@@ -1301,7 +1455,22 @@ function FilePreview({ itemType, url, label, compact = false }: { itemType: Mate
   if (!url) return <div className={`file-preview ${compact ? "compact" : ""}`}><span>กำลังเตรียมพรีวิว {label}</span></div>;
   if (itemType === "VIDEO") return <video className={`file-preview ${compact ? "compact" : ""}`} controls preload="metadata" src={url} />;
   if (itemType === "IMG") return <img className={`file-preview ${compact ? "compact" : ""}`} src={url} alt={label} />;
-  return <iframe className={`file-preview ${compact ? "compact" : ""}`} src={url} title={label} />;
+  return (
+    <div className={`file-preview pdf-preview ${compact ? "compact" : ""}`}>
+      <iframe className="pdf-native-preview" src={url} title={label} />
+      <div className="pdf-mobile-preview">
+        <FileText aria-hidden />
+        <div>
+          <strong>{label}</strong>
+          <span>PDF บางเครื่องไม่แสดงแบบฝังในมือถือ</span>
+        </div>
+        <button className="template-button" type="button" onClick={() => window.open(url, "_blank", "noopener,noreferrer")}>
+          <ExternalLink aria-hidden />
+          เปิดพรีวิว PDF
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function MaterialCard({ item, role, previewUrl, downloadCount, onOpen, onDownload, onDelete }: { item: Material; role: Role; previewUrl?: string; downloadCount: number; onOpen: () => void; onDownload: () => void; onDelete: () => void }) {
@@ -1317,7 +1486,7 @@ function EmptyState({ title, body }: { title: string; body: string }) {
 }
 
 function downloadRosterTemplate(kind: "excel" | "csv") {
-  const csv = "เลขที่,รหัสนักเรียน,ชื่อ-นามสกุล,เพศ,ชั้นเรียน\n1,65001,ชื่อ นักเรียน,ชาย,ม.1 ห้อง 1\n";
+  const csv = "เลขที่,เลขประจำตัว,คำนำหน้า,ชื่อ,สกุล\n1,65001,นาย,สมชาย,ใจดี\n";
   const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -1480,11 +1649,6 @@ function formatScore(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-function gradeFromPercent(percent: number) {
-  const safe = Math.max(0, Math.min(100, percent));
-  return gradeBands.find((item) => safe >= item.min)?.grade || "0";
-}
-
 function numericInputValue(value: number) {
   return value === 0 ? "" : formatScore(value);
 }
@@ -1497,6 +1661,22 @@ function formatDate(input: string) {
 
 function safeFileName(name: string) {
   return name.replace(/[^\w.\-\u0E00-\u0E7F]+/g, "-");
+}
+
+function storageSafeFileName(name: string) {
+  const trimmed = name.trim();
+  const extensionMatch = trimmed.match(/\.[A-Za-z0-9]{1,10}$/);
+  const extension = extensionMatch ? extensionMatch[0].toLowerCase() : "";
+  const base = trimmed
+    .replace(/\.[^.]+$/, "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+
+  return `${base || "file"}${extension}`;
 }
 
 async function parseRosterFile(file: File): Promise<RosterStudent[]> {
@@ -1522,21 +1702,27 @@ function mapRosterRows(rows: Array<Array<string | number | null>>): RosterStuden
   const seen = new Set<string>();
 
   return dataRows.flatMap((row, index) => {
-    const studentId = readRosterCell(row, columns.studentId, 1);
-    const name = readRosterCell(row, columns.name, 2);
+    const studentId = hasHeader ? readRosterCell(row, columns.studentId) : readRosterCell(row, undefined, 1);
+    const fullName = hasHeader ? readRosterCell(row, columns.name) : readRosterCell(row, undefined, 2);
+    const splitName = joinRosterName(
+      readRosterCell(row, columns.prefix),
+      readRosterCell(row, columns.firstName),
+      readRosterCell(row, columns.lastName)
+    );
+    const name = splitName || fullName;
     if (!studentId || !name) return [];
 
     const uniqueId = studentId.replace(/\s+/g, "");
     if (!uniqueId || seen.has(uniqueId)) return [];
     seen.add(uniqueId);
 
-    const noValue = readRosterCell(row, columns.no, 0);
+    const noValue = hasHeader ? readRosterCell(row, columns.no) : readRosterCell(row, undefined, 0);
     const parsedNo = Number(noValue);
     return [{
       no: Number.isFinite(parsedNo) && parsedNo > 0 ? parsedNo : index + 1,
       studentId: uniqueId,
       name,
-      gender: readRosterCell(row, columns.gender, 3)
+      gender: hasHeader ? readRosterCell(row, columns.gender) : readRosterCell(row, undefined, 3)
     }];
   }).sort((a, b) => a.no - b.no || a.studentId.localeCompare(b.studentId));
 }
@@ -1544,16 +1730,19 @@ function mapRosterRows(rows: Array<Array<string | number | null>>): RosterStuden
 function looksLikeRosterHeader(row: string[]) {
   return row.some((cell) => {
     const normalized = normalizeRosterHeader(cell);
-    return normalized === "เลขที่" || normalized === "รหัสนักเรียน" || normalized === "ชื่อ-นามสกุล";
+    return ["เลขที่", "รหัสนักเรียน", "คำนำหน้า", "ชื่อ", "สกุล", "ชื่อ-นามสกุล"].includes(normalized);
   });
 }
 
 function resolveRosterColumns(headerRow: string[]) {
-  const columns: { no?: number; studentId?: number; name?: number; gender?: number } = {};
+  const columns: { no?: number; studentId?: number; prefix?: number; firstName?: number; lastName?: number; name?: number; gender?: number } = {};
   headerRow.forEach((cell, index) => {
     const normalized = normalizeRosterHeader(cell);
     if (normalized === "เลขที่" && columns.no == null) columns.no = index;
     if (normalized === "รหัสนักเรียน" && columns.studentId == null) columns.studentId = index;
+    if (normalized === "คำนำหน้า" && columns.prefix == null) columns.prefix = index;
+    if (normalized === "ชื่อ" && columns.firstName == null) columns.firstName = index;
+    if (normalized === "สกุล" && columns.lastName == null) columns.lastName = index;
     if (normalized === "ชื่อ-นามสกุล" && columns.name == null) columns.name = index;
     if (normalized === "เพศ" && columns.gender == null) columns.gender = index;
   });
@@ -1563,15 +1752,26 @@ function resolveRosterColumns(headerRow: string[]) {
 function normalizeRosterHeader(value: string) {
   const compact = value.toLowerCase().replace(/[\s._:/()-]+/g, "");
   if (["เลขที่", "เลข", "ลำดับ", "ลำดับที่", "no", "number"].includes(compact)) return "เลขที่";
-  if (["รหัสนักเรียน", "รหัส", "รหัสประจำตัวนักเรียน", "studentid", "studentcode", "studentnumber", "id"].includes(compact)) return "รหัสนักเรียน";
-  if (["ชื่อนามสกุล", "ชื่อ-นามสกุล", "ชื่อ", "fullname", "full name", "name"].includes(compact)) return "ชื่อ-นามสกุล";
+  if (["เลขประจำตัว", "เลขประจำตัวนักเรียน", "รหัสนักเรียน", "รหัส", "รหัสประจำตัวนักเรียน", "studentid", "studentcode", "studentnumber", "id"].includes(compact)) return "รหัสนักเรียน";
+  if (["คำนำหน้า", "คำนำหน้าชื่อ", "title", "prefix", "salutation"].includes(compact)) return "คำนำหน้า";
+  if (["ชื่อ", "ชื่อจริง", "firstname", "givenname"].includes(compact)) return "ชื่อ";
+  if (["สกุล", "นามสกุล", "lastname", "surname", "familyname"].includes(compact)) return "สกุล";
+  if (["ชื่อนามสกุล", "ชื่อเต็ม", "fullname", "name"].includes(compact)) return "ชื่อ-นามสกุล";
   if (["เพศ", "gender", "หมายเหตุ", "เพศหมายเหตุ"].includes(compact)) return "เพศ";
   return compact;
 }
 
-function readRosterCell(row: string[], columnIndex: number | undefined, fallbackIndex: number) {
-  const value = columnIndex != null ? row[columnIndex] : row[fallbackIndex];
+function readRosterCell(row: string[], columnIndex: number | undefined, fallbackIndex?: number) {
+  const resolvedIndex = columnIndex ?? fallbackIndex;
+  if (resolvedIndex == null) return "";
+  const value = row[resolvedIndex];
   return String(value ?? "").trim();
+}
+
+function joinRosterName(prefix: string, firstName: string, lastName: string) {
+  if (!firstName && !lastName) return "";
+  const givenName = `${prefix}${firstName}`.trim();
+  return [givenName, lastName].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
 function cleanFileTitle(name: string) {
@@ -1581,6 +1781,37 @@ function cleanFileTitle(name: string) {
 function fileNameFromPath(filePath: string) {
   const raw = filePath.split("/").pop() || filePath;
   return raw.replace(/^\d+-/, "");
+}
+
+async function triggerFileDownload(url: string, item: Material) {
+  const fallback = () => {
+    window.location.href = url;
+  };
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      fallback();
+      return;
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = downloadFileName(item);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  } catch {
+    fallback();
+  }
+}
+
+function downloadFileName(item: Material) {
+  const originalName = fileNameFromPath(item.filePath);
+  const extension = originalName.includes(".") ? originalName.split(".").pop() : "";
+  const safeTitle = safeFileName(item.title);
+  return extension ? `${safeTitle}.${extension}` : safeTitle;
 }
 
 function materialTypeFromFile(name: string, mimeType = ""): MaterialType {
@@ -1638,6 +1869,23 @@ function formatClassroomName(draft: ClassroomDraft) {
 
 function belongsToClass(item: { classroomId?: string; className?: string }, classroom: Classroom) {
   return item.classroomId === classroom.id || (!item.classroomId && item.className === classroom.displayName);
+}
+
+function studentScopedItems<T extends { classroomId?: string; className?: string }>(items: T[], classroom: Classroom | undefined, student: StudentRecord | undefined, session: AppSession | null) {
+  if (classroom) return items.filter((item) => belongsToClass(item, classroom));
+  return items.filter((item) => {
+    if (student?.classroomId && item.classroomId === student.classroomId) return true;
+    if (student?.className && item.className === student.className) return true;
+    return Boolean(session?.room && item.className === session.room);
+  });
+}
+
+function scoreSummaryForStudent(student: StudentRecord | undefined, entries: ScoreEntry[]) {
+  const studentEntries = student ? entries.filter((entry) => entry.studentRecordId === student.id) : [];
+  const totalFinal = studentEntries.reduce((sum, entry) => sum + entry.finalScore, 0);
+  const totalMax = studentEntries.reduce((sum, entry) => sum + entry.finalMax, 0);
+  const ringPercent = totalMax > 0 ? Math.max(0, Math.min(100, (totalFinal / totalMax) * 100)) : 0;
+  return { totalFinal, totalMax, ringPercent };
 }
 
 function statusTone(status: SubmissionStatus) {

@@ -23,11 +23,16 @@ textarea {
   max-width: 100%;
 }
 
+.input-shell input {
+  background: transparent;
+  color: var(--ink);
+}
+
 .brand-mark {
   width: clamp(128px, 18vw, 176px);
   height: clamp(120px, 17vw, 164px);
   border-radius: 8px;
-  background: #fff;
+  background: var(--paper);
   box-shadow: 0 18px 42px rgba(8, 37, 17, 0.18);
 }
 
@@ -45,7 +50,7 @@ textarea {
   height: 56px;
   padding: 6px;
   border-radius: 14px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .side-brand {
@@ -198,7 +203,7 @@ textarea {
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--paper);
   color: var(--ink);
   font: inherit;
 }
@@ -225,7 +230,7 @@ textarea {
   padding: 18px;
   border: 1px dashed var(--line);
   border-radius: 8px;
-  background: #fbfdf9;
+  background: var(--surface-subtle);
   color: var(--muted);
 }
 
@@ -294,7 +299,7 @@ textarea {
 .score-tabs button {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--paper);
   color: var(--ink);
   font: inherit;
   font-weight: 600;
@@ -429,7 +434,7 @@ textarea {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fbfdf9;
+  background: var(--surface-subtle);
 }
 
 .mini-list span {
@@ -457,7 +462,7 @@ textarea {
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--paper);
   color: var(--ink);
   font: inherit;
   font-weight: 600;
@@ -493,7 +498,7 @@ textarea {
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--paper);
   color: var(--ink);
   font: inherit;
 }
@@ -506,7 +511,7 @@ textarea {
   padding: 0 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--paper);
   color: var(--ink);
   font: inherit;
   font-weight: 600;
@@ -531,7 +536,7 @@ textarea {
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .announcement-card {
@@ -560,7 +565,7 @@ textarea {
   min-height: 220px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #f8fbf7;
+  background: var(--surface-subtle);
   overflow: hidden;
 }
 
@@ -575,6 +580,19 @@ textarea {
   height: 100%;
   border: 0;
   object-fit: cover;
+}
+
+.pdf-preview {
+  position: relative;
+  display: block;
+}
+
+.pdf-native-preview {
+  display: block;
+}
+
+.pdf-mobile-preview {
+  display: none;
 }
 
 .file-preview > span {
@@ -616,7 +634,7 @@ textarea {
 
 .score-summary-row.active {
   border-color: var(--green-700);
-  background: #eff8f0;
+  background: var(--surface-selected);
 }
 
 .score-summary-row.static {
@@ -643,7 +661,7 @@ textarea {
   width: 72%;
   aspect-ratio: 1;
   border-radius: 999px;
-  background: #fff;
+  background: var(--paper);
   box-shadow: inset 0 0 0 1px rgba(23, 101, 42, 0.08);
 }
 
@@ -662,7 +680,7 @@ textarea {
   padding: 14px 16px;
   border: 1px solid #dce7d8;
   border-radius: 10px;
-  background: #fbfdf9;
+  background: var(--surface-subtle);
 }
 
 .top-actions {
@@ -1040,7 +1058,7 @@ textarea {
 .role-card {
   border-color: #dce7d8;
   border-radius: 10px;
-  background: #fff;
+  background: var(--paper);
   box-shadow: 0 5px 14px rgba(17, 45, 25, 0.045);
 }
 
@@ -1070,7 +1088,7 @@ textarea {
 .icon-danger {
   border-color: #f2c9bb;
   border-radius: 10px;
-  background: #fff8f5;
+  background: var(--surface-danger);
   color: #b73514;
   box-shadow: 0 5px 14px rgba(201, 71, 29, 0.07);
 }
@@ -1079,4 +1097,49 @@ textarea {
 .avatar-button {
   border-radius: 12px;
   box-shadow: 0 8px 20px rgba(18, 55, 27, 0.08);
+}
+
+@media (max-width: 760px) {
+  .pdf-native-preview {
+    display: none;
+  }
+
+  .pdf-mobile-preview {
+    display: grid;
+    min-height: inherit;
+    align-content: center;
+    justify-items: center;
+    gap: 12px;
+    padding: 18px;
+    color: var(--ink);
+    text-align: center;
+  }
+
+  .pdf-mobile-preview > svg {
+    width: 42px;
+    height: 42px;
+    color: var(--blue);
+  }
+
+  .pdf-mobile-preview strong,
+  .pdf-mobile-preview span {
+    display: block;
+  }
+
+  .pdf-mobile-preview strong {
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+  }
+
+  .pdf-mobile-preview span {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .pdf-mobile-preview .template-button {
+    justify-content: center;
+    width: 100%;
+    max-width: 260px;
+  }
 }
