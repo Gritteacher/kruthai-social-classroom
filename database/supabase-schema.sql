@@ -11,6 +11,17 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.classrooms (
+  id uuid primary key default uuid_generate_v4(),
+  academic_year text not null,
+  level text not null,
+  room text not null,
+  subject text not null,
+  display_name text not null,
+  created_at timestamptz not null default now(),
+  unique (academic_year, level, room, subject)
+);
+
 create table if not exists public.materials (
   id uuid primary key default uuid_generate_v4(),
   title text not null,
@@ -23,17 +34,6 @@ create table if not exists public.materials (
   cover_path text,
   published_at timestamptz not null default now(),
   created_by uuid references public.profiles (id)
-);
-
-create table if not exists public.classrooms (
-  id uuid primary key default uuid_generate_v4(),
-  academic_year text not null,
-  level text not null,
-  room text not null,
-  subject text not null,
-  display_name text not null,
-  created_at timestamptz not null default now(),
-  unique (academic_year, level, room, subject)
 );
 
 create table if not exists public.students (
@@ -434,6 +434,7 @@ $$;
 
 revoke all on function public.create_student_account(uuid, text, text, text, uuid, text) from public;
 grant execute on function public.create_student_account(uuid, text, text, text, uuid, text) to authenticated;
+notify pgrst, 'reload schema';
 
 drop policy if exists "classroom files readable" on storage.objects;
 drop policy if exists "classroom files uploadable" on storage.objects;

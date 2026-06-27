@@ -159,7 +159,7 @@ textarea {
   backdrop-filter: blur(20px);
 }
 
-@media (min-width: 981px) {
+@media (min-width: 1121px) {
   .side-nav {
     gap: 24px;
     padding: 0 18px 24px;
@@ -235,6 +235,135 @@ textarea {
     flex: 0 0 auto;
     padding-inline: 12px;
     white-space: nowrap;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1120px) {
+  .app-shell {
+    display: block;
+    grid-template-columns: 1fr;
+    padding-bottom: 78px;
+  }
+
+  .side-nav {
+    display: none;
+  }
+
+  .workspace {
+    padding-bottom: 18px;
+  }
+
+  .top-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 10px;
+    min-height: 72px;
+    padding: 12px 22px;
+  }
+
+  .top-title-block {
+    width: 100%;
+  }
+
+  .top-title-block > .eyebrow,
+  .top-title-block > h2 {
+    display: none;
+  }
+
+  .mobile-head-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .mobile-head-brand img {
+    flex: 0 0 auto;
+    width: 42px;
+    height: 42px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    object-fit: contain;
+  }
+
+  .mobile-head-brand strong,
+  .mobile-head-brand small {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .top-actions {
+    display: contents;
+  }
+
+  .teacher-classroom-picker {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .teacher-classroom-picker select {
+    width: 100%;
+  }
+
+  .top-actions .icon-button,
+  .avatar-button {
+    display: none;
+  }
+
+  .theme-toggle-button {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .mobile-logout-button {
+    display: inline-flex;
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .bottom-nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 8;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    min-height: 68px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 -12px 34px rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(18px);
+  }
+
+  .bottom-nav button {
+    display: grid;
+    min-width: 0;
+    place-items: center;
+    gap: 2px;
+    padding: 7px 4px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .bottom-nav button.active {
+    color: var(--blue);
+  }
+
+  .bottom-nav svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .content-area {
+    padding: 24px 28px 36px;
   }
 }
 

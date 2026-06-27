@@ -183,3 +183,4 @@ $$;
 
 revoke all on function public.create_student_account(uuid, text, text, text, uuid, text) from public;
 grant execute on function public.create_student_account(uuid, text, text, text, uuid, text) to authenticated;
+notify pgrst, 'reload schema';

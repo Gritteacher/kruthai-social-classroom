@@ -564,41 +564,17 @@ function App() {
       p_password: initialPassword
     };
     const rpcResult = await client.rpc("create_student_account", rpcPayload);
-    let payload = rpcResult.data;
-
     if (rpcResult.error) {
-      const auth = await supabase!.auth.getSession();
-      const accessToken = auth.data.session?.access_token;
-      if (!accessToken) {
-        setBusy(false);
-        flash("กรุณาเข้าสู่ระบบครูใหม่อีกครั้งก่อนสร้างบัญชีนักเรียน");
-        return false;
-      }
-
-      const response = await fetch("/.netlify/functions/create-student-account", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({
-          studentRecordId: student.id,
-          studentCode: student.studentId,
-          fullName: student.name,
-          className: student.className,
-          classroomId: student.classroomId,
-          password: initialPassword
-        })
-      });
-      payload = await response.json().catch(() => ({}));
       setBusy(false);
-      if (!response.ok || !payload?.ok) {
-        flash(payload?.message || "ระบบยังไม่พร้อมสร้างบัญชีนักเรียน กรุณารัน schema ล่าสุดใน Supabase แล้วลองอีกครั้ง");
-        return false;
-      }
-    } else {
-      setBusy(false);
-      if (payload?.ok === false) {
-        flash(payload.message || "สร้างบัญชีนักเรียนไม่สำเร็จ");
-        return false;
-      }
+      const message = rpcResult.error.message || "สร้างบัญชีนักเรียนไม่สำเร็จ";
+      flash(`สร้างบัญชีไม่สำเร็จ: ${message}`);
+      return false;
+    }
+    setBusy(false);
+    const payload = rpcResult.data;
+    if (payload?.ok === false) {
+      flash(payload.message || "สร้างบัญชีนักเรียนไม่สำเร็จ");
+      return false;
     }
 
     const authEmail = payload?.email || studentCodeToEmail(student.studentId);
