@@ -1686,20 +1686,18 @@ textarea {
   z-index: 30;
 }
 
-.content-classroom-picker {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 20px;
+.panel-classroom-picker {
+  width: min(100%, 520px);
 }
 
-.content-classroom-picker .teacher-classroom-picker {
+.panel-classroom-picker .teacher-classroom-picker {
   grid-column: auto;
   grid-row: auto;
-  width: min(100%, 420px);
+  width: 100%;
   min-width: 0;
 }
 
-.content-classroom-picker .teacher-classroom-picker select {
+.panel-classroom-picker .teacher-classroom-picker select {
   width: 100%;
 }
 
@@ -1710,11 +1708,7 @@ textarea {
 }
 
 @media (max-width: 760px) {
-  .content-classroom-picker {
-    margin-bottom: 16px;
-  }
-
-  .content-classroom-picker .teacher-classroom-picker {
+  .panel-classroom-picker {
     width: 100%;
   }
 }
