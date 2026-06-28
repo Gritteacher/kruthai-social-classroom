@@ -756,6 +756,102 @@ function App() {
     }
   }
 
+  async function updateAssignmentDetails(assignment: ScoreAssignment, draft: AssignmentDraft) {
+    const title = draft.title.trim();
+    const rawMax = Number(draft.rawMax);
+    const finalMax = Number(draft.finalMax);
+    if (!title) return flashAndFail("กรอกชื่องานหรือแบบประเมินก่อน", flash);
+    if (!Number.isFinite(rawMax) || rawMax <= 0) return flashAndFail("คะแนนเต็มดิบต้องมากกว่า 0", flash);
+    if (!Number.isFinite(finalMax) || finalMax <= 0) return flashAndFail("คะแนนเก็บเต็มต้องมากกว่า 0", flash);
+    if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
+
+    const relatedEntries = scoreEntries.filter((entry) => entry.assignmentId === assignment.id);
+    const relatedSubmissions = submissionItems.filter((item) => item.assignmentId === assignment.id);
+    const highestRecordedScore = Math.max(0, ...relatedEntries.map((entry) => entry.rawScore), ...relatedSubmissions.map((item) => item.rawScore));
+    if (rawMax < highestRecordedScore) {
+      return flashAndFail(`คะแนนเต็มดิบต้องไม่น้อยกว่า ${formatScore(highestRecordedScore)} ซึ่งเป็นคะแนนสูงสุดที่บันทึกไว้`, flash);
+    }
+
+    const entryPayload = relatedEntries.map((entry) => ({
+      assignment_id: assignment.id,
+      student_id: entry.studentRecordId,
+      student_code: entry.studentId,
+      raw_score: entry.rawScore,
+      raw_max: rawMax,
+      final_score: scaledScore(entry.rawScore, rawMax, finalMax),
+      final_max: finalMax
+    }));
+    const previousEntryPayload = relatedEntries.map((entry) => ({
+      assignment_id: assignment.id,
+      student_id: entry.studentRecordId,
+      student_code: entry.studentId,
+      raw_score: entry.rawScore,
+      raw_max: entry.rawMax,
+      final_score: entry.finalScore,
+      final_max: entry.finalMax
+    }));
+
+    setBusy(true);
+    try {
+      const assignmentResult = await supabase!
+        .from("score_assignments")
+        .update({ title, raw_max: rawMax, final_max: finalMax })
+        .eq("id", assignment.id)
+        .select("*")
+        .single();
+      if (assignmentResult.error) throw assignmentResult.error;
+
+      if (entryPayload.length) {
+        const entriesResult = await supabase!.from("score_entries").upsert(entryPayload, { onConflict: "assignment_id,student_id" });
+        if (entriesResult.error) throw entriesResult.error;
+      }
+
+      const submissionResults = await Promise.all(relatedSubmissions.map((item) => supabase!
+        .from("submissions")
+        .update({
+          assignment_title: title,
+          raw_max: rawMax,
+          final_score: scaledScore(item.rawScore, rawMax, finalMax),
+          final_max: finalMax
+        })
+        .eq("id", item.id)));
+      const submissionError = submissionResults.find((result) => result.error)?.error;
+      if (submissionError) throw submissionError;
+
+      const updatedAssignment = mapAssignmentRow(assignmentResult.data);
+      setAssignments((current) => current.map((item) => item.id === assignment.id ? updatedAssignment : item));
+      setScoreEntries((current) => current.map((entry) => entry.assignmentId === assignment.id ? {
+        ...entry,
+        rawMax,
+        finalScore: scaledScore(entry.rawScore, rawMax, finalMax),
+        finalMax
+      } : entry));
+      setSubmissionItems((current) => current.map((item) => item.assignmentId === assignment.id ? {
+        ...item,
+        assignmentTitle: title,
+        rawMax,
+        finalScore: scaledScore(item.rawScore, rawMax, finalMax),
+        finalMax
+      } : item));
+      flash(`บันทึกการแก้ไข "${title}" แล้ว`);
+      return true;
+    } catch (error) {
+      await supabase!.from("score_assignments").update({ title: assignment.title, raw_max: assignment.rawMax, final_max: assignment.finalMax }).eq("id", assignment.id);
+      if (previousEntryPayload.length) {
+        await supabase!.from("score_entries").upsert(previousEntryPayload, { onConflict: "assignment_id,student_id" });
+      }
+      await Promise.all(relatedSubmissions.map((item) => supabase!
+        .from("submissions")
+        .update({ assignment_title: item.assignmentTitle, raw_max: item.rawMax, final_score: item.finalScore, final_max: item.finalMax })
+        .eq("id", item.id)));
+      await loadClassroomData();
+      flash(userFacingError(error, "แก้ไขงานคะแนนไม่สำเร็จ"));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteMaterialDownloadLog(log: MaterialDownloadLog) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
@@ -1024,7 +1120,7 @@ function App() {
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
-          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
+          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
@@ -1323,26 +1419,44 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
   );
 }
 
-function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, entries, busy, activeClassName, addAssignment, deleteAssignment, moveAssignment, updateScoreDraft, saveScoreSheet, saveAllScoreSheets }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void; saveAllScoreSheets: () => void }) {
+function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, activeClassName, addAssignment, updateAssignment, deleteAssignment, moveAssignment, updateScoreDraft, saveScoreSheet, saveAllScoreSheets }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; allAssignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; updateAssignment: (assignment: ScoreAssignment, draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void; saveAllScoreSheets: () => void }) {
   const [draft, setDraft] = useState<AssignmentDraft>({ title: "", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
+  const [editingId, setEditingId] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
   const [teacherView, setTeacherView] = useState<"add" | "entry" | "overview">("add");
   const selected = assignments.find((assignment) => assignment.id === selectedId) || assignments[0];
+  const editingAssignment = allAssignments.find((assignment) => assignment.id === editingId);
   const note = selected ? `คะแนนดิบเต็ม ${formatScore(selected.rawMax)} หารเป็นคะแนนเก็บ ${formatScore(selected.finalMax)}` : "สร้างงานคะแนนก่อน";
 
   useEffect(() => {
+    if (editingId) return;
     setDraft((current) => ({ ...current, classroomIds: selectedClassroomId ? [selectedClassroomId] : [] }));
-  }, [selectedClassroomId]);
+  }, [editingId, selectedClassroomId]);
 
   function toggleAssignmentClassroom(classroomId: string) {
     setDraft((current) => ({ ...current, classroomIds: current.classroomIds.includes(classroomId) ? current.classroomIds.filter((id) => id !== classroomId) : [...current.classroomIds, classroomId] }));
   }
 
-  async function createAssignment() {
-    const ok = await addAssignment(draft);
-    if (!ok) return;
+  function resetAssignmentForm() {
+    setEditingId("");
     setDraft({ title: "", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
+  }
+
+  function beginEditAssignment(assignment: ScoreAssignment) {
+    setEditingId(assignment.id);
+    setDraft({
+      title: assignment.title,
+      rawMax: numericInputValue(assignment.rawMax),
+      finalMax: numericInputValue(assignment.finalMax),
+      classroomIds: assignment.classroomId ? [assignment.classroomId] : []
+    });
+  }
+
+  async function submitAssignment() {
+    const ok = editingAssignment ? await updateAssignment(editingAssignment, draft) : await addAssignment(draft);
+    if (!ok) return;
+    resetAssignmentForm();
   }
 
   if (role === "student") {
@@ -1359,17 +1473,24 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
       </div>
       {teacherView === "add" &&
         <section className="panel compact-form">
-          <SectionTitle title="เพิ่มงานคะแนน" note="งานที่เพิ่มก่อนจะแสดงก่อน" />
+          <SectionTitle title={editingAssignment ? "แก้ไขงานคะแนน" : "เพิ่มงานคะแนน"} note={editingAssignment ? editingAssignment.className : "งานที่เพิ่มก่อนจะแสดงก่อน"} />
           <div className="form-grid">
             <label className="field">ชื่องาน / แบบประเมิน<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น ใบงานที่ 1" /></label>
             <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => setDraft({ ...draft, rawMax: event.target.value })} placeholder="เช่น 10" /></label>
             <label className="field">คิดเป็นคะแนนเก็บ<input type="number" min="1" value={draft.finalMax} onChange={(event) => setDraft({ ...draft, finalMax: event.target.value })} placeholder="เช่น 5" /></label>
           </div>
-          <fieldset className="assignment-classroom-fieldset">
+          {editingAssignment ? <div className="assignment-edit-classroom"><span>ห้องเรียน</span><strong>{editingAssignment.className}</strong><small>แก้ไขคะแนนและชื่องานได้โดยข้อมูลคะแนนของนักเรียนยังอยู่ครบ</small></div> : <fieldset className="assignment-classroom-fieldset">
             <legend>เลือกห้องเรียนที่ได้รับงาน</legend>
             <div className="classroom-checkbox-grid">{classrooms.map((classroom) => <label className="classroom-checkbox" key={classroom.id}><input type="checkbox" checked={draft.classroomIds.includes(classroom.id)} onChange={() => toggleAssignmentClassroom(classroom.id)} /><span>{classroom.displayName}</span></label>)}</div>
-          </fieldset>
-          <button className="primary-button" disabled={busy} onClick={createAssignment}><Plus aria-hidden />เพิ่มงานคะแนน</button>
+          </fieldset>}
+          <div className="form-actions">
+            <button className="primary-button" disabled={busy} onClick={submitAssignment}>{editingAssignment ? <Save aria-hidden /> : <Plus aria-hidden />}{editingAssignment ? "บันทึกการแก้ไข" : "เพิ่มงานคะแนน"}</button>
+            {editingAssignment && <button className="template-button" type="button" disabled={busy} onClick={resetAssignmentForm}>ยกเลิก</button>}
+          </div>
+          <div className="assignment-catalog">
+            <SectionTitle title="งานคะแนนที่สร้างแล้ว" note={`${allAssignments.length} งาน`} />
+            {allAssignments.length ? <div className="assignment-catalog-list">{allAssignments.map((assignment) => <article className={`assignment-catalog-item ${editingId === assignment.id ? "editing" : ""}`} key={assignment.id}><div><strong>{assignment.title}</strong><span>ดิบ {formatScore(assignment.rawMax)} → เก็บ {formatScore(assignment.finalMax)}</span><small>{assignment.className}</small></div><button className="assignment-edit-button" type="button" disabled={busy} onClick={() => beginEditAssignment(assignment)} aria-label={`แก้ไข ${assignment.title}`}><Pencil aria-hidden /><span>แก้ไข</span></button></article>)}</div> : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานแรกแล้วรายการจะแสดงที่นี่" />}
+          </div>
         </section>}
       {teacherView === "entry" &&
         <section className="panel score-manager">
