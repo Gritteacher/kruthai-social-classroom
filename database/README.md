@@ -4,6 +4,8 @@
 
 For an existing production database, `assignment-groups-transaction.sql` is the focused idempotent patch that adds permanent assignment grouping and atomic multi-classroom score updates.
 
+`student-home-cards.sql` adds teacher-managed website cards with classroom-scoped student access.
+
 ## Access model
 
 - Teachers are identified only by `profiles.role = 'teacher'`.

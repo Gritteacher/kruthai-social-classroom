@@ -109,6 +109,22 @@ create table if not exists public.announcements (
   created_by uuid references public.profiles (id)
 );
 
+create table if not exists public.student_home_cards (
+  id uuid primary key default uuid_generate_v4(),
+  title text not null check (char_length(trim(title)) between 1 and 80),
+  description text not null default '' check (char_length(description) <= 240),
+  url text not null check (url ~* '^https?://'),
+  classroom_ids uuid[] not null default '{}',
+  is_active boolean not null default true,
+  sort_order integer not null default 0 check (sort_order >= 0),
+  created_by uuid references public.profiles (id) default auth.uid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists student_home_cards_sort_idx
+  on public.student_home_cards (is_active desc, sort_order, created_at);
+
 create table if not exists public.student_roster_uploads (
   id uuid primary key default uuid_generate_v4(),
   class_name text not null,
@@ -231,6 +247,7 @@ alter table public.score_entries enable row level security;
 alter table public.submissions enable row level security;
 alter table public.scores enable row level security;
 alter table public.announcements enable row level security;
+alter table public.student_home_cards enable row level security;
 alter table public.student_roster_uploads enable row level security;
 alter table public.material_download_logs enable row level security;
 
@@ -534,7 +551,7 @@ begin
     from pg_policies
     where schemaname = 'public'
       and tablename = any (array[
-        'profiles', 'classrooms', 'students', 'materials', 'announcements',
+        'profiles', 'classrooms', 'students', 'materials', 'announcements', 'student_home_cards',
         'score_assignments', 'score_entries', 'submissions', 'scores',
         'student_roster_uploads', 'material_download_logs'
       ])
@@ -595,6 +612,27 @@ create policy "announcements update teacher" on public.announcements
 for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
 create policy "announcements delete teacher" on public.announcements
 for delete to authenticated using (public.is_teacher());
+
+create policy "student home cards select related" on public.student_home_cards
+for select to authenticated
+using (
+  public.is_teacher()
+  or (
+    is_active
+    and (
+      cardinality(classroom_ids) = 0
+      or public.user_classroom_id() = any(classroom_ids)
+    )
+  )
+);
+create policy "student home cards insert teacher" on public.student_home_cards
+for insert to authenticated with check (public.is_teacher());
+create policy "student home cards update teacher" on public.student_home_cards
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "student home cards delete teacher" on public.student_home_cards
+for delete to authenticated using (public.is_teacher());
+
+notify pgrst, 'reload schema';
 
 create policy "score assignments select related" on public.score_assignments
 for select to authenticated

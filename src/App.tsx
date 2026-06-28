@@ -3,6 +3,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
   BarChart3,
   Bell,
   BookOpen,
@@ -13,9 +15,11 @@ import {
   Download,
   ExternalLink,
   Eye,
+  EyeOff,
   FileText,
   FileSpreadsheet,
   GraduationCap,
+  Globe2,
   Home,
   KeyRound,
   Lock,
@@ -39,6 +43,7 @@ import { isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from "./
 import {
   safeStorageSegment,
   storageSafeFileName,
+  normalizeExternalUrl,
   userFacingError,
   validateMaterialFile,
   validateRosterFile,
@@ -56,6 +61,7 @@ import {
   mapMaterialRow,
   mapScoreEntryRow,
   mapStudentRow,
+  mapStudentHomeCardRow,
   mapSubmissionRow
 } from "./lib/rowMappers";
 import type {
@@ -69,6 +75,7 @@ import type {
   Role,
   ScoreAssignment,
   ScoreEntry,
+  StudentHomeCard,
   StudentRecord,
   SubmissionRecord,
   SubmissionStatus,
@@ -80,6 +87,7 @@ type ClassroomDraft = { academicYear: string; level: string; room: string; subje
 type StudentDraft = { no: string; studentId: string; name: string; gender: string };
 type RosterStudent = { no: number; studentId: string; name: string; gender: string };
 type AnnouncementDraft = { title: string; body: string; classroomId: string };
+type StudentHomeCardDraft = { title: string; description: string; url: string; classroomIds: string[]; showToAll: boolean };
 type AssignmentDraft = { title: string; rawMax: string; finalMax: string; classroomIds: string[] };
 type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string; rawMax: number; finalMax: number; assignments: ScoreAssignment[]; classroomIds: string[]; hasMixedValues: boolean };
 type ThemeMode = "light" | "dark";
@@ -157,6 +165,7 @@ function App() {
   const [selectedClassroomId, setSelectedClassroomId] = useState("");
   const [materialItems, setMaterialItems] = useState<Material[]>([]);
   const [announcementItems, setAnnouncementItems] = useState<Announcement[]>([]);
+  const [studentHomeCards, setStudentHomeCards] = useState<StudentHomeCard[]>([]);
   const [materialDownloadLogs, setMaterialDownloadLogs] = useState<MaterialDownloadLog[]>([]);
   const [students, setStudents] = useState<StudentRecord[]>([]);
   const [assignments, setAssignments] = useState<ScoreAssignment[]>([]);
@@ -185,6 +194,9 @@ function App() {
     ? (workingClassroom ? submissionItems.filter((submission) => belongsToClass(submission, workingClassroom)) : [])
     : submissionItems.filter((submission) => submission.studentId === session?.studentCode);
   const activeAnnouncements = workingClassroom ? announcementItems.filter((item) => belongsToClass(item, workingClassroom)) : [];
+  const activeStudentHomeCards = session?.role === "teacher"
+    ? studentHomeCards
+    : studentHomeCards.filter((card) => card.isActive && (!card.classroomIds.length || Boolean(workingClassroom && card.classroomIds.includes(workingClassroom.id))));
   const activeDownloadLogs = session?.role === "teacher" ? materialDownloadLogs : materialDownloadLogs.filter((item) => item.studentId === session?.studentCode);
 
   const flash = (message: string) => {
@@ -206,10 +218,11 @@ function App() {
     }
     try {
       const client = supabase!;
-      const [classroomsResult, materialsResult, announcementsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult] = await Promise.all([
+      const [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult] = await Promise.all([
         client.from("classrooms").select("*").order("created_at", { ascending: false }),
         client.from("materials").select("*").order("published_at", { ascending: false }),
         client.from("announcements").select("*").order("published_at", { ascending: false }),
+        client.from("student_home_cards").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
         client.from("material_download_logs").select("*").order("downloaded_at", { ascending: false }),
         client.from("students").select("*").order("student_no", { ascending: true }),
         client.from("score_assignments").select("*").order("created_at", { ascending: true }),
@@ -217,7 +230,7 @@ function App() {
         client.from("submissions").select("*").order("submitted_at", { ascending: false })
       ]);
 
-      const errors = [classroomsResult, materialsResult, announcementsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult].filter((result) => result.error);
+      const errors = [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult].filter((result) => result.error);
       if (errors.length) flash("บางตารางใน Supabase ยังไม่พร้อม กรุณาตรวจ schema แล้วลองโหลดใหม่");
 
       const nextClassrooms = (classroomsResult.data ?? []).map(mapClassroomRow).sort(sortClassrooms);
@@ -232,6 +245,7 @@ function App() {
       });
       setMaterialItems((materialsResult.data ?? []).filter((row) => row.file_path).map(mapMaterialRow));
       setAnnouncementItems((announcementsResult.data ?? []).map(mapAnnouncementRow));
+      setStudentHomeCards((homeCardsResult.data ?? []).map(mapStudentHomeCardRow));
       setMaterialDownloadLogs((downloadLogsResult.data ?? []).map(mapMaterialDownloadLogRow));
       setStudents((studentsResult.data ?? []).map(mapStudentRow));
       setAssignments((assignmentsResult.data ?? []).map(mapAssignmentRow));
@@ -451,6 +465,110 @@ function App() {
       flash(`ลบประกาศ "${item.title}" แล้ว`);
     } catch (error) {
       flash(userFacingError(error, "ลบประกาศไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveStudentHomeCard(draft: StudentHomeCardDraft, editingId?: string) {
+    const title = draft.title.trim();
+    const description = draft.description.trim();
+    if (!title) return flashAndFail("กรอกชื่อการ์ดก่อน", flash);
+    if (title.length > 80) return flashAndFail("ชื่อการ์ดต้องไม่เกิน 80 ตัวอักษร", flash);
+    if (description.length > 240) return flashAndFail("คำอธิบายต้องไม่เกิน 240 ตัวอักษร", flash);
+    const normalized = normalizeExternalUrl(draft.url);
+    if (normalized.error) return flashAndFail(normalized.error, flash);
+    const classroomIds = draft.showToAll ? [] : [...new Set(draft.classroomIds)];
+    if (!draft.showToAll && !classroomIds.length) return flashAndFail("เลือกห้องเรียนอย่างน้อย 1 ห้อง หรือเลือกแสดงทุกห้อง", flash);
+    if (classroomIds.some((id) => !classroomItems.some((classroom) => classroom.id === id))) return flashAndFail("พบห้องเรียนที่ไม่ถูกต้อง กรุณาเลือกใหม่", flash);
+    if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
+
+    const payload = {
+      title,
+      description,
+      url: normalized.url,
+      classroom_ids: classroomIds,
+      updated_at: new Date().toISOString()
+    };
+    setBusy(true);
+    try {
+      if (editingId) {
+        const result = await supabase!.from("student_home_cards").update(payload).eq("id", editingId).select("*").single();
+        if (result.error) throw result.error;
+        const updated = mapStudentHomeCardRow(result.data);
+        setStudentHomeCards((current) => current.map((card) => card.id === editingId ? updated : card));
+        flash(`บันทึกการ์ด "${title}" แล้ว`);
+      } else {
+        const result = await supabase!.from("student_home_cards").insert({
+          ...payload,
+          sort_order: studentHomeCards.reduce((highest, card) => Math.max(highest, card.sortOrder), -1) + 1
+        }).select("*").single();
+        if (result.error) throw result.error;
+        setStudentHomeCards((current) => [...current, mapStudentHomeCardRow(result.data)]);
+        flash(`เพิ่มการ์ด "${title}" บนหน้าแรกนักเรียนแล้ว`);
+      }
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, editingId ? "แก้ไขการ์ดไม่สำเร็จ" : "เพิ่มการ์ดไม่สำเร็จ"));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleStudentHomeCard(card: StudentHomeCard) {
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    setBusy(true);
+    try {
+      const result = await supabase!.from("student_home_cards").update({ is_active: !card.isActive, updated_at: new Date().toISOString() }).eq("id", card.id).select("*").single();
+      if (result.error) throw result.error;
+      const updated = mapStudentHomeCardRow(result.data);
+      setStudentHomeCards((current) => current.map((item) => item.id === card.id ? updated : item));
+      flash(`${updated.isActive ? "เปิด" : "ซ่อน"}การ์ด "${updated.title}" แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "เปลี่ยนสถานะการ์ดไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteStudentHomeCard(card: StudentHomeCard) {
+    if (!window.confirm(`ลบการ์ด "${card.title}" ออกจากหน้าแรกนักเรียนหรือไม่`)) return;
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    setBusy(true);
+    try {
+      const result = await supabase!.from("student_home_cards").delete().eq("id", card.id);
+      if (result.error) throw result.error;
+      setStudentHomeCards((current) => current.filter((item) => item.id !== card.id));
+      flash(`ลบการ์ด "${card.title}" แล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "ลบการ์ดไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveStudentHomeCard(card: StudentHomeCard, direction: -1 | 1) {
+    const ordered = orderStudentHomeCards(studentHomeCards);
+    const currentIndex = ordered.findIndex((item) => item.id === card.id);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= ordered.length || !isSupabaseConfigured) return;
+    const target = ordered[targetIndex];
+    setBusy(true);
+    try {
+      const [currentResult, targetResult] = await Promise.all([
+        supabase!.from("student_home_cards").update({ sort_order: target.sortOrder, updated_at: new Date().toISOString() }).eq("id", card.id),
+        supabase!.from("student_home_cards").update({ sort_order: card.sortOrder, updated_at: new Date().toISOString() }).eq("id", target.id)
+      ]);
+      if (currentResult.error || targetResult.error) throw currentResult.error || targetResult.error;
+      setStudentHomeCards((current) => current.map((item) => {
+        if (item.id === card.id) return { ...item, sortOrder: target.sortOrder };
+        if (item.id === target.id) return { ...item, sortOrder: card.sortOrder };
+        return item;
+      }));
+    } catch (error) {
+      await loadClassroomData();
+      flash(userFacingError(error, "เปลี่ยนลำดับการ์ดไม่สำเร็จ"));
     } finally {
       setBusy(false);
     }
@@ -1093,7 +1211,7 @@ function App() {
         </header>
         <section className="content-area">
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
-          {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />}
+          {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
@@ -1165,25 +1283,25 @@ function TeacherClassroomSelector({ classrooms, selectedClassroomId, onChange }:
   );
 }
 
-function HomeView({ session, setView, materials, classrooms, students, submissions, assignments, entries, announcements, busy, addAnnouncement, deleteAnnouncement }: { session: AppSession; setView: (view: ViewKey) => void; materials: Material[]; classrooms: Classroom[]; students: StudentRecord[]; submissions: SubmissionRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; announcements: Announcement[]; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void }) {
+function HomeView({ session, setView, materials, classrooms, students, submissions, assignments, entries, announcements, homeCards, busy, addAnnouncement, deleteAnnouncement, saveHomeCard, toggleHomeCard, deleteHomeCard, moveHomeCard }: { session: AppSession; setView: (view: ViewKey) => void; materials: Material[]; classrooms: Classroom[]; students: StudentRecord[]; submissions: SubmissionRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; announcements: Announcement[]; homeCards: StudentHomeCard[]; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void; saveHomeCard: (draft: StudentHomeCardDraft, editingId?: string) => Promise<boolean>; toggleHomeCard: (card: StudentHomeCard) => void; deleteHomeCard: (card: StudentHomeCard) => void; moveHomeCard: (card: StudentHomeCard, direction: -1 | 1) => void }) {
   const isTeacher = session.role === "teacher";
   if (!isTeacher) {
-    return <div className="page-stack"><StudentHome setView={setView} materials={materials} entries={entries} students={students} announcements={announcements} /></div>;
+    return <div className="page-stack"><StudentHome setView={setView} materials={materials} entries={entries} students={students} announcements={announcements} homeCards={homeCards} /></div>;
   }
   const waiting = submissions.filter((item) => item.status !== "ตรวจแล้ว").length;
-  const stats = [["ห้องเรียน", String(classrooms.length), "blue"], ["นักเรียนทั้งหมด", String(students.length), "green"], ["งานคะแนน", String(assignments.length), "amber"], ["งานรอตรวจ", String(waiting), "coral"], ["สื่อการสอน", String(materials.length), "blue"], ["ประกาศ", String(announcements.length), "amber"]];
+  const stats = [["ห้องเรียน", String(classrooms.length), "blue"], ["นักเรียนทั้งหมด", String(students.length), "green"], ["งานคะแนน", String(assignments.length), "amber"], ["งานรอตรวจ", String(waiting), "coral"], ["สื่อการสอน", String(materials.length), "blue"], ["ประกาศ", String(announcements.length), "amber"], ["การ์ดหน้าแรก", String(homeCards.length), "green"]];
   return (
     <div className="page-stack">
       <section className="hero-strip">
         <div><p className="eyebrow">{session.school}</p><h1>เมนูหลัก</h1></div>
       </section>
       <div className="stat-grid">{stats.map(([label, value, tone]) => <article className={`stat-card tone-${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
-      <TeacherHome setView={setView} classrooms={classrooms} submissions={submissions} announcements={announcements} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} />
+      <TeacherHome setView={setView} classrooms={classrooms} submissions={submissions} announcements={announcements} homeCards={homeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveHomeCard} toggleHomeCard={toggleHomeCard} deleteHomeCard={deleteHomeCard} moveHomeCard={moveHomeCard} />
     </div>
   );
 }
 
-function TeacherHome({ setView, classrooms, submissions, announcements, busy, addAnnouncement, deleteAnnouncement }: { setView: (view: ViewKey) => void; classrooms: Classroom[]; submissions: SubmissionRecord[]; announcements: Announcement[]; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void }) {
+function TeacherHome({ setView, classrooms, submissions, announcements, homeCards, busy, addAnnouncement, deleteAnnouncement, saveHomeCard, toggleHomeCard, deleteHomeCard, moveHomeCard }: { setView: (view: ViewKey) => void; classrooms: Classroom[]; submissions: SubmissionRecord[]; announcements: Announcement[]; homeCards: StudentHomeCard[]; busy: boolean; addAnnouncement: (draft: AnnouncementDraft) => Promise<boolean>; deleteAnnouncement: (item: Announcement) => void; saveHomeCard: (draft: StudentHomeCardDraft, editingId?: string) => Promise<boolean>; toggleHomeCard: (card: StudentHomeCard) => void; deleteHomeCard: (card: StudentHomeCard) => void; moveHomeCard: (card: StudentHomeCard, direction: -1 | 1) => void }) {
   const [draft, setDraft] = useState<AnnouncementDraft>({ title: "", body: "", classroomId: classrooms[0]?.id || "" });
   const tools = [["อัปโหลดสื่อการสอน", Upload, "materials"], ["จัดการคะแนน", BarChart3, "scores"], ["ตรวจงานนักเรียน", ClipboardCheck, "work"], ["เพิ่มรายชื่อ", FileSpreadsheet, "students"]] as const;
 
@@ -1282,14 +1400,69 @@ function TeacherHome({ setView, classrooms, submissions, announcements, busy, ad
           </div>
         )}
       </section>
+
+      <StudentHomeCardManager classrooms={classrooms} cards={homeCards} busy={busy} saveCard={saveHomeCard} toggleCard={toggleHomeCard} deleteCard={deleteHomeCard} moveCard={moveHomeCard} />
     </div>
   );
 }
 
-function StudentHome({ setView, materials, entries, students, announcements }: { setView: (view: ViewKey) => void; materials: Material[]; entries: ScoreEntry[]; students: StudentRecord[]; announcements: Announcement[] }) {
+function StudentHomeCardManager({ classrooms, cards, busy, saveCard, toggleCard, deleteCard, moveCard }: { classrooms: Classroom[]; cards: StudentHomeCard[]; busy: boolean; saveCard: (draft: StudentHomeCardDraft, editingId?: string) => Promise<boolean>; toggleCard: (card: StudentHomeCard) => void; deleteCard: (card: StudentHomeCard) => void; moveCard: (card: StudentHomeCard, direction: -1 | 1) => void }) {
+  const emptyDraft: StudentHomeCardDraft = { title: "", description: "", url: "", classroomIds: [], showToAll: true };
+  const [draft, setDraft] = useState<StudentHomeCardDraft>(emptyDraft);
+  const [editingId, setEditingId] = useState("");
+  const orderedCards = orderStudentHomeCards(cards);
+
+  function reset() {
+    setDraft(emptyDraft);
+    setEditingId("");
+  }
+
+  function edit(card: StudentHomeCard) {
+    setEditingId(card.id);
+    setDraft({ title: card.title, description: card.description, url: card.url, classroomIds: card.classroomIds, showToAll: !card.classroomIds.length });
+  }
+
+  function toggleClassroom(classroomId: string) {
+    setDraft((current) => ({ ...current, classroomIds: current.classroomIds.includes(classroomId) ? current.classroomIds.filter((id) => id !== classroomId) : [...current.classroomIds, classroomId] }));
+  }
+
+  async function submit() {
+    const ok = await saveCard(draft, editingId || undefined);
+    if (ok) reset();
+  }
+
+  return <section className="panel student-home-card-manager">
+    <SectionTitle title={editingId ? "แก้ไขการ์ดหน้าแรกนักเรียน" : "จัดการการ์ดหน้าแรกนักเรียน"} note={`${cards.length} การ์ด`} />
+    <div className="home-card-manager-layout">
+      <div className="home-card-compose">
+        <div className="form-grid">
+          <label className="field">ชื่อการ์ด<input value={draft.title} maxLength={80} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น ห้องเรียน Google Classroom" /></label>
+          <label className="field">URL เว็บไซต์<input value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://example.com" inputMode="url" /></label>
+          <label className="field full-span">คำอธิบาย<textarea value={draft.description} maxLength={240} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="ข้อความสั้น ๆ ที่ช่วยให้นักเรียนรู้ว่าการ์ดนี้ใช้ทำอะไร" rows={3} /></label>
+        </div>
+        <fieldset className="assignment-classroom-fieldset home-card-audience-fieldset">
+          <legend>นักเรียนที่เห็นการ์ด</legend>
+          <label className="classroom-checkbox audience-all-checkbox"><input type="checkbox" checked={draft.showToAll} onChange={(event) => setDraft({ ...draft, showToAll: event.target.checked, classroomIds: event.target.checked ? [] : draft.classroomIds })} /><span>แสดงทุกห้องเรียน</span></label>
+          {!draft.showToAll && <div className="classroom-checkbox-grid">{classrooms.map((classroom) => <label className="classroom-checkbox" key={classroom.id}><input type="checkbox" checked={draft.classroomIds.includes(classroom.id)} onChange={() => toggleClassroom(classroom.id)} /><span>{classroom.displayName}</span></label>)}</div>}
+        </fieldset>
+        <div className="form-actions"><button className="primary-button" type="button" disabled={busy} onClick={submit}><Save aria-hidden />{editingId ? "บันทึกการแก้ไข" : "เพิ่มการ์ด"}</button>{editingId && <button className="template-button" type="button" disabled={busy} onClick={reset}>ยกเลิก</button>}</div>
+      </div>
+      <div className="home-card-admin-list">
+        {orderedCards.length ? orderedCards.map((card, index) => <article className={`home-card-admin-item ${card.isActive ? "" : "inactive"}`} key={card.id}>
+          <span className="home-card-admin-icon"><Globe2 aria-hidden /></span>
+          <div className="home-card-admin-copy"><strong>{card.title}</strong><a href={card.url} target="_blank" rel="noopener noreferrer">{websiteHost(card.url)}<ExternalLink aria-hidden /></a><small>{card.classroomIds.length ? `${card.classroomIds.length} ห้องเรียน` : "ทุกห้องเรียน"} · {card.isActive ? "กำลังแสดง" : "ซ่อนอยู่"}</small></div>
+          <div className="home-card-admin-actions"><button type="button" disabled={busy || index === 0} onClick={() => moveCard(card, -1)} title="เลื่อนขึ้น" aria-label={`เลื่อน ${card.title} ขึ้น`}><ArrowUp aria-hidden /></button><button type="button" disabled={busy || index === orderedCards.length - 1} onClick={() => moveCard(card, 1)} title="เลื่อนลง" aria-label={`เลื่อน ${card.title} ลง`}><ArrowDown aria-hidden /></button><button type="button" disabled={busy} onClick={() => toggleCard(card)} title={card.isActive ? "ซ่อนจากนักเรียน" : "เปิดให้นักเรียนเห็น"} aria-label={`${card.isActive ? "ซ่อน" : "แสดง"} ${card.title}`}>{card.isActive ? <EyeOff aria-hidden /> : <Eye aria-hidden />}</button><button type="button" disabled={busy} onClick={() => edit(card)} title="แก้ไข" aria-label={`แก้ไข ${card.title}`}><Pencil aria-hidden /></button><button className="delete" type="button" disabled={busy} onClick={() => deleteCard(card)} title="ลบ" aria-label={`ลบ ${card.title}`}><Trash2 aria-hidden /></button></div>
+        </article>) : <EmptyState title="ยังไม่มีการ์ดเว็บไซต์" body="เพิ่มเว็บไซต์ที่นักเรียนใช้บ่อย แล้วการ์ดจะแสดงบนหน้าแรกของนักเรียน" />}
+      </div>
+    </div>
+  </section>;
+}
+
+function StudentHome({ setView, materials, entries, students, announcements, homeCards }: { setView: (view: ViewKey) => void; materials: Material[]; entries: ScoreEntry[]; students: StudentRecord[]; announcements: Announcement[]; homeCards: StudentHomeCard[] }) {
   const student = students[0];
   const score = scoreSummaryForStudent(student, entries);
-  return <><section className="student-home-welcome"><p>ยินดีต้อนรับ</p><h1>{student?.name || "นักเรียน"}</h1><span>{student?.className || "ยังไม่พบข้อมูลชั้นเรียน"}</span></section><section className="student-home-grid"><button className="student-home-card score-home-card" onClick={() => setView("scores")}><div className="score-ring home-score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${score.ringPercent * 3.6}deg, var(--ring-track) ${score.ringPercent * 3.6}deg 360deg)` }}><div><strong>{formatScore(score.totalFinal)}</strong><span>คะแนน</span></div></div></button><button className="student-home-card" onClick={() => setView("materials")}><BookOpen aria-hidden /><span>{materials.length} ไฟล์</span><strong>สื่อการสอน</strong><small>เปิดดูและดาวน์โหลดสื่อ</small></button></section><div className="two-column student-home-lists"><section className="panel announcement-panel-red"><SectionTitle title="ประกาศ" note={`${announcements.length} รายการ`} />{announcements.length ? <div className="announcement-list">{announcements.slice(0, 4).map((item) => <article className="announcement-card announcement-card-student" key={item.id}><div><strong>{item.title}</strong><span>{item.publishedAt}</span><p>{item.body}</p></div></article>)}</div> : <EmptyState title="ยังไม่มีประกาศ" body="เมื่อคุณครูประกาศ ระบบจะแสดงที่นี่" />}</section><section className="panel"><SectionTitle title="สื่อล่าสุด" note={`${materials.length} รายการ`} />{materials.length ? <div className="mini-list">{materials.slice(0, 3).map((item) => <div key={item.id}><strong>{item.title}</strong><span>{item.level} · {item.type}</span></div>)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="รอคุณครูอัปโหลดสื่อ" />}</section></div></>;
+  const visibleCards = orderStudentHomeCards(homeCards);
+  return <><section className="student-home-welcome"><p>ยินดีต้อนรับ</p><h1>{student?.name || "นักเรียน"}</h1><span>{student?.className || "ยังไม่พบข้อมูลชั้นเรียน"}</span></section><section className="student-home-grid"><button className="student-home-card score-home-card" onClick={() => setView("scores")}><div className="score-ring home-score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${score.ringPercent * 3.6}deg, var(--ring-track) ${score.ringPercent * 3.6}deg 360deg)` }}><div><strong>{formatScore(score.totalFinal)}</strong><span>คะแนน</span></div></div></button><button className="student-home-card" onClick={() => setView("materials")}><BookOpen aria-hidden /><span>{materials.length} ไฟล์</span><strong>สื่อการสอน</strong><small>เปิดดูและดาวน์โหลดสื่อ</small></button></section>{visibleCards.length > 0 && <section className="panel student-resource-panel"><SectionTitle title="เว็บไซต์สำหรับนักเรียน" note={`${visibleCards.length} รายการ`} /><div className="student-resource-grid">{visibleCards.map((card) => <a className="student-resource-card" href={card.url} target="_blank" rel="noopener noreferrer" key={card.id}><span className="student-resource-icon"><Globe2 aria-hidden /></span><div><strong>{card.title}</strong><small>{websiteHost(card.url)}</small>{card.description && <p>{card.description}</p>}</div><ExternalLink className="student-resource-external" aria-hidden /></a>)}</div></section>}<div className="two-column student-home-lists"><section className="panel announcement-panel-red"><SectionTitle title="ประกาศ" note={`${announcements.length} รายการ`} />{announcements.length ? <div className="announcement-list">{announcements.slice(0, 4).map((item) => <article className="announcement-card announcement-card-student" key={item.id}><div><strong>{item.title}</strong><span>{item.publishedAt}</span><p>{item.body}</p></div></article>)}</div> : <EmptyState title="ยังไม่มีประกาศ" body="เมื่อคุณครูประกาศ ระบบจะแสดงที่นี่" />}</section><section className="panel"><SectionTitle title="สื่อล่าสุด" note={`${materials.length} รายการ`} />{materials.length ? <div className="mini-list">{materials.slice(0, 3).map((item) => <div key={item.id}><strong>{item.title}</strong><span>{item.level} · {item.type}</span></div>)}</div> : <EmptyState title="ยังไม่มีสื่อการสอน" body="รอคุณครูอัปโหลดสื่อ" />}</section></div></>;
 }
 
 function MaterialsView({ role, session, currentStudent, materials: items, logs, busy, flash, onOpen, onDownload, onUpload, onDelete, onDeleteLog }: { role: Role; session: AppSession; currentStudent?: StudentRecord; materials: Material[]; logs: MaterialDownloadLog[]; busy: boolean; flash: (message: string) => void; onOpen: (item: Material) => void; onDownload: (item: Material, studentCode: string, password: string) => Promise<boolean>; onUpload: (input: MaterialUpload) => Promise<boolean>; onDelete: (item: Material) => void; onDeleteLog: (log: MaterialDownloadLog) => void }) {
@@ -1818,6 +1991,18 @@ function orderAssignments(items: ScoreAssignment[]) {
     const safeB = Number.isFinite(bTime) ? bTime : 0;
     return safeA - safeB || a.title.localeCompare(b.title, "th");
   });
+}
+
+function orderStudentHomeCards(items: StudentHomeCard[]) {
+  return [...items].sort((a, b) => a.sortOrder - b.sortOrder || Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.title.localeCompare(b.title, "th"));
+}
+
+function websiteHost(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
 }
 
 function groupAssignments(items: ScoreAssignment[]): AssignmentGroup[] {

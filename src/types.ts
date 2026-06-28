@@ -44,6 +44,17 @@ export interface MaterialDownloadLog {
   downloadedAt: string;
 }
 
+export interface StudentHomeCard {
+  id: string;
+  title: string;
+  description: string;
+  url: string;
+  classroomIds: string[];
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
 export interface Classroom {
   id: string;
   academicYear: string;

@@ -6,6 +6,7 @@ import type {
   MaterialType,
   ScoreAssignment,
   ScoreEntry,
+  StudentHomeCard,
   StudentRecord,
   SubmissionRecord,
   SubmissionStatus
@@ -37,6 +38,11 @@ function optionalText(row: DatabaseRow, keys: string[]) {
 function number(row: DatabaseRow, keys: string[], fallback: number) {
   const parsed = Number(value(row, ...keys));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function stringArray(row: DatabaseRow, keys: string[]) {
+  const found = value(row, ...keys);
+  return Array.isArray(found) ? found.map(String).filter(Boolean) : [];
 }
 
 function formatDate(input: unknown) {
@@ -97,6 +103,19 @@ export function mapAnnouncementRow(row: DatabaseRow): Announcement {
     className: text(row, ["class_name", "className"], NO_CLASS_LABEL),
     classroomId: optionalText(row, ["classroom_id", "classroomId"]),
     publishedAt: formatDate(value(row, "published_at", "publishedAt"))
+  };
+}
+
+export function mapStudentHomeCardRow(row: DatabaseRow): StudentHomeCard {
+  return {
+    id: text(row, ["id"]),
+    title: text(row, ["title"], "เว็บไซต์สำหรับนักเรียน"),
+    description: text(row, ["description"]),
+    url: text(row, ["url"]),
+    classroomIds: stringArray(row, ["classroom_ids", "classroomIds"]),
+    isActive: value(row, "is_active", "isActive") !== false,
+    sortOrder: number(row, ["sort_order", "sortOrder"], 0),
+    createdAt: text(row, ["created_at", "createdAt"], new Date().toISOString())
   };
 }
 

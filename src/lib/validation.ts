@@ -51,6 +51,19 @@ export function validateSubmissionFile(file: File) {
   return "";
 }
 
+export function normalizeExternalUrl(value: string) {
+  const input = value.trim();
+  if (!input) return { url: "", error: "กรอก URL เว็บไซต์ก่อน" };
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(input) ? input : `https://${input}`;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { url: "", error: "รองรับเฉพาะ URL แบบ http หรือ https" };
+    return { url: parsed.toString(), error: "" };
+  } catch {
+    return { url: "", error: "URL เว็บไซต์ไม่ถูกต้อง" };
+  }
+}
+
 export function safeStorageSegment(value: string) {
   return value.trim().replace(/[^A-Za-z0-9_-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
 }
