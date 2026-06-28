@@ -399,6 +399,50 @@ textarea {
   border-top: 1px solid var(--line);
 }
 
+.assignment-catalog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.assignment-edit-help {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.created-score-ring {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 104px;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+.created-score-ring > div {
+  display: grid;
+  width: 76%;
+  aspect-ratio: 1;
+  place-content: center;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.created-score-ring strong {
+  font-size: 25px;
+  line-height: 1;
+}
+
+.created-score-ring span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .assignment-catalog-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -1435,6 +1479,18 @@ textarea {
   .assignment-catalog-item {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .assignment-catalog-heading {
+    align-items: flex-start;
+  }
+
+  .created-score-ring {
+    width: 82px;
+  }
+
+  .created-score-ring strong {
+    font-size: 20px;
   }
 
   .assignment-edit-button {
