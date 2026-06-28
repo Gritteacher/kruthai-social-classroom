@@ -67,6 +67,7 @@ export interface StudentRecord {
 
 export interface ScoreAssignment {
   id: string;
+  assignmentGroupId?: string;
   title: string;
   className: string;
   classroomId?: string;

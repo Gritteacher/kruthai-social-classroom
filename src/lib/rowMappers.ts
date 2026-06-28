@@ -130,6 +130,7 @@ export function mapStudentRow(row: DatabaseRow): StudentRecord {
 export function mapAssignmentRow(row: DatabaseRow): ScoreAssignment {
   return {
     id: text(row, ["id"]),
+    assignmentGroupId: optionalText(row, ["assignment_group_id", "assignmentGroupId"]),
     title: text(row, ["title"], "งานคะแนน"),
     className: text(row, ["class_name", "className"], NO_CLASS_LABEL),
     classroomId: optionalText(row, ["classroom_id", "classroomId"]),

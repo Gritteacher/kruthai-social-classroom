@@ -81,7 +81,7 @@ type StudentDraft = { no: string; studentId: string; name: string; gender: strin
 type RosterStudent = { no: number; studentId: string; name: string; gender: string };
 type AnnouncementDraft = { title: string; body: string; classroomId: string };
 type AssignmentDraft = { title: string; rawMax: string; finalMax: string; classroomIds: string[] };
-type AssignmentGroup = { key: string; title: string; rawMax: number; finalMax: number; assignments: ScoreAssignment[]; classroomIds: string[] };
+type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string; rawMax: number; finalMax: number; assignments: ScoreAssignment[]; classroomIds: string[]; hasMixedValues: boolean };
 type ThemeMode = "light" | "dark";
 type ProfileRow = { full_name?: string | null; role?: string | null; class_name?: string | null; school_name?: string | null; student_code?: string | null };
 
@@ -740,7 +740,8 @@ function App() {
     if (!Number.isFinite(finalMax) || finalMax <= 0) return flashAndFail("คะแนนเก็บเต็มต้องมากกว่า 0", flash);
     const targetClassrooms = classroomItems.filter((classroom) => draft.classroomIds.includes(classroom.id));
     if (!targetClassrooms.length) return flashAndFail("ไม่พบห้องเรียนที่เลือก กรุณาเลือกใหม่", flash);
-    const payload = targetClassrooms.map((classroom) => ({ title: draft.title.trim(), class_name: classroom.displayName, classroom_id: classroom.id, raw_max: rawMax, final_max: finalMax }));
+    const assignmentGroupId = crypto.randomUUID();
+    const payload = targetClassrooms.map((classroom) => ({ assignment_group_id: assignmentGroupId, title: draft.title.trim(), class_name: classroom.displayName, classroom_id: classroom.id, raw_max: rawMax, final_max: finalMax }));
     setBusy(true);
     try {
       const result = await supabase!.from("score_assignments").insert(payload).select("*");
@@ -768,6 +769,10 @@ function App() {
     if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
 
     const assignmentIds = new Set(targetAssignments.map((assignment) => assignment.id));
+    const assignmentGroupId = targetAssignments[0]?.assignmentGroupId;
+    if (!assignmentGroupId || targetAssignments.some((assignment) => assignment.assignmentGroupId !== assignmentGroupId)) {
+      return flashAndFail("ระบบจัดกลุ่มงานยังไม่พร้อม กรุณารัน SQL เวอร์ชันล่าสุดใน Supabase", flash);
+    }
     const relatedEntries = scoreEntries.filter((entry) => assignmentIds.has(entry.assignmentId));
     const relatedSubmissions = submissionItems.filter((item) => item.assignmentId && assignmentIds.has(item.assignmentId));
     const highestRecordedScore = Math.max(0, ...relatedEntries.map((entry) => entry.rawScore), ...relatedSubmissions.map((item) => item.rawScore));
@@ -775,53 +780,20 @@ function App() {
       return flashAndFail(`คะแนนเต็มดิบต้องไม่น้อยกว่า ${formatScore(highestRecordedScore)} ซึ่งเป็นคะแนนสูงสุดที่บันทึกไว้`, flash);
     }
 
-    const entryPayload = relatedEntries.map((entry) => ({
-      assignment_id: entry.assignmentId,
-      student_id: entry.studentRecordId,
-      student_code: entry.studentId,
-      raw_score: entry.rawScore,
-      raw_max: rawMax,
-      final_score: scaledScore(entry.rawScore, rawMax, finalMax),
-      final_max: finalMax
-    }));
-    const previousEntryPayload = relatedEntries.map((entry) => ({
-      assignment_id: entry.assignmentId,
-      student_id: entry.studentRecordId,
-      student_code: entry.studentId,
-      raw_score: entry.rawScore,
-      raw_max: entry.rawMax,
-      final_score: entry.finalScore,
-      final_max: entry.finalMax
-    }));
-
     setBusy(true);
     try {
-      const assignmentResult = await supabase!
-        .from("score_assignments")
-        .update({ title, raw_max: rawMax, final_max: finalMax })
-        .in("id", [...assignmentIds])
-        .select("*");
+      const assignmentResult = await supabase!.rpc("update_score_assignment_group", {
+        p_assignment_group_id: assignmentGroupId,
+        p_classroom_ids: targetAssignments.map((assignment) => assignment.classroomId!),
+        p_title: title,
+        p_raw_max: rawMax,
+        p_final_max: finalMax
+      });
       if (assignmentResult.error) throw assignmentResult.error;
 
-      if (entryPayload.length) {
-        const entriesResult = await supabase!.from("score_entries").upsert(entryPayload, { onConflict: "assignment_id,student_id" });
-        if (entriesResult.error) throw entriesResult.error;
-      }
-
-      const submissionResults = await Promise.all(relatedSubmissions.map((item) => supabase!
-        .from("submissions")
-        .update({
-          assignment_title: title,
-          raw_max: rawMax,
-          final_score: scaledScore(item.rawScore, rawMax, finalMax),
-          final_max: finalMax
-        })
-        .eq("id", item.id)));
-      const submissionError = submissionResults.find((result) => result.error)?.error;
-      if (submissionError) throw submissionError;
-
-      const updatedAssignments = (assignmentResult.data ?? []).map(mapAssignmentRow);
-      const updatedById = new Map(updatedAssignments.map((assignment) => [assignment.id, assignment]));
+      const assignmentRows = Array.isArray(assignmentResult.data) ? assignmentResult.data as Record<string, unknown>[] : [];
+      const updatedAssignments: ScoreAssignment[] = assignmentRows.map(mapAssignmentRow);
+      const updatedById = new Map<string, ScoreAssignment>(updatedAssignments.map((assignment) => [assignment.id, assignment]));
       setAssignments((current) => current.map((item) => updatedById.get(item.id) ?? item));
       setScoreEntries((current) => current.map((entry) => assignmentIds.has(entry.assignmentId) ? {
         ...entry,
@@ -839,19 +811,16 @@ function App() {
       flash(`บันทึกการแก้ไข "${title}" ให้ ${targetAssignments.length} ห้องแล้ว`);
       return true;
     } catch (error) {
-      await Promise.all(targetAssignments.map((assignment) => supabase!
-        .from("score_assignments")
-        .update({ title: assignment.title, raw_max: assignment.rawMax, final_max: assignment.finalMax })
-        .eq("id", assignment.id)));
-      if (previousEntryPayload.length) {
-        await supabase!.from("score_entries").upsert(previousEntryPayload, { onConflict: "assignment_id,student_id" });
+      const message = error && typeof error === "object" && "message" in error ? String(error.message) : "";
+      if (message.includes("RAW_MAX_BELOW_RECORDED_SCORE")) {
+        const messageParts = message.split(":");
+        const recordedScore = messageParts[messageParts.length - 1]?.trim();
+        flash(`คะแนนเต็มดิบต้องไม่น้อยกว่า ${recordedScore || "คะแนนสูงสุดที่บันทึกไว้"}`);
+      } else if (message.includes("update_score_assignment_group") || message.includes("schema cache")) {
+        flash("ระบบแก้ไขคะแนนแบบปลอดภัยยังไม่พร้อม กรุณารัน SQL เวอร์ชันล่าสุดใน Supabase");
+      } else {
+        flash(userFacingError(error, "แก้ไขงานคะแนนไม่สำเร็จ ระบบไม่ได้เปลี่ยนข้อมูลใด ๆ"));
       }
-      await Promise.all(relatedSubmissions.map((item) => supabase!
-        .from("submissions")
-        .update({ assignment_title: item.assignmentTitle, raw_max: item.rawMax, final_score: item.finalScore, final_max: item.finalMax })
-        .eq("id", item.id)));
-      await loadClassroomData();
-      flash(userFacingError(error, "แก้ไขงานคะแนนไม่สำเร็จ"));
       return false;
     } finally {
       setBusy(false);
@@ -1432,6 +1401,22 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
   const [teacherView, setTeacherView] = useState<"add" | "entry" | "overview">("add");
   const assignmentGroups = useMemo(() => groupAssignments(allAssignments), [allAssignments]);
+  const assignmentGroupLabels = useMemo(() => {
+    const totals = new Map<string, number>();
+    const positions = new Map<string, number>();
+    const labels = new Map<string, string>();
+    assignmentGroups.forEach((group) => {
+      const titleKey = group.title.trim().toLocaleLowerCase("th");
+      totals.set(titleKey, (totals.get(titleKey) ?? 0) + 1);
+    });
+    assignmentGroups.forEach((group) => {
+      const titleKey = group.title.trim().toLocaleLowerCase("th");
+      const position = (positions.get(titleKey) ?? 0) + 1;
+      positions.set(titleKey, position);
+      if ((totals.get(titleKey) ?? 0) > 1) labels.set(group.key, `ชุดที่ ${position}`);
+    });
+    return labels;
+  }, [assignmentGroups]);
   const totalCreatedScore = assignmentGroups.reduce((sum, group) => sum + group.finalMax, 0);
   const scoreRingPercent = Math.max(0, Math.min(100, totalCreatedScore));
   const selected = assignments.find((assignment) => assignment.id === selectedId) || assignments[0];
@@ -1444,7 +1429,19 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
   }, [editingGroupKey, selectedClassroomId]);
 
   function toggleAssignmentClassroom(classroomId: string) {
-    setDraft((current) => ({ ...current, classroomIds: current.classroomIds.includes(classroomId) ? current.classroomIds.filter((id) => id !== classroomId) : [...current.classroomIds, classroomId] }));
+    setDraft((current) => {
+      if (current.classroomIds.includes(classroomId)) return { ...current, classroomIds: current.classroomIds.filter((id) => id !== classroomId) };
+      const assignment = editingGroup?.assignments.find((item) => item.classroomId === classroomId);
+      if (editingGroup?.hasMixedValues && !current.classroomIds.length && assignment) {
+        return {
+          title: assignment.title,
+          rawMax: numericInputValue(assignment.rawMax),
+          finalMax: numericInputValue(assignment.finalMax),
+          classroomIds: [classroomId]
+        };
+      }
+      return { ...current, classroomIds: [...current.classroomIds, classroomId] };
+    });
   }
 
   function resetAssignmentForm() {
@@ -1455,10 +1452,10 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
   function beginEditAssignment(group: AssignmentGroup) {
     setEditingGroupKey(group.key);
     setDraft({
-      title: group.title,
-      rawMax: numericInputValue(group.rawMax),
-      finalMax: numericInputValue(group.finalMax),
-      classroomIds: group.classroomIds
+      title: group.hasMixedValues ? "" : group.title,
+      rawMax: group.hasMixedValues ? "" : numericInputValue(group.rawMax),
+      finalMax: group.hasMixedValues ? "" : numericInputValue(group.finalMax),
+      classroomIds: group.hasMixedValues ? [] : group.classroomIds
     });
   }
 
@@ -1492,7 +1489,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
           <fieldset className="assignment-classroom-fieldset">
             <legend>{editingGroup ? "เลือกห้องเรียนที่ต้องการแก้ไข" : "เลือกห้องเรียนที่ได้รับงาน"}</legend>
             <div className="classroom-checkbox-grid">{(editingGroup ? classrooms.filter((classroom) => editingGroup.classroomIds.includes(classroom.id)) : classrooms).map((classroom) => <label className="classroom-checkbox" key={classroom.id}><input type="checkbox" checked={draft.classroomIds.includes(classroom.id)} onChange={() => toggleAssignmentClassroom(classroom.id)} /><span>{classroom.displayName}</span></label>)}</div>
-            {editingGroup && <small className="assignment-edit-help">ค่าที่แก้ไขจะเปลี่ยนเฉพาะห้องที่ติ๊กเลือก คะแนนนักเรียนเดิมยังอยู่ครบ</small>}
+            {editingGroup && <small className="assignment-edit-help">{editingGroup.hasMixedValues && !draft.classroomIds.length ? "งานนี้มีค่าต่างกันตามห้อง เลือกห้องแรกเพื่อโหลดค่าเดิมก่อนแก้ไข" : "ค่าที่แก้ไขจะเปลี่ยนเฉพาะห้องที่ติ๊กเลือก คะแนนนักเรียนเดิมยังอยู่ครบ"}</small>}
           </fieldset>
           <div className="form-actions">
             <button className="primary-button" disabled={busy || Boolean(editingGroup && !draft.classroomIds.length)} onClick={submitAssignment}>{editingGroup ? <Save aria-hidden /> : <Plus aria-hidden />}{editingGroup ? "บันทึกการแก้ไข" : "เพิ่มงานคะแนน"}</button>
@@ -1500,7 +1497,10 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
           </div>
           <div className="assignment-catalog">
             <div className="assignment-catalog-heading"><SectionTitle title="งานคะแนนที่สร้างแล้ว" note={`${assignmentGroups.length} งาน`} /><div className="created-score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${scoreRingPercent * 3.6}deg, var(--ring-track) ${scoreRingPercent * 3.6}deg 360deg)` }} aria-label={`สร้างคะแนนแล้ว ${formatScore(totalCreatedScore)} คะแนน`}><div><strong>{formatScore(totalCreatedScore)}</strong><span>คะแนน</span></div></div></div>
-            {assignmentGroups.length ? <div className="assignment-catalog-list">{assignmentGroups.map((group) => <article className={`assignment-catalog-item ${editingGroupKey === group.key ? "editing" : ""}`} key={group.key}><div><strong>{group.title}</strong><span>ดิบ {formatScore(group.rawMax)} → เก็บ {formatScore(group.finalMax)} · {group.assignments.length} ห้อง</span><small>{group.assignments.map((assignment) => assignment.className).join(" · ")}</small></div><button className="assignment-edit-button" type="button" disabled={busy} onClick={() => beginEditAssignment(group)} aria-label={`แก้ไข ${group.title}`}><Pencil aria-hidden /><span>แก้ไข</span></button></article>)}</div> : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานแรกแล้วรายการจะแสดงที่นี่" />}
+            {assignmentGroups.length ? <div className="assignment-catalog-list">{assignmentGroups.map((group) => {
+              const groupLabel = assignmentGroupLabels.get(group.key);
+              return <article className={`assignment-catalog-item ${editingGroupKey === group.key ? "editing" : ""}`} key={group.key}><div><strong>{group.title}{groupLabel ? ` · ${groupLabel}` : ""}</strong><span>{group.hasMixedValues ? "ค่าคะแนนต่างกันตามห้อง" : `ดิบ ${formatScore(group.rawMax)} → เก็บ ${formatScore(group.finalMax)}`} · {group.assignments.length} ห้อง</span><small>{group.assignments.map((assignment) => assignment.className).join(" · ")}</small></div><button className="assignment-edit-button" type="button" disabled={busy} onClick={() => beginEditAssignment(group)} aria-label={`แก้ไข ${group.title}${groupLabel ? ` ${groupLabel}` : ""}`}><Pencil aria-hidden /><span>แก้ไข</span></button></article>;
+            })}</div> : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานแรกแล้วรายการจะแสดงที่นี่" />}
           </div>
         </section>}
       {teacherView === "entry" &&
@@ -1824,7 +1824,8 @@ function groupAssignments(items: ScoreAssignment[]): AssignmentGroup[] {
   const grouped = new Map<string, AssignmentGroup>();
   orderAssignments(items).forEach((assignment) => {
     const normalizedTitle = assignment.title.trim().toLocaleLowerCase("th");
-    const key = `${normalizedTitle}\u001f${assignment.rawMax}\u001f${assignment.finalMax}`;
+    const legacyKey = `${normalizedTitle}\u001f${assignment.rawMax}\u001f${assignment.finalMax}`;
+    const key = assignment.assignmentGroupId ? `group:${assignment.assignmentGroupId}` : `legacy:${legacyKey}`;
     const current = grouped.get(key);
     if (current) {
       current.assignments.push(assignment);
@@ -1833,14 +1834,19 @@ function groupAssignments(items: ScoreAssignment[]): AssignmentGroup[] {
     }
     grouped.set(key, {
       key,
+      assignmentGroupId: assignment.assignmentGroupId,
       title: assignment.title,
       rawMax: assignment.rawMax,
       finalMax: assignment.finalMax,
       assignments: [assignment],
-      classroomIds: assignment.classroomId ? [assignment.classroomId] : []
+      classroomIds: assignment.classroomId ? [assignment.classroomId] : [],
+      hasMixedValues: false
     });
   });
-  return [...grouped.values()];
+  return [...grouped.values()].map((group) => ({
+    ...group,
+    hasMixedValues: group.assignments.some((assignment) => assignment.title !== group.title || assignment.rawMax !== group.rawMax || assignment.finalMax !== group.finalMax)
+  }));
 }
 
 function buildScoreEntry(assignment: ScoreAssignment, student: StudentRecord, rawScore: number): ScoreEntry {

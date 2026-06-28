@@ -2,6 +2,8 @@
 
 `supabase-schema.sql` is the current idempotent schema and policy source. Run the whole file in the Supabase SQL editor after deploying these changes.
 
+For an existing production database, `assignment-groups-transaction.sql` is the focused idempotent patch that adds permanent assignment grouping and atomic multi-classroom score updates.
+
 ## Access model
 
 - Teachers are identified only by `profiles.role = 'teacher'`.
