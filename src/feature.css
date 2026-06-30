@@ -645,6 +645,7 @@ textarea {
 }
 
 .score-workspace-panel {
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -668,11 +669,28 @@ textarea {
   .content-area.score-content-area {
     width: 100%;
     max-width: none;
-    padding-inline: clamp(16px, 2vw, 28px);
+    padding-inline: clamp(12px, 1.4vw, 20px);
   }
 
   .score-content-area .score-manager {
-    padding-inline: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .score-content-area .page-stack {
+    gap: 16px;
+  }
+
+  .score-content-area .panel-classroom-picker {
+    width: min(100%, 640px);
+  }
+
+  .score-content-area .score-matrix-scroll {
+    border-color: color-mix(in srgb, var(--line) 72%, transparent);
+    border-radius: 10px;
+    box-shadow: none;
   }
 }
 
@@ -734,8 +752,8 @@ textarea {
 
 .score-matrix .matrix-name {
   left: 180px;
-  width: 220px;
-  min-width: 220px;
+  width: 240px;
+  min-width: 240px;
   box-shadow: 8px 0 16px rgba(15, 23, 42, 0.05);
   text-align: left;
 }
@@ -748,8 +766,8 @@ textarea {
 }
 
 .matrix-assignment {
-  width: 214px;
-  min-width: 214px;
+  width: 228px;
+  min-width: 228px;
 }
 
 .matrix-assignment > div {
@@ -807,8 +825,8 @@ textarea {
 }
 
 .matrix-score-cell {
-  width: 214px;
-  min-width: 214px;
+  width: 228px;
+  min-width: 228px;
   height: 118px;
 }
 
@@ -835,7 +853,7 @@ textarea {
 }
 
 .score-entry-number input {
-  width: 88px;
+  width: 96px;
   height: 40px;
   padding: 0 8px;
   border: 1px solid var(--line);
@@ -1006,9 +1024,15 @@ textarea {
 }
 
 .matrix-overview-score {
-  width: 138px;
-  min-width: 138px;
+  width: 152px;
+  min-width: 152px;
   text-align: center;
+}
+
+.desktop-score-overview .score-matrix-scroll {
+  max-height: clamp(560px, calc(100dvh - 170px), 920px);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .matrix-overview-score strong,
@@ -1418,6 +1442,16 @@ textarea {
 
   .desktop-score-matrix {
     display: none;
+  }
+
+  .score-workspace-panel > .section-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .score-workspace-panel > .section-heading span {
+    justify-self: start;
   }
 
   .mobile-score-editor {
