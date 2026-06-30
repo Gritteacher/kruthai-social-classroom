@@ -635,8 +635,22 @@ textarea {
   gap: 16px;
 }
 
+.teacher-score-page,
+.score-workspace-panel,
+.desktop-score-matrix,
+.desktop-score-overview {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.score-workspace-panel {
+  overflow: hidden;
+}
+
 .score-matrix-scroll {
   width: 100%;
+  max-width: 100%;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -658,7 +672,7 @@ textarea {
   }
 
   .score-content-area .score-manager {
-    padding-inline: clamp(16px, 2vw, 28px);
+    padding-inline: 0;
   }
 }
 
