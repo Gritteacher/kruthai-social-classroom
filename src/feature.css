@@ -645,9 +645,21 @@ textarea {
 }
 
 .desktop-score-matrix .score-matrix-scroll {
-  max-height: clamp(360px, 68vh, 720px);
+  max-height: clamp(600px, calc(100dvh - 160px), 960px);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+@media (min-width: 981px) {
+  .content-area.score-content-area {
+    width: 100%;
+    max-width: none;
+    padding-inline: clamp(16px, 2vw, 28px);
+  }
+
+  .score-content-area .score-manager {
+    padding-inline: clamp(16px, 2vw, 28px);
+  }
 }
 
 .score-matrix {
