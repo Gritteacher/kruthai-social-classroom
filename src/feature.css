@@ -644,6 +644,12 @@ textarea {
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
 }
 
+.desktop-score-matrix .score-matrix-scroll {
+  max-height: clamp(360px, 68vh, 720px);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .score-matrix {
   width: max-content;
   min-width: 100%;
