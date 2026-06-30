@@ -52,6 +52,7 @@ import {
   validateSubmissionFile
 } from "./lib/validation";
 import { createOrResetStudentAccount } from "./services/studentService";
+import { fetchAllScoreEntryRows } from "./services/scoreService";
 import {
   isLegacyDemoSubmission,
   mapAnnouncementRow,
@@ -244,7 +245,7 @@ function App() {
         client.from("material_download_logs").select("*").order("downloaded_at", { ascending: false }),
         client.from("students").select("*").order("student_no", { ascending: true }),
         client.from("score_assignments").select("*").order("created_at", { ascending: true }),
-        client.from("score_entries").select("*").order("updated_at", { ascending: false }),
+        fetchAllScoreEntryRows(),
         client.from("submissions").select("*").order("submitted_at", { ascending: false })
       ]);
 
