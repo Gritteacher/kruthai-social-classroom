@@ -1,5 +1,5 @@
 import { createClient, type User as SupabaseUser } from "@supabase/supabase-js";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -91,6 +91,7 @@ type StudentHomeCardDraft = { title: string; description: string; url: string; c
 type AssignmentDraft = { title: string; rawMax: string; finalMax: string; classroomIds: string[] };
 type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string; rawMax: number; finalMax: number; assignments: ScoreAssignment[]; classroomIds: string[]; hasMixedValues: boolean };
 type ThemeMode = "light" | "dark";
+type ScoreAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 type ProfileRow = { full_name?: string | null; role?: string | null; class_name?: string | null; school_name?: string | null; student_code?: string | null };
 
 const SCHOOL_LOGO = `${import.meta.env.BASE_URL}kruthai-logo.png`;
@@ -170,7 +171,10 @@ function App() {
   const [students, setStudents] = useState<StudentRecord[]>([]);
   const [assignments, setAssignments] = useState<ScoreAssignment[]>([]);
   const [scoreEntries, setScoreEntries] = useState<ScoreEntry[]>([]);
+  const [scoreAutoSaveStates, setScoreAutoSaveStates] = useState<Record<string, ScoreAutoSaveStatus>>({});
   const [submissionItems, setSubmissionItems] = useState<SubmissionRecord[]>([]);
+  const scoreAutoSaveTimers = useRef(new Map<string, number>());
+  const scoreAutoSaveVersions = useRef(new Map<string, number>());
   const nav = session?.role === "student" ? studentNav : teacherNav;
   const effectiveSelectedClassroomId = selectedClassroomId || classroomItems[0]?.id || "";
   const selectedClassroom = classroomItems.find((item) => item.id === effectiveSelectedClassroomId);
@@ -198,6 +202,8 @@ function App() {
     ? studentHomeCards
     : studentHomeCards.filter((card) => card.isActive && (!card.classroomIds.length || Boolean(workingClassroom && card.classroomIds.includes(workingClassroom.id))));
   const activeDownloadLogs = session?.role === "teacher" ? materialDownloadLogs : materialDownloadLogs.filter((item) => item.studentId === session?.studentCode);
+  const activeScoreSaveStates = activeAssignments.flatMap((assignment) => activeStudents.map((student) => scoreAutoSaveStates[scoreEntryKey(assignment.id, student.id)])).filter(Boolean);
+  const scoreAutoSaveStatus: ScoreAutoSaveStatus = activeScoreSaveStates.includes("error") ? "error" : activeScoreSaveStates.includes("saving") ? "saving" : activeScoreSaveStates.includes("pending") ? "pending" : activeScoreSaveStates.includes("saved") ? "saved" : "idle";
 
   const flash = (message: string) => {
     setToast(message);
@@ -208,6 +214,10 @@ function App() {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem("classroom-theme", theme);
   }, [theme]);
+
+  useEffect(() => () => {
+    scoreAutoSaveTimers.current.forEach((timer) => window.clearTimeout(timer));
+  }, []);
 
   async function loadClassroomData(showToast = false) {
     setLoadingData(true);
@@ -1004,6 +1014,65 @@ function App() {
     }
   }
 
+  function setScoreAutoSaveState(key: string, status: ScoreAutoSaveStatus) {
+    setScoreAutoSaveStates((current) => {
+      if (status === "idle") {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return { ...current, [key]: status };
+    });
+  }
+
+  function cancelScoreAutoSaves(keys: Set<string>) {
+    keys.forEach((key) => {
+      const timer = scoreAutoSaveTimers.current.get(key);
+      if (timer) window.clearTimeout(timer);
+      scoreAutoSaveTimers.current.delete(key);
+      scoreAutoSaveVersions.current.set(key, (scoreAutoSaveVersions.current.get(key) ?? 0) + 1);
+    });
+    setScoreAutoSaveStates((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !keys.has(key))));
+  }
+
+  async function autoSaveScoreEntry(assignment: ScoreAssignment, student: StudentRecord, rawScore: number, key: string, version: number) {
+    scoreAutoSaveTimers.current.delete(key);
+    if (!isSupabaseConfigured) {
+      if (scoreAutoSaveVersions.current.get(key) === version) setScoreAutoSaveState(key, "error");
+      flash("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงบันทึกคะแนนอัตโนมัติไม่ได้");
+      return;
+    }
+    setScoreAutoSaveState(key, "saving");
+    try {
+      const result = await supabase!.from("score_entries").upsert({
+        assignment_id: assignment.id,
+        student_id: student.id,
+        student_code: student.studentId,
+        raw_score: rawScore,
+        raw_max: assignment.rawMax,
+        final_score: scaledScore(rawScore, assignment.rawMax, assignment.finalMax),
+        final_max: assignment.finalMax
+      }, { onConflict: "assignment_id,student_id" }).select("*").single();
+      if (result.error) throw result.error;
+      if (scoreAutoSaveVersions.current.get(key) !== version) return;
+      const savedEntry = mapScoreEntryRow(result.data);
+      setScoreEntries((current) => {
+        const exists = current.some((entry) => entry.assignmentId === assignment.id && entry.studentRecordId === student.id);
+        return exists ? current.map((entry) => entry.assignmentId === assignment.id && entry.studentRecordId === student.id ? savedEntry : entry) : [...current, savedEntry];
+      });
+      setScoreAutoSaveState(key, "saved");
+      const timer = window.setTimeout(() => {
+        if (scoreAutoSaveVersions.current.get(key) === version) setScoreAutoSaveState(key, "idle");
+        scoreAutoSaveTimers.current.delete(key);
+      }, 2200);
+      scoreAutoSaveTimers.current.set(key, timer);
+    } catch (error) {
+      if (scoreAutoSaveVersions.current.get(key) !== version) return;
+      setScoreAutoSaveState(key, "error");
+      flash(userFacingError(error, `บันทึกคะแนนของ ${student.name} ไม่สำเร็จ`));
+    }
+  }
+
   function updateScoreDraft(assignment: ScoreAssignment, student: StudentRecord, value: string) {
     const rawScore = clampScore(value, assignment.rawMax);
     const nextEntry = buildScoreEntry(assignment, student, rawScore);
@@ -1014,11 +1083,20 @@ function App() {
         : [...current, nextEntry];
       return next;
     });
+    const key = scoreEntryKey(assignment.id, student.id);
+    const version = (scoreAutoSaveVersions.current.get(key) ?? 0) + 1;
+    scoreAutoSaveVersions.current.set(key, version);
+    const currentTimer = scoreAutoSaveTimers.current.get(key);
+    if (currentTimer) window.clearTimeout(currentTimer);
+    setScoreAutoSaveState(key, "pending");
+    const timer = window.setTimeout(() => void autoSaveScoreEntry(assignment, student, rawScore, key, version), 900);
+    scoreAutoSaveTimers.current.set(key, timer);
   }
 
   async function saveScoreSheet(assignment: ScoreAssignment) {
     if (!activeStudents.length) return flash("ยังไม่มีรายชื่อนักเรียนในห้องนี้");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    cancelScoreAutoSaves(new Set(activeStudents.map((student) => scoreEntryKey(assignment.id, student.id))));
     const payload = activeStudents.map((student) => {
       const entry = findScoreEntry(scoreEntries, assignment.id, student.id);
       const rawScore = entry?.rawScore ?? 0;
@@ -1049,6 +1127,7 @@ function App() {
     if (!activeStudents.length) return flash("ยังไม่มีรายชื่อนักเรียนในห้องนี้");
     if (!activeAssignments.length) return flash("ยังไม่มีงานคะแนนในห้องนี้");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    cancelScoreAutoSaves(new Set(activeAssignments.flatMap((assignment) => activeStudents.map((student) => scoreEntryKey(assignment.id, student.id)))));
     const payload = activeAssignments.flatMap((assignment) => activeStudents.map((student) => {
       const entry = findScoreEntry(scoreEntries, assignment.id, student.id);
       const rawScore = entry?.rawScore ?? 0;
@@ -1213,7 +1292,7 @@ function App() {
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
-          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
+          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
@@ -1567,7 +1646,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
   );
 }
 
-function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, activeClassName, addAssignment, updateAssignment, deleteAssignment, moveAssignment, updateScoreDraft, saveScoreSheet, saveAllScoreSheets }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; allAssignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; updateAssignment: (assignments: ScoreAssignment[], draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void; saveAllScoreSheets: () => void }) {
+function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, moveAssignment, updateScoreDraft, saveScoreSheet, saveAllScoreSheets }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; allAssignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; scoreAutoSaveStatus: ScoreAutoSaveStatus; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; updateAssignment: (assignments: ScoreAssignment[], draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; saveScoreSheet: (assignment: ScoreAssignment) => void; saveAllScoreSheets: () => void }) {
   const [draft, setDraft] = useState<AssignmentDraft>({ title: "", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   const [editingGroupKey, setEditingGroupKey] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -1687,7 +1766,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
                 const rawScore = entry?.rawScore ?? 0;
                 const final = scaledScore(rawScore, assignment.rawMax, assignment.finalMax);
                 return <td className="matrix-score-cell" key={assignment.id}><label><input aria-label={`${assignment.title} ของ ${student.name}`} type="number" min="0" max={assignment.rawMax} value={entry ? numericInputValue(rawScore) : ""} onChange={(event) => updateScoreDraft(assignment, student, event.target.value)} placeholder="0" /><span>/ {formatScore(assignment.rawMax)}</span></label><small>เก็บ {formatScore(final)} / {formatScore(assignment.finalMax)}</small></td>;
-              })}</tr>)}</tbody></table></div><div className="matrix-actions"><span>กรอกคะแนนดิบ ระบบคำนวณคะแนนเก็บให้อัตโนมัติ</span><button className="primary-button" disabled={busy || !students.length} onClick={saveAllScoreSheets}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกคะแนนทั้งห้อง"}</button></div></div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
+              })}</tr>)}</tbody></table></div><div className="matrix-actions"><div className="matrix-save-copy"><span>กรอกคะแนนดิบ ระบบคำนวณคะแนนเก็บและบันทึกให้อัตโนมัติ</span><ScoreAutoSaveIndicator status={scoreAutoSaveStatus} /></div><button className="primary-button" disabled={busy || !students.length} onClick={saveAllScoreSheets}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกทั้งหมดตอนนี้"}</button></div></div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
               <div className="mobile-score-editor">
                 <div className="assignment-list">{assignments.map((assignment, index) => <div className="assignment-order-item" key={assignment.id}><button className={`assignment-chip ${selected?.id === assignment.id ? "active" : ""}`} type="button" onClick={() => setSelectedId(assignment.id)}>{assignment.title}<span>{formatScore(assignment.rawMax)}{" → "}{formatScore(assignment.finalMax)}</span></button><div><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button></div></div>)}</div>
                 <div className="score-tabs"><button className={mode === "raw" ? "active" : ""} onClick={() => setMode("raw")}>คะแนนดิบ</button><button className={mode === "scaled" ? "active" : ""} onClick={() => setMode("scaled")}>คะแนนที่หารแล้ว</button></div>
@@ -1697,7 +1776,8 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
                   const final = scaledScore(rawScore, selected.rawMax, selected.finalMax);
                   return <article className="score-row score-row-wide" key={student.id}><div className="student-score-identity"><strong>{student.name}</strong><span>รหัสนักเรียน {student.studentId}</span></div>{mode === "raw" ? <label className="score-input"><input type="number" min="0" max={selected.rawMax} value={entry ? numericInputValue(rawScore) : ""} onChange={(event) => updateScoreDraft(selected, student, event.target.value)} placeholder="0" /><span>/ {formatScore(selected.rawMax)}</span></label> : <div className="score-result"><strong>{formatScore(final)}</strong><span>/ {formatScore(selected.finalMax)}</span></div>}</article>;
                 })}</div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
-                <div className="form-actions">{selected && <button className="primary-button" disabled={busy || !students.length} onClick={() => saveScoreSheet(selected)}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกคะแนนงานนี้"}</button>}{selected && <button className="danger-button" disabled={busy} onClick={() => deleteAssignment(selected)}><Trash2 aria-hidden />ลบงานนี้</button>}</div>
+                <ScoreAutoSaveIndicator status={scoreAutoSaveStatus} />
+                <div className="form-actions">{selected && <button className="primary-button" disabled={busy || !students.length} onClick={() => saveScoreSheet(selected)}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกงานนี้ตอนนี้"}</button>}{selected && <button className="danger-button" disabled={busy} onClick={() => deleteAssignment(selected)}><Trash2 aria-hidden />ลบงานนี้</button>}</div>
               </div>
             </>
           ) : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานคะแนนแรก แล้วระบบจะสร้างตารางให้กรอกตามรายชื่อนักเรียน" />}
@@ -1705,6 +1785,17 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
       {teacherView === "overview" && <TeacherScoreOverview classrooms={classrooms} selectedClassroomId={selectedClassroomId} onClassroomChange={onClassroomChange} students={students} assignments={assignments} entries={entries} onEdit={() => setTeacherView("entry")} />}
     </div>
   );
+}
+
+function ScoreAutoSaveIndicator({ status }: { status: ScoreAutoSaveStatus }) {
+  const labels: Record<ScoreAutoSaveStatus, string> = {
+    idle: "พร้อมบันทึกอัตโนมัติ",
+    pending: "รอบันทึก...",
+    saving: "กำลังบันทึก...",
+    saved: "บันทึกแล้ว",
+    error: "บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง"
+  };
+  return <span className={`score-autosave-status ${status}`} role="status" aria-live="polite"><i aria-hidden />{labels[status]}</span>;
 }
 
 function TeacherScoreOverview({ classrooms, selectedClassroomId, onClassroomChange, students, assignments, entries, onEdit }: { classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; onEdit: () => void }) {
@@ -2049,6 +2140,10 @@ function buildScoreEntry(assignment: ScoreAssignment, student: StudentRecord, ra
 
 function findScoreEntry(entries: ScoreEntry[], assignmentId: string, studentId: string) {
   return entries.find((entry) => entry.assignmentId === assignmentId && entry.studentRecordId === studentId);
+}
+
+function scoreEntryKey(assignmentId: string, studentId: string) {
+  return `${assignmentId}:${studentId}`;
 }
 
 function scaledScore(rawScore: number, rawMax: number, finalMax: number) {

@@ -740,7 +740,7 @@ textarea {
 
 .matrix-assignment span,
 .matrix-score-cell small,
-.matrix-actions > span {
+.matrix-save-copy > span {
   color: var(--muted);
   font-size: 11px;
 }
@@ -817,6 +817,46 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.matrix-save-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.score-autosave-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  min-height: 22px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.score-autosave-status i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.score-autosave-status.pending {
+  color: var(--amber);
+}
+
+.score-autosave-status.saving {
+  color: var(--blue);
+}
+
+.score-autosave-status.saved {
+  color: var(--green-700);
+}
+
+.score-autosave-status.error {
+  color: var(--coral);
 }
 
 .score-overview-heading {
