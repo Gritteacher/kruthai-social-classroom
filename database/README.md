@@ -6,6 +6,8 @@ For an existing production database, `assignment-groups-transaction.sql` is the 
 
 `student-home-cards.sql` adds teacher-managed website cards with classroom-scoped student access.
 
+`score-entry-status.sql` adds persistent score states for ungraded, scored, leave, expired, and no-score entries.
+
 ## Access model
 
 - Teachers are identified only by `profiles.role = 'teacher'`.

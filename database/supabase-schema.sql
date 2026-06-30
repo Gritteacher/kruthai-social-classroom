@@ -64,6 +64,7 @@ create table if not exists public.score_entries (
   assignment_id uuid not null references public.score_assignments (id) on delete cascade,
   student_id uuid not null references public.students (id) on delete cascade,
   student_code text not null,
+  score_status text not null default 'ungraded' check (score_status in ('ungraded', 'scored', 'leave', 'expired', 'no_score')),
   raw_score numeric not null default 0 check (raw_score >= 0),
   raw_max numeric not null check (raw_max > 0),
   final_score numeric not null default 0 check (final_score >= 0),
@@ -71,6 +72,26 @@ create table if not exists public.score_entries (
   updated_at timestamptz not null default now(),
   unique (assignment_id, student_id)
 );
+
+alter table public.score_entries add column if not exists score_status text;
+update public.score_entries
+set score_status = case when raw_score > 0 then 'scored' else 'ungraded' end
+where score_status is null;
+alter table public.score_entries alter column score_status set default 'ungraded';
+alter table public.score_entries alter column score_status set not null;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'score_entries_score_status_check'
+      and conrelid = 'public.score_entries'::regclass
+  ) then
+    alter table public.score_entries
+      add constraint score_entries_score_status_check
+      check (score_status in ('ungraded', 'scored', 'leave', 'expired', 'no_score'));
+  end if;
+end;
+$$;
 
 create table if not exists public.submissions (
   id uuid primary key default uuid_generate_v4(),
@@ -442,7 +463,7 @@ begin
   update public.score_entries
   set
     raw_max = p_raw_max,
-    final_score = round((raw_score / p_raw_max) * p_final_max, 2),
+    final_score = case when score_status = 'scored' then round((raw_score / p_raw_max) * p_final_max, 2) else 0 end,
     final_max = p_final_max,
     updated_at = now()
   where assignment_id = any(selected_assignment_ids);

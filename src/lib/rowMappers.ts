@@ -6,6 +6,7 @@ import type {
   MaterialType,
   ScoreAssignment,
   ScoreEntry,
+  ScoreEntryStatus,
   StudentHomeCard,
   StudentRecord,
   SubmissionRecord,
@@ -17,6 +18,7 @@ type DatabaseRow = Record<string, unknown>;
 const NO_CLASS_LABEL = "ยังไม่ได้เลือกห้องเรียน";
 const materialTypes = new Set<MaterialType>(["PDF", "VIDEO", "IMG"]);
 const submissionStatuses = new Set<SubmissionStatus>(["ยังไม่ส่ง", "ส่งแล้ว", "รอตรวจ", "ตรวจแล้ว", "ให้แก้ไข", "ส่งช้า"]);
+const scoreEntryStatuses = new Set<ScoreEntryStatus>(["ungraded", "scored", "leave", "expired", "no_score"]);
 
 function value(row: DatabaseRow, ...keys: string[]) {
   for (const key of keys) {
@@ -160,12 +162,15 @@ export function mapAssignmentRow(row: DatabaseRow): ScoreAssignment {
 }
 
 export function mapScoreEntryRow(row: DatabaseRow): ScoreEntry {
+  const rawScore = number(row, ["raw_score", "rawScore"], 0);
+  const rawStatus = text(row, ["score_status", "status"], rawScore > 0 ? "scored" : "ungraded") as ScoreEntryStatus;
   return {
     id: text(row, ["id"]),
     assignmentId: text(row, ["assignment_id", "assignmentId"]),
     studentRecordId: text(row, ["student_id", "studentRecordId"]),
     studentId: text(row, ["student_code", "studentId"]),
-    rawScore: number(row, ["raw_score", "rawScore"], 0),
+    status: scoreEntryStatuses.has(rawStatus) ? rawStatus : rawScore > 0 ? "scored" : "ungraded",
+    rawScore,
     rawMax: number(row, ["raw_max", "rawMax"], 10),
     finalScore: number(row, ["final_score", "finalScore"], 0),
     finalMax: number(row, ["final_max", "finalMax"], 10)

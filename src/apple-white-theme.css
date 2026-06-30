@@ -11,14 +11,14 @@
   --blue-soft: #eaf4ff;
   --coral: #d93025;
   --coral-soft: #fff2f0;
-  --ink: #1d1d1f;
-  --muted: #6e6e73;
-  --line: #e5e5ea;
-  --paper: #ffffff;
-  --page: #f5f5f7;
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
-  --surface-soft: #f7f8fb;
-  --surface-subtle: #fbfbfd;
+  --ink: #252a32;
+  --muted: #69717d;
+  --line: #d9dfe7;
+  --paper: #fafbfd;
+  --page: #edf1f5;
+  --shadow: 0 10px 30px rgba(35, 45, 60, 0.07);
+  --surface-soft: #f0f3f7;
+  --surface-subtle: #f5f7fa;
   --surface-selected: #eef6ff;
   --surface-danger: #fff8f5;
 }
@@ -106,7 +106,7 @@ textarea {
 
 .side-nav {
   border-right: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(248, 250, 252, 0.94);
   color: var(--ink);
   backdrop-filter: blur(18px);
 }
@@ -139,13 +139,13 @@ textarea {
 .logout-button:hover {
   transform: none;
   border-color: var(--line);
-  background: #f5f5f7;
+  background: var(--surface-soft);
   color: var(--ink);
 }
 
 .side-nav nav button.active {
   border-color: var(--line);
-  background: #f5f5f7;
+  background: var(--surface-soft);
   color: var(--ink);
 }
 
@@ -154,9 +154,14 @@ textarea {
 }
 
 .top-bar {
-  border-bottom: 1px solid rgba(229, 229, 234, 0.8);
-  background: rgba(255, 255, 255, 0.82);
+  border-bottom: 1px solid rgba(217, 223, 231, 0.86);
+  background: rgba(246, 248, 251, 0.9);
   backdrop-filter: blur(20px);
+}
+
+:root:not([data-theme="dark"]) .bottom-nav {
+  border-top-color: var(--line);
+  background: rgba(246, 248, 251, 0.94);
 }
 
 @media (min-width: 1121px) {
@@ -1921,6 +1926,70 @@ textarea {
 :root[data-theme="dark"] .matrix-score-cell input:focus {
   border-color: rgba(41, 151, 255, 0.82);
   outline: 3px solid rgba(41, 151, 255, 0.18);
+}
+
+:root[data-theme="dark"] .score-entry-controls select {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: #101012;
+  color: #f5f5f7;
+}
+
+:root[data-theme="dark"] .score-matrix td.score-status-scored,
+:root[data-theme="dark"] .score-row.score-status-scored,
+:root[data-theme="dark"] .score-summary-row.score-status-scored {
+  border-color: rgba(48, 209, 88, 0.3);
+  background: rgba(48, 209, 88, 0.12);
+}
+
+:root[data-theme="dark"] .score-matrix td.score-status-leave,
+:root[data-theme="dark"] .score-row.score-status-leave,
+:root[data-theme="dark"] .score-summary-row.score-status-leave {
+  border-color: rgba(255, 214, 10, 0.3);
+  background: rgba(255, 214, 10, 0.11);
+}
+
+:root[data-theme="dark"] .score-matrix td.score-status-expired,
+:root[data-theme="dark"] .score-row.score-status-expired,
+:root[data-theme="dark"] .score-summary-row.score-status-expired {
+  border-color: rgba(255, 69, 58, 0.32);
+  background: rgba(255, 69, 58, 0.12);
+}
+
+:root[data-theme="dark"] .score-matrix td.score-status-no_score,
+:root[data-theme="dark"] .score-row.score-status-no_score,
+:root[data-theme="dark"] .score-summary-row.score-status-no_score {
+  border-color: rgba(174, 174, 178, 0.28);
+  background: rgba(174, 174, 178, 0.1);
+}
+
+:root[data-theme="dark"] .score-status-scored .score-entry-controls select,
+:root[data-theme="dark"] .score-status-scored .score-entry-number input,
+:root[data-theme="dark"] .score-status-leave .score-entry-controls select,
+:root[data-theme="dark"] .score-status-expired .score-entry-controls select,
+:root[data-theme="dark"] .score-status-no_score .score-entry-controls select {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.32);
+  color: #f5f5f7;
+}
+
+:root[data-theme="dark"] .score-status-scored .score-entry-controls small,
+:root[data-theme="dark"] .score-result.score-status-scored {
+  color: #62db82;
+}
+
+:root[data-theme="dark"] .score-status-leave .score-entry-controls small,
+:root[data-theme="dark"] .score-result.score-status-leave {
+  color: #ffe06a;
+}
+
+:root[data-theme="dark"] .score-status-expired .score-entry-controls small,
+:root[data-theme="dark"] .score-result.score-status-expired {
+  color: #ff958d;
+}
+
+:root[data-theme="dark"] .score-status-no_score .score-entry-controls small,
+:root[data-theme="dark"] .score-result.score-status-no_score {
+  color: #c7c7cc;
 }
 
 .student-home-card-manager {

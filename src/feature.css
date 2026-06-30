@@ -734,8 +734,8 @@ textarea {
 }
 
 .matrix-assignment {
-  width: 172px;
-  min-width: 172px;
+  width: 214px;
+  min-width: 214px;
 }
 
 .matrix-assignment > div {
@@ -793,18 +793,35 @@ textarea {
 }
 
 .matrix-score-cell {
-  width: 172px;
-  min-width: 172px;
+  width: 214px;
+  min-width: 214px;
+  height: 118px;
 }
 
-.matrix-score-cell label {
+.score-entry-controls {
+  display: grid;
+  gap: 7px;
+}
+
+.score-entry-controls select {
+  width: 100%;
+  height: 32px;
+  padding: 0 28px 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.score-entry-number {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.matrix-score-cell input {
-  width: 78px;
+.score-entry-number input {
+  width: 88px;
   height: 40px;
   padding: 0 8px;
   border: 1px solid var(--line);
@@ -814,14 +831,85 @@ textarea {
   text-align: center;
 }
 
-.matrix-score-cell label span {
+.score-entry-number input:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.score-entry-number span {
   color: var(--muted);
   white-space: nowrap;
 }
 
 .matrix-score-cell small {
   display: block;
-  margin-top: 5px;
+  min-height: 17px;
+  margin: 0;
+}
+
+.score-matrix td.score-status-scored,
+.score-row.score-status-scored,
+.score-summary-row.score-status-scored {
+  border-color: #b9ddc8;
+  background: #edf8f1;
+}
+
+.score-matrix td.score-status-leave,
+.score-row.score-status-leave,
+.score-summary-row.score-status-leave {
+  border-color: #ead28f;
+  background: #fff8df;
+}
+
+.score-matrix td.score-status-expired,
+.score-row.score-status-expired,
+.score-summary-row.score-status-expired {
+  border-color: #efbeb6;
+  background: #fff0ed;
+}
+
+.score-matrix td.score-status-no_score,
+.score-row.score-status-no_score,
+.score-summary-row.score-status-no_score {
+  border-color: #cbd1d9;
+  background: #eef1f4;
+}
+
+.score-status-scored .score-entry-controls select,
+.score-status-scored .score-entry-number input {
+  border-color: #9fceb2;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.score-status-leave .score-entry-controls select,
+.score-status-expired .score-entry-controls select,
+.score-status-no_score .score-entry-controls select {
+  border-color: currentColor;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.score-status-scored .score-entry-controls small,
+.score-result.score-status-scored {
+  color: #18733b;
+}
+
+.score-status-leave .score-entry-controls small,
+.score-result.score-status-leave {
+  color: #936b00;
+}
+
+.score-status-expired .score-entry-controls small,
+.score-result.score-status-expired {
+  color: #b43a2d;
+}
+
+.score-status-no_score .score-entry-controls small,
+.score-result.score-status-no_score {
+  color: #5d6672;
+}
+
+.score-result.score-status-ungraded {
+  color: var(--muted);
 }
 
 .matrix-actions {

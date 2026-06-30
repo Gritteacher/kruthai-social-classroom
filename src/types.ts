@@ -4,6 +4,7 @@ export type Role = "teacher" | "student";
 export type ViewKey = "home" | "materials" | "scores" | "work" | "students" | "profile";
 export type MaterialType = "PDF" | "VIDEO" | "IMG";
 export type SubmissionStatus = "ยังไม่ส่ง" | "ส่งแล้ว" | "รอตรวจ" | "ตรวจแล้ว" | "ให้แก้ไข" | "ส่งช้า";
+export type ScoreEntryStatus = "ungraded" | "scored" | "leave" | "expired" | "no_score";
 
 export interface AppSession {
   role: Role;
@@ -92,6 +93,7 @@ export interface ScoreEntry {
   assignmentId: string;
   studentRecordId: string;
   studentId: string;
+  status: ScoreEntryStatus;
   rawScore: number;
   rawMax: number;
   finalScore: number;
