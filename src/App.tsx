@@ -79,6 +79,7 @@ import type {
   ScoreEntryStatus,
   StudentHomeCard,
   StudentRecord,
+  SubmissionKind,
   SubmissionRecord,
   SubmissionStatus,
   ViewKey
@@ -91,6 +92,7 @@ type RosterStudent = { no: number; studentId: string; name: string; gender: stri
 type AnnouncementDraft = { title: string; body: string; classroomId: string };
 type StudentHomeCardDraft = { title: string; description: string; url: string; classroomIds: string[]; showToAll: boolean };
 type AssignmentDraft = { title: string; rawMax: string; finalMax: string; classroomIds: string[] };
+type SubmissionDraft = { assignmentId: string; file: File | null; linkUrl: string; submissionKind: SubmissionKind; memberCodes: string[] };
 type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string; rawMax: number; finalMax: number; assignments: ScoreAssignment[]; classroomIds: string[]; hasMixedValues: boolean };
 type ThemeMode = "light" | "dark";
 type ScoreAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
@@ -178,6 +180,7 @@ function App() {
   const [studentHomeCards, setStudentHomeCards] = useState<StudentHomeCard[]>([]);
   const [materialDownloadLogs, setMaterialDownloadLogs] = useState<MaterialDownloadLog[]>([]);
   const [students, setStudents] = useState<StudentRecord[]>([]);
+  const [classroomPeers, setClassroomPeers] = useState<StudentRecord[]>([]);
   const [assignments, setAssignments] = useState<ScoreAssignment[]>([]);
   const [scoreEntries, setScoreEntries] = useState<ScoreEntry[]>([]);
   const [scoreAutoSaveStates, setScoreAutoSaveStates] = useState<Record<string, ScoreAutoSaveStatus>>({});
@@ -205,7 +208,7 @@ function App() {
     : materialItems;
   const activeSubmissions = session?.role === "teacher"
     ? (workingClassroom ? submissionItems.filter((submission) => belongsToClass(submission, workingClassroom)) : [])
-    : submissionItems.filter((submission) => submission.studentId === session?.studentCode);
+    : submissionItems.filter((submission) => submission.studentId === session?.studentCode || submission.groupMemberCodes.includes(session?.studentCode || ""));
   const activeAnnouncements = workingClassroom ? announcementItems.filter((item) => belongsToClass(item, workingClassroom)) : [];
   const activeStudentHomeCards = session?.role === "teacher"
     ? studentHomeCards
@@ -267,6 +270,17 @@ function App() {
       setStudentHomeCards((homeCardsResult.data ?? []).map(mapStudentHomeCardRow));
       setMaterialDownloadLogs((downloadLogsResult.data ?? []).map(mapMaterialDownloadLogRow));
       setStudents((studentsResult.data ?? []).map(mapStudentRow));
+      if (session?.role === "student") {
+        const peersResult = await client.rpc("get_classroom_peers");
+        if (peersResult.error) {
+          setClassroomPeers([]);
+          flash("ยังโหลดรายชื่อเพื่อนในห้องไม่ได้ กรุณาตรวจ schema ล่าสุด");
+        } else {
+          setClassroomPeers((peersResult.data ?? []).map(mapStudentRow));
+        }
+      } else {
+        setClassroomPeers([]);
+      }
       setAssignments((assignmentsResult.data ?? []).map(mapAssignmentRow));
       setScoreEntries((entriesResult.data ?? []).map(mapScoreEntryRow));
       setSubmissionItems((submissionsResult.data ?? []).map(mapSubmissionRow).filter((item) => !isLegacyDemoSubmission(item)));
@@ -439,7 +453,11 @@ function App() {
   }
 
   async function openSubmissionFile(item: SubmissionRecord) {
-    if (!item.filePath) return flash("งานนี้ยังไม่มีไฟล์แนบ");
+    if (item.linkUrl) {
+      window.open(item.linkUrl, "_blank", "noopener,noreferrer");
+      return flash(`เปิดลิงก์งาน ${item.assignmentTitle} ในแท็บใหม่`);
+    }
+    if (!item.filePath) return flash("งานนี้ยังไม่มีไฟล์หรือลิงก์แนบ");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเปิดไฟล์ไม่ได้");
     const { data, error } = await supabase!.storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
     if (error || !data?.signedUrl) return flash(error?.message || "เปิดไฟล์งานไม่ได้");
@@ -1210,7 +1228,7 @@ function App() {
   }
 
   async function deleteSubmissionRecord(item: SubmissionRecord) {
-    if (!window.confirm(`ลบรายการส่งงาน "${item.assignmentTitle}" ของ ${item.studentName} พร้อมไฟล์แนบหรือไม่`)) return;
+    if (!window.confirm(`ลบรายการส่งงาน "${item.assignmentTitle}" ของ ${item.studentName}${item.filePath ? " พร้อมไฟล์แนบ" : ""}หรือไม่`)) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
@@ -1227,48 +1245,59 @@ function App() {
     }
   }
 
-  async function submitWork(file: File | null, assignmentId: string) {
-    const assignment = activeAssignments.find((item) => item.id === assignmentId);
+  async function submitWork(draft: SubmissionDraft) {
+    const assignment = activeAssignments.find((item) => item.id === draft.assignmentId);
     if (!assignment) return flash("เลือกงานที่คุณต้องการส่งก่อน");
-    if (!file) return flash("กรุณาเลือกไฟล์งาน");
-    const fileError = validateSubmissionFile(file);
-    if (fileError) return flash(fileError);
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     const studentCode = (currentStudent?.studentId || session?.studentCode || "").trim();
     const codeError = validateStudentCode(studentCode);
     if (codeError) return flash(codeError);
-    const studentName = (currentStudent?.name || session?.name || "").trim();
     const classroomId = assignment.classroomId || workingClassroom?.id || currentStudent?.classroomId;
     if (!classroomId) return flash("ไม่พบห้องเรียนของนักเรียน กรุณาติดต่อครู");
-    const storagePath = `submissions/${safeStorageSegment(studentCode)}/${Date.now()}-${storageSafeFileName(file.name)}`;
+    const memberCodes = Array.from(new Set([studentCode, ...draft.memberCodes.map((code) => code.trim()).filter(Boolean)]));
+    if (draft.submissionKind === "group" && memberCodes.length < 2) return flash("เลือกเพื่อนร่วมกลุ่มอย่างน้อย 1 คน");
+
+    let linkUrl = "";
+    if (draft.linkUrl.trim()) {
+      const normalized = normalizeExternalUrl(draft.linkUrl);
+      if (normalized.error) return flash(normalized.error.replace("เว็บไซต์", "งาน"));
+      linkUrl = normalized.url;
+    }
+    if (!draft.file && !linkUrl) return flash("เลือกไฟล์หรือกรอกลิงก์งานก่อนส่ง");
+    if (draft.file && linkUrl) return flash("เลือกส่งไฟล์หรือลิงก์เพียงอย่างเดียว");
+    if (draft.file) {
+      const fileError = validateSubmissionFile(draft.file);
+      if (fileError) return flash(fileError);
+    }
+
+    const storagePath = draft.file
+      ? `submissions/${safeStorageSegment(studentCode)}/${Date.now()}-${storageSafeFileName(draft.file.name)}`
+      : "";
     const client = supabase!;
     setBusy(true);
     try {
-      const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
-        contentType: file.type || "application/octet-stream",
-        upsert: false
-      });
-      if (upload.error) throw upload.error;
+      if (draft.file) {
+        const upload = await client.storage.from(STORAGE_BUCKET).upload(storagePath, draft.file, {
+          contentType: draft.file.type || "application/octet-stream",
+          upsert: false
+        });
+        if (upload.error) throw upload.error;
+      }
 
-      const result = await client.from("submissions").insert({
-        assignment_id: assignment.id,
-        assignment_title: assignment.title,
-        student_name: studentName,
-        student_code: studentCode,
-        classroom_id: classroomId,
-        file_path: storagePath,
-        status: "รอตรวจ",
-        raw_score: 0,
-        raw_max: assignment.rawMax,
-        final_score: 0,
-        final_max: assignment.finalMax
-      }).select("*").single();
+      const result = await client.rpc("submit_assignment_work", {
+        p_assignment_id: assignment.id,
+        p_file_path: storagePath || null,
+        p_link_url: linkUrl || null,
+        p_member_codes: draft.submissionKind === "group" ? memberCodes : [studentCode]
+      });
       if (result.error) {
-        await client.storage.from(STORAGE_BUCKET).remove([storagePath]);
+        if (storagePath) await client.storage.from(STORAGE_BUCKET).remove([storagePath]);
         throw result.error;
       }
-      setSubmissionItems((current) => [mapSubmissionRow(result.data), ...current]);
-      flash(`ส่งงาน ${file.name} เรียบร้อย`);
+      const savedRow = Array.isArray(result.data) ? result.data[0] : result.data;
+      if (!savedRow) throw new Error("ระบบไม่ได้คืนข้อมูลรายการส่งงาน");
+      setSubmissionItems((current) => [mapSubmissionRow(savedRow), ...current]);
+      flash(`ส่ง${draft.submissionKind === "group" ? "งานกลุ่ม" : "งาน"}เรียบร้อย`);
     } catch (error) {
       flash(userFacingError(error, "ส่งงานไม่สำเร็จ"));
       return false;
@@ -1320,7 +1349,7 @@ function App() {
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
-          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
+          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
         </section>
@@ -1869,12 +1898,37 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
-function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, busy, activeClassName, submitWork, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; assignments: ScoreAssignment[]; submissions: SubmissionRecord[]; busy: boolean; activeClassName: string; submitWork: (file: File | null, assignmentId: string) => void; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
+function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; assignments: ScoreAssignment[]; submissions: SubmissionRecord[]; classmates: StudentRecord[]; currentStudent?: StudentRecord; busy: boolean; activeClassName: string; submitWork: (draft: SubmissionDraft) => Promise<boolean | void>; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [assignmentId, setAssignmentId] = useState("");
+  const [submissionKind, setSubmissionKind] = useState<SubmissionKind>("individual");
+  const [deliveryMethod, setDeliveryMethod] = useState<"file" | "link">("file");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [memberCodes, setMemberCodes] = useState<string[]>([]);
+  const ownCode = currentStudent?.studentId || "";
+  const selectableClassmates = classmates.filter((student) => student.studentId !== ownCode);
   useEffect(() => {
-    if (!assignmentId && assignments[0]?.id) setAssignmentId(assignments[0].id);
+    if (!assignments.some((assignment) => assignment.id === assignmentId)) setAssignmentId(assignments[0]?.id || "");
   }, [assignmentId, assignments]);
+
+  function toggleGroupMember(studentCode: string) {
+    setMemberCodes((current) => current.includes(studentCode) ? current.filter((code) => code !== studentCode) : [...current, studentCode]);
+  }
+
+  async function handleSubmitWork() {
+    const ok = await submitWork({
+      assignmentId,
+      file: deliveryMethod === "file" ? file : null,
+      linkUrl: deliveryMethod === "link" ? linkUrl : "",
+      submissionKind,
+      memberCodes: submissionKind === "group" ? memberCodes : []
+    });
+    if (!ok) return;
+    setFile(null);
+    setLinkUrl("");
+    setMemberCodes([]);
+  }
+
   if (role === "teacher") {
     return (
       <div className="page-stack">
@@ -1899,8 +1953,29 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
                 {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.title}</option>)}
               </select>
             </label>
-            <UploadPanel file={file} setFile={setFile} accept=".pdf,.docx,.png,.jpg,.jpeg" label="เลือกไฟล์งานของคุณ" help="รองรับ PDF, DOCX, PNG, JPG ขนาดไม่เกิน 10MB" />
-            <button className="primary-button full-button" disabled={busy} onClick={() => submitWork(file, assignmentId)}><CloudUpload aria-hidden />{busy ? "กำลังส่งงาน" : "ส่งงาน"}</button>
+            <fieldset className="submission-option-group">
+              <legend>รูปแบบการส่ง</legend>
+              <div className="submission-segmented-control">
+                <button className={submissionKind === "individual" ? "active" : ""} type="button" onClick={() => { setSubmissionKind("individual"); setMemberCodes([]); }}><User aria-hidden />งานเดี่ยว</button>
+                <button className={submissionKind === "group" ? "active" : ""} type="button" onClick={() => setSubmissionKind("group")}><Users aria-hidden />งานกลุ่ม</button>
+              </div>
+            </fieldset>
+            {submissionKind === "group" && <fieldset className="group-member-picker">
+              <legend>สมาชิกกลุ่ม <span>{memberCodes.length + 1} คน</span></legend>
+              <div className="group-member-current"><CheckCircle2 aria-hidden /><div><strong>{currentStudent?.name || "บัญชีของฉัน"}</strong><small>ผู้ส่งงาน</small></div></div>
+              {selectableClassmates.length ? <div className="group-member-grid">{selectableClassmates.map((student) => <label className="group-member-option" key={student.id}><input type="checkbox" checked={memberCodes.includes(student.studentId)} onChange={() => toggleGroupMember(student.studentId)} /><span><strong>{student.no ? `${student.no}. ` : ""}{student.name}</strong><small>รหัส {student.studentId}</small></span></label>)}</div> : <div className="empty-inline">ยังโหลดรายชื่อเพื่อนในห้องไม่ได้</div>}
+            </fieldset>}
+            <fieldset className="submission-option-group">
+              <legend>สิ่งที่แนบ</legend>
+              <div className="submission-segmented-control">
+                <button className={deliveryMethod === "file" ? "active" : ""} type="button" onClick={() => { setDeliveryMethod("file"); setLinkUrl(""); }}><FileText aria-hidden />ไฟล์</button>
+                <button className={deliveryMethod === "link" ? "active" : ""} type="button" onClick={() => { setDeliveryMethod("link"); setFile(null); }}><ExternalLink aria-hidden />ลิงก์</button>
+              </div>
+            </fieldset>
+            {deliveryMethod === "file"
+              ? <UploadPanel file={file} setFile={setFile} accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.mp4,.mov" label="เลือกไฟล์งาน" help="ขนาดไม่เกิน 25MB" />
+              : <label className="field submission-link-field">ลิงก์งาน<input type="url" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://..." /></label>}
+            <button className="primary-button full-button" disabled={busy} onClick={() => void handleSubmitWork()}><CloudUpload aria-hidden />{busy ? "กำลังส่งงาน" : submissionKind === "group" ? `ส่งงานกลุ่ม ${memberCodes.length + 1} คน` : "ส่งงาน"}</button>
           </>
         ) : <EmptyState title="ยังไม่มีงานให้ส่ง" body="รอคุณครูกำหนดงานในหน้าจัดการคะแนนก่อน" />}
       </section>
@@ -1913,13 +1988,15 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
 }
 
 function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
+  const isLink = Boolean(item.linkUrl);
   return (
     <article className="submission-card review-card">
       <div>
-        <strong>{item.assignmentTitle}</strong>
-        <div className="student-submission-identity"><span>{item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>
+        <div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className="submission-kind-badge">{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"}</span></div>
+        <div className="student-submission-identity"><span>ผู้ส่ง {item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>
+        <SubmissionMemberList item={item} />
         <small>{item.submittedAt}</small>
-        <div className="review-file-box"><FileText aria-hidden /><div><span>ไฟล์งาน</span><strong>{item.filePath ? fileNameFromPath(item.filePath) : "ยังไม่มีไฟล์แนบ"}</strong></div><button className="template-button" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath}><ExternalLink aria-hidden />เปิดไฟล์</button></div>
+        <div className="review-file-box">{isLink ? <ExternalLink aria-hidden /> : <FileText aria-hidden />}<div><span>{isLink ? "ลิงก์งาน" : "ไฟล์งาน"}</span><strong>{isLink ? item.linkUrl : item.filePath ? fileNameFromPath(item.filePath) : "ยังไม่มีสิ่งที่แนบ"}</strong></div><button className="template-button" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl}><ExternalLink aria-hidden />{isLink ? "เปิดลิงก์" : "เปิดไฟล์"}</button></div>
       </div>
       <div className="review-grid">
         <label className="field">สถานะ<select value={item.status} onChange={(event) => updateSubmission(item.id, { status: event.target.value as SubmissionStatus })}>{submissionStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
@@ -1932,6 +2009,11 @@ function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmis
       </div>
     </article>
   );
+}
+
+function SubmissionMemberList({ item }: { item: SubmissionRecord }) {
+  if (item.submissionKind !== "group") return null;
+  return <div className="submission-member-list" aria-label="สมาชิกกลุ่ม">{item.groupMemberNames.map((name, index) => <span key={`${item.groupMemberCodes[index] || name}-${index}`}>{name}</span>)}</div>;
 }
 
 function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, students, busy, flash, addClassroom, deleteClassroom, selectClassroom, addStudent, deleteStudent, deleteStudents, uploadRosterFile, createStudentAccount }: { classrooms: Classroom[]; selectedClassroom?: Classroom; selectedClassroomId: string; students: StudentRecord[]; busy: boolean; flash: (message: string) => void; addClassroom: (draft: ClassroomDraft) => Promise<boolean>; deleteClassroom: (classroom: Classroom) => void; selectClassroom: (id: string) => void; addStudent: (draft: StudentDraft) => Promise<boolean>; deleteStudent: (student: StudentRecord) => void; deleteStudents: (students: StudentRecord[]) => Promise<boolean>; uploadRosterFile: (file: File | null) => Promise<boolean>; createStudentAccount: (student: StudentRecord, password: string, options?: { silent?: boolean }) => Promise<boolean> }) {
@@ -2097,7 +2179,7 @@ function MaterialCard({ item, role, downloadCount, onOpen, onDownload, onDelete 
 }
 
 function SubmissionList({ items, onOpen, compact = false }: { items: SubmissionRecord[]; onOpen?: (item: SubmissionRecord) => void; compact?: boolean }) {
-  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card compact-submission-card" key={item.id}><div><strong>{item.assignmentTitle}</strong><div className="student-submission-identity"><span>{item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>{!compact && <small className="submission-file-name">{item.filePath ? `ไฟล์: ${fileNameFromPath(item.filePath)}` : "ยังไม่มีไฟล์แนบ"}</small>}</div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath}><Eye aria-hidden />เปิดไฟล์</button>}</div></article>)}</div>;
+  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card compact-submission-card" key={item.id}><div><div className="submission-title-line"><strong>{item.assignmentTitle}</strong>{item.submissionKind === "group" && <span className="submission-kind-badge">งานกลุ่ม {item.groupMemberCodes.length} คน</span>}</div><div className="student-submission-identity"><span>ผู้ส่ง {item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>{!compact && <SubmissionMemberList item={item} />}{!compact && <small className="submission-file-name">{item.linkUrl ? `ลิงก์: ${item.linkUrl}` : item.filePath ? `ไฟล์: ${fileNameFromPath(item.filePath)}` : "ยังไม่มีสิ่งที่แนบ"}</small>}</div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath && !item.linkUrl}><Eye aria-hidden />{item.linkUrl ? "เปิดลิงก์" : "เปิดไฟล์"}</button>}</div></article>)}</div>;
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {

@@ -10,6 +10,7 @@ import type {
   StudentHomeCard,
   StudentRecord,
   SubmissionRecord,
+  SubmissionKind,
   SubmissionStatus
 } from "../types";
 
@@ -182,14 +183,23 @@ export function mapSubmissionRow(row: DatabaseRow): SubmissionRecord {
   const rawMax = number(row, ["raw_max", "rawMax"], 10);
   const finalMax = number(row, ["final_max", "finalMax"], 10);
   const rawStatus = text(row, ["status"], "รอตรวจ") as SubmissionStatus;
+  const rawKind = text(row, ["submission_kind", "submissionKind"], "individual") as SubmissionKind;
+  const studentCode = text(row, ["student_code", "studentId"]);
+  const studentName = text(row, ["student_name", "studentName"], "นักเรียน");
+  const groupMemberCodes = stringArray(row, ["group_member_codes", "groupMemberCodes"]);
+  const groupMemberNames = stringArray(row, ["group_member_names", "groupMemberNames"]);
   return {
     id: text(row, ["id"]),
     assignmentId: optionalText(row, ["assignment_id", "assignmentId"]),
     assignmentTitle: text(row, ["assignment_title", "assignmentTitle"], "งานที่ส่ง"),
-    studentName: text(row, ["student_name", "studentName"], "นักเรียน"),
-    studentId: text(row, ["student_code", "studentId"]),
+    studentName,
+    studentId: studentCode,
     classroomId: optionalText(row, ["classroom_id", "classroomId"]),
     filePath: optionalText(row, ["file_path", "filePath"]),
+    linkUrl: optionalText(row, ["link_url", "linkUrl"]),
+    submissionKind: rawKind === "group" ? "group" : "individual",
+    groupMemberCodes: groupMemberCodes.length ? groupMemberCodes : [studentCode].filter(Boolean),
+    groupMemberNames: groupMemberNames.length ? groupMemberNames : [studentName].filter(Boolean),
     status: submissionStatuses.has(rawStatus) ? rawStatus : "รอตรวจ",
     submittedAt: formatDate(value(row, "submitted_at", "submittedAt")),
     rawScore,

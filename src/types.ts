@@ -4,6 +4,7 @@ export type Role = "teacher" | "student";
 export type ViewKey = "home" | "materials" | "scores" | "work" | "students" | "profile";
 export type MaterialType = "PDF" | "VIDEO" | "IMG";
 export type SubmissionStatus = "ยังไม่ส่ง" | "ส่งแล้ว" | "รอตรวจ" | "ตรวจแล้ว" | "ให้แก้ไข" | "ส่งช้า";
+export type SubmissionKind = "individual" | "group";
 export type ScoreEntryStatus = "ungraded" | "scored" | "leave" | "expired" | "no_score";
 
 export interface AppSession {
@@ -108,6 +109,10 @@ export interface SubmissionRecord {
   studentId: string;
   classroomId?: string;
   filePath?: string;
+  linkUrl?: string;
+  submissionKind: SubmissionKind;
+  groupMemberCodes: string[];
+  groupMemberNames: string[];
   previewUrl?: string;
   status: SubmissionStatus;
   submittedAt: string;

@@ -8,6 +8,8 @@ For an existing production database, `assignment-groups-transaction.sql` is the 
 
 `score-entry-status.sql` adds persistent score states for ungraded, scored, leave, expired, and no-score entries.
 
+`group-submissions.sql` adds secure individual/group submissions, file-or-link delivery, and classroom-scoped peer selection.
+
 ## Access model
 
 - Teachers are identified only by `profiles.role = 'teacher'`.
