@@ -92,6 +92,7 @@ export function mapMaterialRow(row: DatabaseRow): Material {
     type,
     date: formatDate(value(row, "published_at", "date")),
     filePath: text(row, ["file_path", "filePath"]),
+    viewCount: number(row, ["view_count", "viewCount"], 0),
     className: text(row, ["class_name", "className"], NO_CLASS_LABEL),
     classroomId: optionalText(row, ["classroom_id", "classroomId"]),
     accent: accentForType(type)

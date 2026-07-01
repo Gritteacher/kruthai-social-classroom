@@ -29,6 +29,7 @@ export interface Material {
   type: MaterialType;
   date: string;
   filePath: string;
+  viewCount: number;
   className: string;
   classroomId?: string;
   previewUrl?: string;

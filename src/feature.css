@@ -232,6 +232,10 @@ textarea {
   font-size: 12px;
 }
 
+.material-meta {
+  flex-wrap: wrap;
+}
+
 .student-material-level {
   display: inline-flex;
   width: fit-content;

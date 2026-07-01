@@ -447,6 +447,13 @@ function App() {
       const { data, error } = await supabase!.storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
       if (error || !data?.signedUrl) return flash(error?.message || "เปิดไฟล์ไม่ได้");
       window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+      if (session?.role === "student") {
+        const viewResult = await supabase!.rpc("record_material_view", { p_material_id: item.id });
+        const nextViewCount = Number(viewResult.data);
+        if (!viewResult.error && Number.isFinite(nextViewCount)) {
+          setMaterialItems((current) => current.map((material) => material.id === item.id ? { ...material, viewCount: nextViewCount } : material));
+        }
+      }
       return flash(`เปิดไฟล์ ${item.title} ในแท็บใหม่`);
     }
     flash("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเปิดไฟล์ไม่ได้");
@@ -2175,7 +2182,7 @@ function FilePreview({ itemType, url, label, compact = false }: { itemType: Mate
 }
 
 function MaterialCard({ item, role, downloadCount, onOpen, onDownload, onDelete }: { item: Material; role: Role; downloadCount: number; onOpen: () => void; onDownload: () => void; onDelete: () => void }) {
-  return <article className={`material-card material-name-card tone-border-${item.accent}`}><div className="material-title-display"><div className="material-title-meta"><span className={`type-pill ${item.type.toLowerCase()}`}>{item.type}</span><span>{item.level}</span></div><h2>{item.title}</h2><p>{item.unit}</p></div><div className="material-body"><div className="material-meta"><span>{item.date}</span><span>ดาวน์โหลดแล้ว {downloadCount} ครั้ง</span></div><div className="card-actions"><button className="small-primary" onClick={onOpen}><Eye aria-hidden />ดู</button><button className="template-button" onClick={onDownload}><Download aria-hidden />ดาวน์โหลด</button>{role === "teacher" && <button className="danger-button small-danger" onClick={onDelete}><Trash2 aria-hidden />ลบ</button>}</div></div></article>;
+  return <article className={`material-card material-name-card tone-border-${item.accent}`}><div className="material-title-display"><div className="material-title-meta"><span className={`type-pill ${item.type.toLowerCase()}`}>{item.type}</span><span>{item.level}</span></div><h2>{item.title}</h2><p>{item.unit}</p></div><div className="material-body"><div className="material-meta"><span>{item.date}</span><span>เข้าชม {item.viewCount} ครั้ง · ดาวน์โหลด {downloadCount} ครั้ง</span></div><div className="card-actions"><button className="small-primary" onClick={onOpen}><Eye aria-hidden />ดู</button><button className="template-button" onClick={onDownload}><Download aria-hidden />ดาวน์โหลด</button>{role === "teacher" && <button className="danger-button small-danger" onClick={onDelete}><Trash2 aria-hidden />ลบ</button>}</div></div></article>;
 }
 
 function SubmissionList({ items, onOpen, compact = false }: { items: SubmissionRecord[]; onOpen?: (item: SubmissionRecord) => void; compact?: boolean }) {
