@@ -338,7 +338,7 @@ textarea {
     left: 0;
     z-index: 8;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
     min-height: 68px;
     border-top: 1px solid var(--line);
     background: rgba(255, 255, 255, 0.94);
@@ -2489,9 +2489,220 @@ textarea {
   background: rgba(41, 151, 255, 0.14);
 }
 
+.chat-panel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.chat-classroom-picker {
+  max-width: 460px;
+}
+
+.chat-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 620px;
+}
+
+.chat-roster {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.chat-roster button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+}
+
+.chat-roster button.active {
+  border-color: rgba(0, 113, 227, 0.42);
+  background: var(--surface-selected);
+  box-shadow: 0 12px 28px rgba(0, 113, 227, 0.09);
+}
+
+.chat-roster strong,
+.chat-roster span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-roster span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-roster b {
+  display: grid;
+  min-width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--coral);
+  color: #fff;
+  font-size: 12px;
+}
+
+.chat-thread {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface-soft);
+}
+
+.chat-thread-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.chat-thread-head strong,
+.chat-thread-head span {
+  display: block;
+}
+
+.chat-thread-head span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chat-thread-head svg {
+  width: 24px;
+  height: 24px;
+  color: var(--blue);
+}
+
+.chat-message-list {
+  display: flex;
+  min-height: 360px;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.chat-bubble {
+  max-width: min(72%, 620px);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+}
+
+.chat-bubble.mine {
+  align-self: flex-end;
+  border-color: rgba(0, 113, 227, 0.28);
+  background: #0071e3;
+  color: #fff;
+}
+
+.chat-bubble.theirs {
+  align-self: flex-start;
+}
+
+.chat-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-bubble span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-bubble.mine span {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.chat-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.chat-compose input {
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .chat-roster button,
+:root[data-theme="dark"] .chat-thread,
+:root[data-theme="dark"] .chat-thread-head,
+:root[data-theme="dark"] .chat-compose,
+:root[data-theme="dark"] .chat-compose input,
+:root[data-theme="dark"] .chat-bubble.theirs {
+  border-color: rgba(255, 255, 255, 0.13);
+  background: #1d1d1f;
+  color: #f5f5f7;
+}
+
+:root[data-theme="dark"] .chat-roster button.active {
+  border-color: rgba(41, 151, 255, 0.62);
+  background: rgba(41, 151, 255, 0.14);
+}
+
+:root[data-theme="dark"] .chat-thread {
+  background: #161617;
+}
+
 @media (max-width: 1100px) {
   .review-card {
     grid-template-columns: 1fr;
+  }
+
+  .chat-layout {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .chat-roster {
+    display: flex;
+    max-height: none;
+    overflow-x: auto;
+    padding: 0 0 4px;
+  }
+
+  .chat-roster button {
+    min-width: 220px;
+  }
+
+  .chat-thread {
+    min-height: 560px;
   }
 
   .home-card-manager-layout {

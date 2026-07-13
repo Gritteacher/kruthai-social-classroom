@@ -26,9 +26,11 @@ import {
   LogOut,
   Mail,
   Megaphone,
+  MessageCircle,
   Plus,
   Save,
   Search,
+  Send,
   ShieldCheck,
   Trash2,
   Upload,
@@ -57,6 +59,7 @@ import {
   isLegacyDemoSubmission,
   mapAnnouncementRow,
   mapAssignmentRow,
+  mapChatMessageRow,
   mapClassroomRow,
   mapMaterialDownloadLogRow,
   mapMaterialRow,
@@ -68,6 +71,7 @@ import {
 import type {
   Announcement,
   AppSession,
+  ChatMessage,
   Classroom,
   Material,
   MaterialDownloadLog,
@@ -125,7 +129,8 @@ const teacherNav: NavItem[] = [
   { key: "materials", label: "สื่อการสอน", icon: BookOpen },
   { key: "scores", label: "คะแนน", icon: BarChart3 },
   { key: "work", label: "ตรวจงาน", icon: ClipboardCheck },
-  { key: "students", label: "รายชื่อ", icon: Users }
+  { key: "students", label: "รายชื่อ", icon: Users },
+  { key: "chat", label: "แชท", icon: MessageCircle }
 ];
 
 const studentNav: NavItem[] = [
@@ -133,6 +138,7 @@ const studentNav: NavItem[] = [
   { key: "materials", label: "สื่อการสอน", icon: BookOpen },
   { key: "work", label: "ส่งงาน", icon: CloudUpload },
   { key: "scores", label: "คะแนน", icon: BarChart3 },
+  { key: "chat", label: "แชท", icon: MessageCircle },
   { key: "profile", label: "โปรไฟล์", icon: User }
 ];
 
@@ -185,6 +191,7 @@ function App() {
   const [scoreEntries, setScoreEntries] = useState<ScoreEntry[]>([]);
   const [scoreAutoSaveStates, setScoreAutoSaveStates] = useState<Record<string, ScoreAutoSaveStatus>>({});
   const [submissionItems, setSubmissionItems] = useState<SubmissionRecord[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const scoreAutoSaveTimers = useRef(new Map<string, number>());
   const scoreAutoSaveVersions = useRef(new Map<string, number>());
   const nav = session?.role === "student" ? studentNav : teacherNav;
@@ -214,6 +221,9 @@ function App() {
     ? studentHomeCards
     : studentHomeCards.filter((card) => card.isActive && (!card.classroomIds.length || Boolean(workingClassroom && card.classroomIds.includes(workingClassroom.id))));
   const activeDownloadLogs = session?.role === "teacher" ? materialDownloadLogs : materialDownloadLogs.filter((item) => item.studentId === session?.studentCode);
+  const activeChatMessages = session?.role === "teacher"
+    ? chatMessages
+    : chatMessages.filter((message) => message.studentId === session?.studentCode);
   const activeScoreSaveStates = activeAssignments.flatMap((assignment) => activeStudents.map((student) => scoreAutoSaveStates[scoreEntryKey(assignment.id, student.id)])).filter(Boolean);
   const scoreAutoSaveStatus: ScoreAutoSaveStatus = activeScoreSaveStates.includes("error") ? "error" : activeScoreSaveStates.includes("saving") ? "saving" : activeScoreSaveStates.includes("pending") ? "pending" : activeScoreSaveStates.includes("saved") ? "saved" : "idle";
 
@@ -240,7 +250,7 @@ function App() {
     }
     try {
       const client = supabase!;
-      const [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult] = await Promise.all([
+      const [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult, chatResult] = await Promise.all([
         client.from("classrooms").select("*").order("created_at", { ascending: false }),
         client.from("materials").select("*").order("published_at", { ascending: false }),
         client.from("announcements").select("*").order("published_at", { ascending: false }),
@@ -249,10 +259,11 @@ function App() {
         client.from("students").select("*").order("student_no", { ascending: true }),
         client.from("score_assignments").select("*").order("created_at", { ascending: true }),
         fetchAllScoreEntryRows(),
-        client.from("submissions").select("*").order("submitted_at", { ascending: false })
+        client.from("submissions").select("*").order("submitted_at", { ascending: false }),
+        client.from("chat_messages").select("*").order("created_at", { ascending: true })
       ]);
 
-      const errors = [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult].filter((result) => result.error);
+      const errors = [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult, chatResult].filter((result) => result.error);
       if (errors.length) flash("บางตารางใน Supabase ยังไม่พร้อม กรุณาตรวจ schema แล้วลองโหลดใหม่");
 
       const nextClassrooms = (classroomsResult.data ?? []).map(mapClassroomRow).sort(sortClassrooms);
@@ -284,6 +295,7 @@ function App() {
       setAssignments((assignmentsResult.data ?? []).map(mapAssignmentRow));
       setScoreEntries((entriesResult.data ?? []).map(mapScoreEntryRow));
       setSubmissionItems((submissionsResult.data ?? []).map(mapSubmissionRow).filter((item) => !isLegacyDemoSubmission(item)));
+      setChatMessages((chatResult.data ?? []).map(mapChatMessageRow));
       if (showToast && errors.length === 0) flash("โหลดข้อมูลล่าสุดจาก Supabase แล้ว");
     } catch (error) {
       flash(userFacingError(error, "โหลดข้อมูลจาก Supabase ไม่สำเร็จ"));
@@ -1360,6 +1372,58 @@ function App() {
     return true;
   }
 
+  async function sendChatMessage(student: StudentRecord | undefined, body: string) {
+    if (!body.trim()) return flashAndFail("พิมพ์ข้อความก่อนส่ง", flash);
+    if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
+    if (!session) return flashAndFail("กรุณาเข้าสู่ระบบก่อนส่งข้อความ", flash);
+    const targetStudent = session.role === "teacher" ? student : currentStudent;
+    if (!targetStudent?.studentId) return flashAndFail(session.role === "teacher" ? "เลือกนักเรียนก่อนส่งข้อความ" : "ไม่พบข้อมูลนักเรียนของคุณ", flash);
+    setBusy(true);
+    try {
+      const result = await supabase!
+        .from("chat_messages")
+        .insert({
+          student_code: targetStudent.studentId,
+          student_name: targetStudent.name || session.name,
+          classroom_id: targetStudent.classroomId || workingClassroom?.id || null,
+          sender_role: session.role,
+          body: body.trim(),
+          is_read_by_teacher: session.role === "teacher",
+          is_read_by_student: session.role === "student"
+        })
+        .select("*")
+        .single();
+      if (result.error) throw result.error;
+      setChatMessages((current) => [...current, mapChatMessageRow(result.data)]);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "ส่งข้อความไม่สำเร็จ"));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markChatThreadRead(studentCode: string) {
+    if (!isSupabaseConfigured || session?.role !== "teacher" || !studentCode.trim()) return;
+    try {
+      const result = await supabase!
+        .from("chat_messages")
+        .update({ is_read_by_teacher: true })
+        .eq("student_code", studentCode)
+        .eq("sender_role", "student")
+        .eq("is_read_by_teacher", false)
+        .select("id");
+      if (result.error) throw result.error;
+      const ids = new Set((result.data ?? []).map((row) => String(row.id)));
+      if (ids.size) {
+        setChatMessages((current) => current.map((message) => ids.has(message.id) ? { ...message, isReadByTeacher: true } : message));
+      }
+    } catch (error) {
+      flash(userFacingError(error, "อัปเดตสถานะอ่านข้อความไม่สำเร็จ"));
+    }
+  }
+
   if (!session) {
     return <Auth role={role} theme={theme} busy={busy} onRole={setRole} onTheme={() => setTheme((current) => current === "light" ? "dark" : "light")} onLogin={login} onResetPassword={requestPasswordReset} toast={toast} />;
   }
@@ -1404,6 +1468,7 @@ function App() {
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
+          {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} busy={busy} sendMessage={sendChatMessage} markThreadRead={markChatThreadRead} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
         </section>
       </main>
@@ -1468,6 +1533,77 @@ function TeacherClassroomSelector({ classrooms, selectedClassroomId, onChange }:
         {classrooms.length ? classrooms.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>) : <option value="">ยังไม่มีห้องเรียน</option>}
       </select>
     </label>
+  );
+}
+
+function ChatView({ role, classrooms, selectedClassroomId, onClassroomChange, students, currentStudent, messages, busy, sendMessage, markThreadRead }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; currentStudent?: StudentRecord; messages: ChatMessage[]; busy: boolean; sendMessage: (student: StudentRecord | undefined, body: string) => Promise<boolean>; markThreadRead: (studentCode: string) => void }) {
+  const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [draft, setDraft] = useState("");
+  const teacherMode = role === "teacher";
+  const selectedStudent = teacherMode ? students.find((student) => student.id === selectedStudentId) || students[0] : currentStudent;
+  const visibleMessages = useMemo(() => {
+    if (!selectedStudent?.studentId) return [];
+    return messages
+      .filter((message) => message.studentId === selectedStudent.studentId)
+      .sort((a, b) => Date.parse(a.createdAtRaw) - Date.parse(b.createdAtRaw));
+  }, [messages, selectedStudent?.studentId]);
+  const unreadByStudent = useMemo(() => {
+    const counts = new Map<string, number>();
+    messages.forEach((message) => {
+      if (message.senderRole === "student" && !message.isReadByTeacher) {
+        counts.set(message.studentId, (counts.get(message.studentId) ?? 0) + 1);
+      }
+    });
+    return counts;
+  }, [messages]);
+
+  useEffect(() => {
+    if (!teacherMode) return;
+    if (selectedStudentId && students.some((student) => student.id === selectedStudentId)) return;
+    setSelectedStudentId(students[0]?.id || "");
+  }, [selectedStudentId, students, teacherMode]);
+
+  useEffect(() => {
+    if (teacherMode && selectedStudent?.studentId) markThreadRead(selectedStudent.studentId);
+  }, [selectedStudent?.studentId, teacherMode]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const ok = await sendMessage(selectedStudent, draft);
+    if (ok) setDraft("");
+  }
+
+  const headerTitle = teacherMode ? selectedStudent?.name || "เลือกนักเรียน" : "ครูไต๋";
+  const headerNote = teacherMode ? selectedStudent?.studentId ? `รหัส ${selectedStudent.studentId}` : "เลือกนักเรียนเพื่อเริ่มแชท" : "ส่งข้อความถึงครู";
+
+  return (
+    <div className="page-stack">
+      <PageHeader title="แชท" eyebrow={teacherMode ? "ข้อความจากนักเรียน" : "พูดคุยกับครู"} />
+      <section className="panel chat-panel">
+        {teacherMode && <div className="chat-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>}
+        <div className="chat-layout">
+          {teacherMode && (
+            <aside className="chat-roster" aria-label="รายชื่อนักเรียนในแชท">
+              {students.length ? students.map((student) => {
+                const unread = unreadByStudent.get(student.studentId) ?? 0;
+                const latest = [...messages].reverse().find((message) => message.studentId === student.studentId);
+                return <button className={selectedStudent?.id === student.id ? "active" : ""} type="button" onClick={() => setSelectedStudentId(student.id)} key={student.id}><div><strong>{student.no ? `${student.no}. ` : ""}{student.name}</strong><span>{latest?.body || "ยังไม่มีข้อความ"}</span></div>{unread > 0 && <b>{unread}</b>}</button>;
+              }) : <EmptyState title="ยังไม่มีรายชื่อในห้องนี้" body="เลือกห้องเรียนที่มีรายชื่อนักเรียนก่อนเปิดแชท" />}
+            </aside>
+          )}
+          <div className="chat-thread">
+            <header className="chat-thread-head"><div><strong>{headerTitle}</strong><span>{headerNote}</span></div><MessageCircle aria-hidden /></header>
+            <div className="chat-message-list">
+              {selectedStudent ? visibleMessages.length ? visibleMessages.map((message) => <article className={`chat-bubble ${message.senderRole === role ? "mine" : "theirs"}`} key={message.id}><p>{message.body}</p><span>{message.senderRole === "teacher" ? "ครู" : message.studentName} · {message.createdAt}</span></article>) : <EmptyState title="ยังไม่มีข้อความ" body={teacherMode ? "พิมพ์ข้อความเพื่อเริ่มคุยกับนักเรียนคนนี้" : "ส่งคำถามถึงครูได้จากช่องด้านล่าง"} /> : <EmptyState title="เลือกห้องแชท" body="เลือกนักเรียนจากรายชื่อด้านซ้ายก่อนตอบข้อความ" />}
+            </div>
+            <form className="chat-compose" onSubmit={submit}>
+              <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={selectedStudent ? "พิมพ์ข้อความ..." : "เลือกนักเรียนก่อน"} disabled={busy || !selectedStudent} />
+              <button className="primary-button" disabled={busy || !selectedStudent || !draft.trim()}><Send aria-hidden />ส่ง</button>
+            </form>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 

@@ -172,6 +172,24 @@ create table if not exists public.material_download_logs (
   downloaded_at timestamptz not null default now()
 );
 
+create table if not exists public.chat_messages (
+  id uuid primary key default extensions.uuid_generate_v4(),
+  student_code text not null,
+  student_name text not null,
+  classroom_id uuid references public.classrooms (id) on delete set null,
+  sender_role text not null check (sender_role in ('teacher', 'student')),
+  body text not null check (char_length(trim(body)) between 1 and 1200),
+  is_read_by_teacher boolean not null default false,
+  is_read_by_student boolean not null default false,
+  created_by uuid references public.profiles (id) default auth.uid(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists chat_messages_student_created_idx
+  on public.chat_messages (student_code, created_at);
+create index if not exists chat_messages_classroom_created_idx
+  on public.chat_messages (classroom_id, created_at desc);
+
 alter table public.profiles add column if not exists school_name text default 'โรงเรียนเทพศิรินทร์ นนทบุรี';
 alter table public.materials add column if not exists class_name text not null default 'ยังไม่ได้เลือกห้องเรียน';
 alter table public.materials add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
@@ -309,6 +327,7 @@ alter table public.announcements enable row level security;
 alter table public.student_home_cards enable row level security;
 alter table public.student_roster_uploads enable row level security;
 alter table public.material_download_logs enable row level security;
+alter table public.chat_messages enable row level security;
 
 create or replace function public.is_teacher()
 returns boolean
@@ -758,7 +777,7 @@ begin
       and tablename = any (array[
         'profiles', 'classrooms', 'students', 'materials', 'announcements', 'student_home_cards',
         'score_assignments', 'score_entries', 'submissions', 'scores',
-        'student_roster_uploads', 'material_download_logs'
+        'student_roster_uploads', 'material_download_logs', 'chat_messages'
       ])
   loop
     execute format('drop policy if exists %I on %I.%I', policy_record.policyname, policy_record.schemaname, policy_record.tablename);
@@ -957,6 +976,32 @@ with check (
   )
 );
 create policy "download logs delete teacher" on public.material_download_logs
+for delete to authenticated using (public.is_teacher());
+
+create policy "chat messages select own or teacher" on public.chat_messages
+for select to authenticated
+using (public.is_teacher() or student_code = public.current_student_code());
+create policy "chat messages insert teacher or own student" on public.chat_messages
+for insert to authenticated with check (
+  (
+    public.is_teacher()
+    and sender_role = 'teacher'
+    and exists (
+      select 1 from public.students student
+      where student.student_code = chat_messages.student_code
+        and (chat_messages.classroom_id is null or student.classroom_id = chat_messages.classroom_id)
+    )
+  )
+  or (
+    sender_role = 'student'
+    and student_code = public.current_student_code()
+    and student_name = public.current_student_name()
+    and classroom_id = public.user_classroom_id()
+  )
+);
+create policy "chat messages update teacher" on public.chat_messages
+for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "chat messages delete teacher" on public.chat_messages
 for delete to authenticated using (public.is_teacher());
 
 do $$

@@ -1,5 +1,6 @@
 import type {
   Announcement,
+  ChatMessage,
   Classroom,
   Material,
   MaterialDownloadLog,
@@ -207,6 +208,22 @@ export function mapSubmissionRow(row: DatabaseRow): SubmissionRecord {
     rawMax,
     finalScore: number(row, ["final_score", "finalScore"], scaledScore(rawScore, rawMax, finalMax)),
     finalMax
+  };
+}
+
+export function mapChatMessageRow(row: DatabaseRow): ChatMessage {
+  const rawRole = text(row, ["sender_role", "senderRole"], "student");
+  return {
+    id: text(row, ["id"]),
+    studentId: text(row, ["student_code", "studentId"]),
+    studentName: text(row, ["student_name", "studentName"], "นักเรียน"),
+    classroomId: optionalText(row, ["classroom_id", "classroomId"]),
+    senderRole: rawRole === "teacher" ? "teacher" : "student",
+    body: text(row, ["body"]),
+    isReadByTeacher: value(row, "is_read_by_teacher", "isReadByTeacher") === true,
+    isReadByStudent: value(row, "is_read_by_student", "isReadByStudent") === true,
+    createdAt: formatDate(value(row, "created_at", "createdAt")),
+    createdAtRaw: text(row, ["created_at", "createdAt"], new Date().toISOString())
   };
 }
 
