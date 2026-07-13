@@ -132,7 +132,8 @@ const teacherNav: NavItem[] = [
   { key: "scores", label: "คะแนน", icon: BarChart3 },
   { key: "work", label: "ตรวจงาน", icon: ClipboardCheck },
   { key: "students", label: "รายชื่อ", icon: Users },
-  { key: "chat", label: "แชท", icon: MessageCircle }
+  { key: "chat", label: "แชท", icon: MessageCircle },
+  { key: "profile", label: "โปรไฟล์", icon: User }
 ];
 
 const studentNav: NavItem[] = [
@@ -200,7 +201,7 @@ function App() {
   const chatTypingChannel = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(null);
   const chatTypingClearTimers = useRef(new Map<string, number>());
   const nav = session?.role === "student" ? studentNav : teacherNav;
-  const bottomNav = session?.role === "student" ? nav.filter((item) => item.key !== "profile") : nav;
+  const bottomNav = nav.filter((item) => item.key !== "profile");
   const effectiveSelectedClassroomId = selectedClassroomId || classroomItems[0]?.id || "";
   const selectedClassroom = classroomItems.find((item) => item.id === effectiveSelectedClassroomId);
   const currentStudent = session?.studentCode ? students.find((student) => student.studentId === session.studentCode) : undefined;
@@ -1545,7 +1546,7 @@ function App() {
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
             <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
             <button className="theme-toggle-button" type="button" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title="เปลี่ยนธีม">{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}<span>{theme === "light" ? "โทนมืด" : "โทนสว่าง"}</span></button>
-            {session.role === "student" && <button className={`mobile-profile-button ${view === "profile" ? "active" : ""}`} type="button" onClick={() => setView("profile")} title="โปรไฟล์"><User aria-hidden /><span>โปรไฟล์</span></button>}
+            <button className={`mobile-profile-button ${view === "profile" ? "active" : ""}`} type="button" onClick={() => setView("profile")} title="โปรไฟล์"><User aria-hidden /><span>โปรไฟล์</span></button>
             <button className="mobile-logout-button" onClick={logout} title="ออกจากระบบ"><LogOut aria-hidden /><span>ออกจากระบบ</span></button>
           </div>
         </header>
