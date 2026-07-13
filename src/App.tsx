@@ -448,10 +448,18 @@ function App() {
       if (error || !data?.signedUrl) return flash(error?.message || "เปิดไฟล์ไม่ได้");
       window.open(data.signedUrl, "_blank", "noopener,noreferrer");
       if (session?.role === "student") {
-        const viewResult = await supabase!.rpc("record_material_view", { p_material_id: item.id });
-        const nextViewCount = Number(viewResult.data);
-        if (!viewResult.error && Number.isFinite(nextViewCount)) {
-          setMaterialItems((current) => current.map((material) => material.id === item.id ? { ...material, viewCount: nextViewCount } : material));
+        const optimisticViewCount = item.viewCount + 1;
+        setMaterialItems((current) => current.map((material) => material.id === item.id ? { ...material, viewCount: optimisticViewCount } : material));
+        try {
+          const viewResult = await supabase!.rpc("record_material_view", { p_material_id: item.id });
+          if (viewResult.error) throw viewResult.error;
+          const nextViewCount = Number(viewResult.data);
+          if (Number.isFinite(nextViewCount)) {
+            setMaterialItems((current) => current.map((material) => material.id === item.id ? { ...material, viewCount: nextViewCount } : material));
+          }
+        } catch (viewError) {
+          setMaterialItems((current) => current.map((material) => material.id === item.id ? { ...material, viewCount: item.viewCount } : material));
+          return flash(userFacingError(viewError, "เปิดไฟล์ได้ แต่บันทึกยอดเข้าชมไม่สำเร็จ"));
         }
       }
       return flash(`เปิดไฟล์ ${item.title} ในแท็บใหม่`);

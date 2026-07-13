@@ -85,10 +85,20 @@ export function storageSafeFileName(name: string) {
 }
 
 export function userFacingError(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : String(error || "");
+  const source = error as { message?: unknown; error_description?: unknown; details?: unknown; hint?: unknown; code?: unknown } | null | undefined;
+  const parts = [
+    error instanceof Error ? error.message : source?.message,
+    source?.error_description,
+    source?.details,
+    source?.hint
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  const message = parts[0] || (typeof error === "string" ? error : "");
+  const debugCode = source?.code ? ` (${String(source.code)})` : "";
   if (/row-level security|permission denied|not allowed/i.test(message)) return "คุณไม่มีสิทธิ์ดำเนินการนี้";
   if (/jwt|session|refresh token/i.test(message)) return "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่";
   if (/duplicate|unique constraint/i.test(message)) return "ข้อมูลนี้มีอยู่ในระบบแล้ว";
   if (/invalid key/i.test(message)) return "ชื่อหรือเส้นทางไฟล์ไม่ถูกต้อง";
-  return message || fallback;
+  return message ? `${message}${debugCode}` : fallback;
 }

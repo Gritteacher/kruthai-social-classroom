@@ -375,6 +375,33 @@ as $$
   limit 1;
 $$;
 
+create or replace function public.normalized_grade_level(level_text text)
+returns text
+language sql
+immutable
+set search_path = public, pg_temp
+as $$
+  select case
+    when coalesce(level_text, '') ~* 'ม\.?\s*1' then 'ม.1'
+    when coalesce(level_text, '') ~* 'ม\.?\s*2' then 'ม.2'
+    when coalesce(level_text, '') ~* 'ม\.?\s*3' then 'ม.3'
+    when coalesce(level_text, '') ~* 'ม\.?\s*4' then 'ม.4'
+    when coalesce(level_text, '') ~* 'ม\.?\s*5' then 'ม.5'
+    when coalesce(level_text, '') ~* 'ม\.?\s*6' then 'ม.6'
+    else null
+  end;
+$$;
+
+create or replace function public.material_level_matches(material_level text, classroom_level text)
+returns boolean
+language sql
+immutable
+set search_path = public, pg_temp
+as $$
+  select public.normalized_grade_level(material_level) is not null
+    and public.normalized_grade_level(material_level) = public.normalized_grade_level(classroom_level);
+$$;
+
 create or replace function public.get_classroom_peers()
 returns table (
   id uuid,
@@ -492,7 +519,7 @@ as $$
     where m.file_path = object_name
       and (
         m.classroom_id = public.user_classroom_id()
-        or (m.classroom_id is null and m.level = public.user_classroom_level())
+        or (m.classroom_id is null and public.material_level_matches(m.level, public.user_classroom_level()))
       )
   );
 $$;
@@ -520,6 +547,8 @@ revoke all on function public.current_student_code() from public;
 revoke all on function public.current_student_name() from public;
 revoke all on function public.user_classroom_id() from public;
 revoke all on function public.user_classroom_level() from public;
+revoke all on function public.normalized_grade_level(text) from public;
+revoke all on function public.material_level_matches(text, text) from public;
 revoke all on function public.get_classroom_peers() from public;
 revoke all on function public.submit_assignment_work(uuid, text, text, text[]) from public;
 revoke all on function public.can_access_material_file(text) from public;
@@ -529,6 +558,8 @@ grant execute on function public.current_student_code() to authenticated;
 grant execute on function public.current_student_name() to authenticated;
 grant execute on function public.user_classroom_id() to authenticated;
 grant execute on function public.user_classroom_level() to authenticated;
+grant execute on function public.normalized_grade_level(text) to authenticated;
+grant execute on function public.material_level_matches(text, text) to authenticated;
 grant execute on function public.get_classroom_peers() to authenticated;
 grant execute on function public.submit_assignment_work(uuid, text, text, text[]) to authenticated;
 grant execute on function public.can_access_material_file(text) to authenticated;
@@ -768,7 +799,7 @@ for select to authenticated
 using (
   public.is_teacher()
   or classroom_id = public.user_classroom_id()
-  or (classroom_id is null and level = public.user_classroom_level())
+  or (classroom_id is null and public.material_level_matches(level, public.user_classroom_level()))
 );
 create policy "materials insert teacher" on public.materials
 for insert to authenticated with check (public.is_teacher());
@@ -804,7 +835,7 @@ begin
         material.classroom_id = public.user_classroom_id()
         or (
           material.classroom_id is null
-          and material.level = public.user_classroom_level()
+          and public.material_level_matches(material.level, public.user_classroom_level())
         )
       )
     returning material.view_count into v_view_count;
@@ -921,7 +952,7 @@ with check (
     where material.id = material_download_logs.material_id
       and (
         material.classroom_id = public.user_classroom_id()
-        or (material.classroom_id is null and material.level = public.user_classroom_level())
+        or (material.classroom_id is null and public.material_level_matches(material.level, public.user_classroom_level()))
       )
   )
 );
