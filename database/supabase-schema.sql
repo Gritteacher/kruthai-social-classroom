@@ -190,6 +190,24 @@ create index if not exists chat_messages_student_created_idx
 create index if not exists chat_messages_classroom_created_idx
   on public.chat_messages (classroom_id, created_at desc);
 
+alter table public.chat_messages replica identity full;
+
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+    and not exists (
+      select 1
+      from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'chat_messages'
+    )
+  then
+    alter publication supabase_realtime add table public.chat_messages;
+  end if;
+end;
+$$;
+
 alter table public.profiles add column if not exists school_name text default 'โรงเรียนเทพศิรินทร์ นนทบุรี';
 alter table public.materials add column if not exists class_name text not null default 'ยังไม่ได้เลือกห้องเรียน';
 alter table public.materials add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;

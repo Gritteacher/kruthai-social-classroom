@@ -101,6 +101,8 @@ type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string;
 type ThemeMode = "light" | "dark";
 type ScoreAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 type ProfileRow = { full_name?: string | null; role?: string | null; class_name?: string | null; school_name?: string | null; student_code?: string | null };
+type ChatTypingStatus = { role: Role; name: string; at: number };
+type ChatTypingPayload = { studentCode?: string; role?: Role; name?: string; isTyping?: boolean };
 
 const SCHOOL_LOGO = `${import.meta.env.BASE_URL}kruthai-logo.png`;
 const SCHOOL_NAME = "โรงเรียนเทพศิรินทร์ นนทบุรี";
@@ -192,8 +194,11 @@ function App() {
   const [scoreAutoSaveStates, setScoreAutoSaveStates] = useState<Record<string, ScoreAutoSaveStatus>>({});
   const [submissionItems, setSubmissionItems] = useState<SubmissionRecord[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatTypingByStudent, setChatTypingByStudent] = useState<Record<string, ChatTypingStatus>>({});
   const scoreAutoSaveTimers = useRef(new Map<string, number>());
   const scoreAutoSaveVersions = useRef(new Map<string, number>());
+  const chatTypingChannel = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(null);
+  const chatTypingClearTimers = useRef(new Map<string, number>());
   const nav = session?.role === "student" ? studentNav : teacherNav;
   const bottomNav = session?.role === "student" ? nav.filter((item) => item.key !== "profile") : nav;
   const effectiveSelectedClassroomId = selectedClassroomId || classroomItems[0]?.id || "";
@@ -309,6 +314,70 @@ function App() {
     if (!session) return;
     void loadClassroomData();
   }, [session?.role]);
+
+  useEffect(() => {
+    if (!session || !isSupabaseConfigured || !workingClassroom?.id) return;
+    const classroomId = workingClassroom.id;
+
+    const clearTypingStatus = (studentCode: string) => {
+      const currentTimer = chatTypingClearTimers.current.get(studentCode);
+      if (currentTimer) window.clearTimeout(currentTimer);
+      chatTypingClearTimers.current.delete(studentCode);
+      setChatTypingByStudent((current) => {
+        if (!current[studentCode]) return current;
+        const next = { ...current };
+        delete next[studentCode];
+        return next;
+      });
+    };
+
+    const channel = supabase!
+      .channel(`classroom-chat:${classroomId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages", filter: `classroom_id=eq.${classroomId}` }, (payload) => {
+        if (payload.eventType === "DELETE") {
+          const oldRow = payload.old as Record<string, unknown>;
+          const deletedId = String(oldRow.id || "");
+          if (deletedId) setChatMessages((current) => current.filter((message) => message.id !== deletedId));
+          return;
+        }
+
+        const nextMessage = mapChatMessageRow(payload.new as Record<string, unknown>);
+        setChatMessages((current) => upsertChatMessage(current, nextMessage));
+        if (nextMessage.senderRole !== session.role) clearTypingStatus(nextMessage.studentId);
+      })
+      .on("broadcast", { event: "typing" }, ({ payload }) => {
+        const data = payload as ChatTypingPayload;
+        const studentCode = String(data.studentCode || "").trim();
+        const senderRole = data.role;
+        if (!studentCode || (senderRole !== "teacher" && senderRole !== "student") || senderRole === session.role) return;
+        if (session.role === "student" && studentCode !== session.studentCode) return;
+
+        if (!data.isTyping) {
+          clearTypingStatus(studentCode);
+          return;
+        }
+
+        const currentTimer = chatTypingClearTimers.current.get(studentCode);
+        if (currentTimer) window.clearTimeout(currentTimer);
+        setChatTypingByStudent((current) => ({
+          ...current,
+          [studentCode]: { role: senderRole, name: String(data.name || (senderRole === "teacher" ? "ครู" : "นักเรียน")), at: Date.now() }
+        }));
+        const timeout = window.setTimeout(() => clearTypingStatus(studentCode), 3500);
+        chatTypingClearTimers.current.set(studentCode, timeout);
+      })
+      .subscribe();
+
+    chatTypingChannel.current = channel;
+
+    return () => {
+      chatTypingChannel.current = null;
+      void supabase!.removeChannel(channel);
+      chatTypingClearTimers.current.forEach((timer) => window.clearTimeout(timer));
+      chatTypingClearTimers.current.clear();
+      setChatTypingByStudent({});
+    };
+  }, [session?.role, session?.studentCode, session?.name, workingClassroom?.id]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -1395,7 +1464,8 @@ function App() {
         .select("*")
         .single();
       if (result.error) throw result.error;
-      setChatMessages((current) => [...current, mapChatMessageRow(result.data)]);
+      setChatMessages((current) => upsertChatMessage(current, mapChatMessageRow(result.data)));
+      sendChatTyping(targetStudent, false);
       return true;
     } catch (error) {
       flash(userFacingError(error, "ส่งข้อความไม่สำเร็จ"));
@@ -1403,6 +1473,22 @@ function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function sendChatTyping(student: StudentRecord | undefined, isTyping: boolean) {
+    if (!session || !chatTypingChannel.current) return;
+    const targetStudent = session.role === "teacher" ? student : currentStudent;
+    if (!targetStudent?.studentId) return;
+    void chatTypingChannel.current.send({
+      type: "broadcast",
+      event: "typing",
+      payload: {
+        studentCode: targetStudent.studentId,
+        role: session.role,
+        name: session.name,
+        isTyping
+      } satisfies ChatTypingPayload
+    });
   }
 
   async function markChatThreadRead(studentCode: string) {
@@ -1470,7 +1556,7 @@ function App() {
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
-          {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} busy={busy} sendMessage={sendChatMessage} markThreadRead={markChatThreadRead} />}
+          {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
         </section>
       </main>
@@ -1538,11 +1624,14 @@ function TeacherClassroomSelector({ classrooms, selectedClassroomId, onChange }:
   );
 }
 
-function ChatView({ role, classrooms, selectedClassroomId, onClassroomChange, students, currentStudent, messages, busy, sendMessage, markThreadRead }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; currentStudent?: StudentRecord; messages: ChatMessage[]; busy: boolean; sendMessage: (student: StudentRecord | undefined, body: string) => Promise<boolean>; markThreadRead: (studentCode: string) => void }) {
+function ChatView({ role, classrooms, selectedClassroomId, onClassroomChange, students, currentStudent, messages, typingByStudent, busy, sendMessage, sendTyping, markThreadRead }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; currentStudent?: StudentRecord; messages: ChatMessage[]; typingByStudent: Record<string, ChatTypingStatus>; busy: boolean; sendMessage: (student: StudentRecord | undefined, body: string) => Promise<boolean>; sendTyping: (student: StudentRecord | undefined, isTyping: boolean) => void; markThreadRead: (studentCode: string) => void }) {
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [draft, setDraft] = useState("");
+  const typingTimer = useRef<number | null>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
   const teacherMode = role === "teacher";
   const selectedStudent = teacherMode ? students.find((student) => student.id === selectedStudentId) || students[0] : currentStudent;
+  const selectedTyping = selectedStudent?.studentId ? typingByStudent[selectedStudent.studentId] : undefined;
   const visibleMessages = useMemo(() => {
     if (!selectedStudent?.studentId) return [];
     return messages
@@ -1569,14 +1658,35 @@ function ChatView({ role, classrooms, selectedClassroomId, onClassroomChange, st
     if (teacherMode && selectedStudent?.studentId) markThreadRead(selectedStudent.studentId);
   }, [selectedStudent?.studentId, teacherMode]);
 
+  useEffect(() => {
+    const element = messageListRef.current;
+    if (!element) return;
+    element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
+  }, [visibleMessages.length, selectedStudent?.studentId, selectedTyping?.at]);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimer.current) window.clearTimeout(typingTimer.current);
+      sendTyping(selectedStudent, false);
+    };
+  }, [selectedStudent?.studentId]);
+
+  function updateDraft(value: string) {
+    setDraft(value);
+    sendTyping(selectedStudent, Boolean(value.trim()));
+    if (typingTimer.current) window.clearTimeout(typingTimer.current);
+    typingTimer.current = window.setTimeout(() => sendTyping(selectedStudent, false), 1800);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    sendTyping(selectedStudent, false);
     const ok = await sendMessage(selectedStudent, draft);
     if (ok) setDraft("");
   }
 
   const headerTitle = teacherMode ? selectedStudent?.name || "เลือกนักเรียน" : "ครูไต๋";
-  const headerNote = teacherMode ? selectedStudent?.studentId ? `รหัส ${selectedStudent.studentId}` : "เลือกนักเรียนเพื่อเริ่มแชท" : "ส่งข้อความถึงครู";
+  const headerNote = selectedTyping ? `${selectedTyping.name} กำลังพิมพ์...` : teacherMode ? selectedStudent?.studentId ? `รหัส ${selectedStudent.studentId}` : "เลือกนักเรียนเพื่อเริ่มแชท" : "ส่งข้อความถึงครู";
 
   return (
     <div className="page-stack">
@@ -1589,17 +1699,19 @@ function ChatView({ role, classrooms, selectedClassroomId, onClassroomChange, st
               {students.length ? students.map((student) => {
                 const unread = unreadByStudent.get(student.studentId) ?? 0;
                 const latest = [...messages].reverse().find((message) => message.studentId === student.studentId);
-                return <button className={selectedStudent?.id === student.id ? "active" : ""} type="button" onClick={() => setSelectedStudentId(student.id)} key={student.id}><div><strong>{student.no ? `${student.no}. ` : ""}{student.name}</strong><span>{latest?.body || "ยังไม่มีข้อความ"}</span></div>{unread > 0 && <b>{unread}</b>}</button>;
+                const typing = typingByStudent[student.studentId];
+                return <button className={selectedStudent?.id === student.id ? "active" : ""} type="button" onClick={() => setSelectedStudentId(student.id)} key={student.id}><div><strong>{student.no ? `${student.no}. ` : ""}{student.name}</strong><span className={typing ? "chat-typing-text" : ""}>{typing ? "กำลังพิมพ์..." : latest?.body || "ยังไม่มีข้อความ"}</span></div>{unread > 0 && <b>{unread}</b>}</button>;
               }) : <EmptyState title="ยังไม่มีรายชื่อในห้องนี้" body="เลือกห้องเรียนที่มีรายชื่อนักเรียนก่อนเปิดแชท" />}
             </aside>
           )}
           <div className="chat-thread">
             <header className="chat-thread-head"><div><strong>{headerTitle}</strong><span>{headerNote}</span></div><MessageCircle aria-hidden /></header>
-            <div className="chat-message-list">
+            <div className="chat-message-list" ref={messageListRef}>
               {selectedStudent ? visibleMessages.length ? visibleMessages.map((message) => <article className={`chat-bubble ${message.senderRole === role ? "mine" : "theirs"}`} key={message.id}><p>{message.body}</p><span>{message.senderRole === "teacher" ? "ครู" : message.studentName} · {message.createdAt}</span></article>) : <EmptyState title="ยังไม่มีข้อความ" body={teacherMode ? "พิมพ์ข้อความเพื่อเริ่มคุยกับนักเรียนคนนี้" : "ส่งคำถามถึงครูได้จากช่องด้านล่าง"} /> : <EmptyState title="เลือกห้องแชท" body="เลือกนักเรียนจากรายชื่อด้านซ้ายก่อนตอบข้อความ" />}
+              {selectedTyping && <div className="chat-typing-indicator"><span></span><span></span><span></span><b>{selectedTyping.name} กำลังพิมพ์...</b></div>}
             </div>
             <form className="chat-compose" onSubmit={submit}>
-              <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={selectedStudent ? "พิมพ์ข้อความ..." : "เลือกนักเรียนก่อน"} disabled={busy || !selectedStudent} />
+              <input value={draft} onChange={(event) => updateDraft(event.target.value)} placeholder={selectedStudent ? "พิมพ์ข้อความ..." : "เลือกนักเรียนก่อน"} disabled={busy || !selectedStudent} />
               <button className="primary-button" disabled={busy || !selectedStudent || !draft.trim()}><Send aria-hidden />ส่ง</button>
             </form>
           </div>
@@ -2696,6 +2808,12 @@ function sortClassrooms(a: Classroom, b: Classroom) {
   const subjectOrder = a.subject.localeCompare(b.subject, "th", { numeric: true, sensitivity: "base" });
   if (subjectOrder) return subjectOrder;
   return b.academicYear.localeCompare(a.academicYear, "th", { numeric: true });
+}
+
+function upsertChatMessage(items: ChatMessage[], message: ChatMessage) {
+  const exists = items.some((item) => item.id === message.id);
+  const next = exists ? items.map((item) => item.id === message.id ? message : item) : [...items, message];
+  return next.sort((a, b) => Date.parse(a.createdAtRaw) - Date.parse(b.createdAtRaw));
 }
 
 function gradeNumber(level: string) {
