@@ -364,6 +364,10 @@ textarea {
     font-size: 12px;
   }
 
+  .bottom-nav [data-nav-key="profile"] {
+    display: none !important;
+  }
+
   .bottom-nav button.active {
     color: var(--blue);
   }
@@ -595,6 +599,10 @@ textarea {
   border-top-color: var(--line);
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(18px);
+}
+
+.bottom-nav [data-nav-key="profile"] {
+  display: none !important;
 }
 
 .bottom-nav button.active {

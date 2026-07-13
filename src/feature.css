@@ -170,6 +170,10 @@ textarea {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.bottom-nav [data-nav-key="profile"] {
+  display: none !important;
+}
+
 .bottom-nav button span {
   max-width: 100%;
   overflow: hidden;
