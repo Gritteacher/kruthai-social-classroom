@@ -260,7 +260,7 @@ textarea {
 
   .top-bar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     gap: 10px;
     min-height: 72px;
     padding: 12px 22px;
@@ -325,9 +325,15 @@ textarea {
     grid-row: 1;
   }
 
-  .mobile-logout-button {
+  .mobile-profile-button {
     display: inline-flex;
     grid-column: 3;
+    grid-row: 1;
+  }
+
+  .mobile-logout-button {
+    display: inline-flex;
+    grid-column: 4;
     grid-row: 1;
   }
 
@@ -430,6 +436,7 @@ textarea {
 .outline-file-button,
 .icon-button,
 .avatar-button,
+.mobile-profile-button,
 .mobile-logout-button,
 .filter-row button {
   border-radius: 8px;
@@ -438,6 +445,7 @@ textarea {
 .template-button,
 .select-button,
 .filter-row button,
+.mobile-profile-button,
 .mobile-logout-button {
   border: 1px solid var(--line);
   background: var(--paper);
@@ -476,6 +484,28 @@ textarea {
 .theme-toggle-button svg {
   width: 18px;
   height: 18px;
+}
+
+.mobile-profile-button {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.mobile-profile-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mobile-profile-button.active {
+  border-color: rgba(0, 113, 227, 0.36);
+  background: rgba(0, 113, 227, 0.1);
+  color: #0071e3;
 }
 
 .field input,
@@ -1100,6 +1130,7 @@ textarea {
   }
 
   .teacher-classroom-picker,
+  .mobile-profile-button,
   .mobile-logout-button {
     flex: 1 1 180px;
   }
@@ -1112,7 +1143,7 @@ textarea {
 
   .top-bar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     align-items: center;
     gap: 10px;
     min-height: 64px;
@@ -1140,6 +1171,19 @@ textarea {
 
   .mobile-logout-button {
     display: grid;
+    grid-column: 4;
+    grid-row: 1;
+    width: 40px;
+    height: 40px;
+    min-width: 0;
+    min-height: 40px;
+    place-items: center;
+    padding: 0;
+    border-radius: 999px;
+  }
+
+  .mobile-profile-button {
+    display: grid;
     grid-column: 3;
     grid-row: 1;
     width: 40px;
@@ -1149,6 +1193,15 @@ textarea {
     place-items: center;
     padding: 0;
     border-radius: 999px;
+  }
+
+  .mobile-profile-button span {
+    display: none;
+  }
+
+  .mobile-profile-button svg {
+    width: 18px;
+    height: 18px;
   }
 
   .mobile-logout-button span {
@@ -1501,6 +1554,7 @@ textarea {
 :root[data-theme="dark"] .template-button,
 :root[data-theme="dark"] .select-button,
 :root[data-theme="dark"] .filter-row button,
+:root[data-theme="dark"] .mobile-profile-button,
 :root[data-theme="dark"] .mobile-logout-button,
 :root[data-theme="dark"] .icon-button,
 :root[data-theme="dark"] .theme-toggle-button,
@@ -1511,6 +1565,12 @@ textarea {
   background: rgba(255, 255, 255, 0.075);
   color: var(--ink);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.26);
+}
+
+:root[data-theme="dark"] .mobile-profile-button.active {
+  border-color: rgba(41, 151, 255, 0.42);
+  background: rgba(41, 151, 255, 0.16);
+  color: #8ecbff;
 }
 
 :root[data-theme="dark"] .logout-button,
@@ -1603,6 +1663,7 @@ textarea {
 .select-button,
 .outline-file-button,
 .danger-button,
+.mobile-profile-button,
 .mobile-logout-button {
   height: 46px;
   min-height: 46px;
@@ -1663,6 +1724,7 @@ textarea {
 .top-actions .icon-button,
 .top-actions .avatar-button,
 .top-actions .theme-toggle-button,
+.top-actions .mobile-profile-button,
 .top-actions .mobile-logout-button,
 .teacher-classroom-picker select {
   height: 42px;

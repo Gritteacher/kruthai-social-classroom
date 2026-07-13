@@ -195,6 +195,7 @@ function App() {
   const scoreAutoSaveTimers = useRef(new Map<string, number>());
   const scoreAutoSaveVersions = useRef(new Map<string, number>());
   const nav = session?.role === "student" ? studentNav : teacherNav;
+  const bottomNav = session?.role === "student" ? nav.filter((item) => item.key !== "profile") : nav;
   const effectiveSelectedClassroomId = selectedClassroomId || classroomItems[0]?.id || "";
   const selectedClassroom = classroomItems.find((item) => item.id === effectiveSelectedClassroomId);
   const currentStudent = session?.studentCode ? students.find((student) => student.studentId === session.studentCode) : undefined;
@@ -1458,6 +1459,7 @@ function App() {
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
             <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
             <button className="theme-toggle-button" type="button" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title="เปลี่ยนธีม">{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}<span>{theme === "light" ? "โทนมืด" : "โทนสว่าง"}</span></button>
+            {session.role === "student" && <button className={`mobile-profile-button ${view === "profile" ? "active" : ""}`} type="button" onClick={() => setView("profile")} title="โปรไฟล์"><User aria-hidden /><span>โปรไฟล์</span></button>}
             <button className="mobile-logout-button" onClick={logout} title="ออกจากระบบ"><LogOut aria-hidden /><span>ออกจากระบบ</span></button>
           </div>
         </header>
@@ -1472,7 +1474,7 @@ function App() {
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
         </section>
       </main>
-      <nav className="bottom-nav">{nav.map((item) => <NavButton key={item.key} item={item} active={view === item.key} onClick={() => setView(item.key)} />)}</nav>
+      <nav className="bottom-nav">{bottomNav.map((item) => <NavButton key={item.key} item={item} active={view === item.key} onClick={() => setView(item.key)} />)}</nav>
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
