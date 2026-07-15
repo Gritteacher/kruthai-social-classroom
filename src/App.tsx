@@ -2600,7 +2600,7 @@ function studentScoreEntryLabel(entry: ScoreEntry) {
 
 function scaledScore(rawScore: number, rawMax: number, finalMax: number) {
   if (!rawMax || rawMax <= 0) return 0;
-  return Math.round((rawScore / rawMax) * finalMax * 100) / 100;
+  return Math.round((rawScore / rawMax) * finalMax);
 }
 
 function clampScore(value: string, max: number) {

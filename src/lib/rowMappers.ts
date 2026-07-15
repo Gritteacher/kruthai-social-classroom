@@ -64,7 +64,11 @@ function accentForType(type: MaterialType): Material["accent"] {
 
 function scaledScore(rawScore: number, rawMax: number, finalMax: number) {
   if (rawMax <= 0) return 0;
-  return Math.round((rawScore / rawMax) * finalMax * 100) / 100;
+  return Math.round((rawScore / rawMax) * finalMax);
+}
+
+function roundedScore(row: DatabaseRow, keys: string[], fallback: number) {
+  return Math.round(number(row, keys, fallback));
 }
 
 export function mapClassroomRow(row: DatabaseRow): Classroom {
@@ -175,7 +179,7 @@ export function mapScoreEntryRow(row: DatabaseRow): ScoreEntry {
     status: scoreEntryStatuses.has(rawStatus) ? rawStatus : rawScore > 0 ? "scored" : "ungraded",
     rawScore,
     rawMax: number(row, ["raw_max", "rawMax"], 10),
-    finalScore: number(row, ["final_score", "finalScore"], 0),
+    finalScore: roundedScore(row, ["final_score", "finalScore"], 0),
     finalMax: number(row, ["final_max", "finalMax"], 10)
   };
 }
@@ -206,7 +210,7 @@ export function mapSubmissionRow(row: DatabaseRow): SubmissionRecord {
     submittedAt: formatDate(value(row, "submitted_at", "submittedAt")),
     rawScore,
     rawMax,
-    finalScore: number(row, ["final_score", "finalScore"], scaledScore(rawScore, rawMax, finalMax)),
+    finalScore: roundedScore(row, ["final_score", "finalScore"], scaledScore(rawScore, rawMax, finalMax)),
     finalMax
   };
 }
