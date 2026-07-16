@@ -55,6 +55,7 @@ import {
 } from "./lib/validation";
 import { createOrResetStudentAccount } from "./services/studentService";
 import { fetchAllScoreEntryRows } from "./services/scoreService";
+import { exportClassroomScorePdf } from "./services/pdfExportService";
 import {
   isLegacyDemoSubmission,
   mapAnnouncementRow,
@@ -2154,7 +2155,27 @@ function ScoreAutoSaveIndicator({ status }: { status: ScoreAutoSaveStatus }) {
 }
 
 function TeacherScoreOverview({ classrooms, selectedClassroomId, onClassroomChange, students, assignments, entries, onEdit }: { classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; onEdit: () => void }) {
-  return <section className="score-manager teacher-score-overview score-workspace-panel"><div className="score-overview-heading"><SectionTitle title="คะแนนรวมทุกงาน" note={`${students.length} คน · ${assignments.length} งาน`} /><button className="primary-button" type="button" onClick={onEdit}><Pencil aria-hidden />แก้ไขคะแนน</button></div><div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>{assignments.length && students.length ? <><div className="desktop-score-overview"><div className="score-matrix-scroll"><table className="score-matrix score-overview-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment) => <th className="matrix-assignment overview-assignment" key={assignment.id}><span className="assignment-type-badge compact">{assignment.assignmentType}</span><strong>{assignment.title}</strong><span>เต็ม {formatScore(assignment.finalMax)}</span></th>)}<th className="matrix-total">รวม</th></tr></thead><tbody>{students.map((student) => {
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const classroom = classrooms.find((item) => item.id === selectedClassroomId);
+
+  async function exportPdf() {
+    setPdfBusy(true);
+    try {
+      await exportClassroomScorePdf({
+        schoolName: SCHOOL_NAME,
+        classroom,
+        students,
+        assignments,
+        entries
+      });
+    } catch (error) {
+      window.alert(userFacingError(error, "ส่งออก PDF ไม่สำเร็จ"));
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
+  return <section className="score-manager teacher-score-overview score-workspace-panel"><div className="score-overview-heading"><SectionTitle title="คะแนนรวมทุกงาน" note={`${students.length} คน · ${assignments.length} งาน`} /><div className="score-overview-actions"><button className="template-button" type="button" disabled={pdfBusy || !students.length || !assignments.length} onClick={() => void exportPdf()}><FileText aria-hidden />{pdfBusy ? "กำลังสร้าง PDF" : "ส่งออก PDF"}</button><button className="primary-button" type="button" onClick={onEdit}><Pencil aria-hidden />แก้ไขคะแนน</button></div></div><div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>{assignments.length && students.length ? <><div className="desktop-score-overview"><div className="score-matrix-scroll"><table className="score-matrix score-overview-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment) => <th className="matrix-assignment overview-assignment" key={assignment.id}><span className="assignment-type-badge compact">{assignment.assignmentType}</span><strong>{assignment.title}</strong><span>เต็ม {formatScore(assignment.finalMax)}</span></th>)}<th className="matrix-total">รวม</th></tr></thead><tbody>{students.map((student) => {
     const studentEntries = assignments.map((assignment) => findScoreEntry(entries, assignment.id, student.id));
     const total = studentEntries.reduce((sum, entry) => sum + (scoreEntryCountsTowardTotal(entry) ? entry?.finalScore ?? 0 : 0), 0);
     const studentTotalMax = assignments.reduce((sum, assignment, index) => sum + (scoreEntryCountsTowardTotal(studentEntries[index]) ? assignment.finalMax : 0), 0);

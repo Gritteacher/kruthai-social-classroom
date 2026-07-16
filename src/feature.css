@@ -573,7 +573,8 @@ textarea {
 }
 
 .teacher-score-view-switch svg,
-.score-overview-heading .primary-button svg {
+.score-overview-heading .primary-button svg,
+.score-overview-heading .template-button svg {
   width: 17px;
   height: 17px;
 }
@@ -1009,6 +1010,19 @@ textarea {
 .score-overview-heading .primary-button {
   min-height: 42px;
   flex: 0 0 auto;
+}
+
+.score-overview-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.score-overview-actions .primary-button,
+.score-overview-actions .template-button {
+  min-height: 42px;
 }
 
 .mobile-score-overview-list {
@@ -1477,7 +1491,14 @@ textarea {
     flex-direction: column;
   }
 
-  .score-overview-heading .primary-button {
+  .score-overview-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .score-overview-heading .primary-button,
+  .score-overview-heading .template-button {
     width: 100%;
   }
 
