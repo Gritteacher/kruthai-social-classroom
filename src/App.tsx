@@ -95,9 +95,9 @@ type StudentDraft = { no: string; studentId: string; name: string; gender: strin
 type RosterStudent = { no: number; studentId: string; name: string; gender: string };
 type AnnouncementDraft = { title: string; body: string; classroomId: string };
 type StudentHomeCardDraft = { title: string; description: string; url: string; classroomIds: string[]; showToAll: boolean };
-type AssignmentDraft = { title: string; rawMax: string; finalMax: string; classroomIds: string[] };
+type AssignmentDraft = { title: string; assignmentType: string; rawMax: string; finalMax: string; classroomIds: string[] };
 type SubmissionDraft = { assignmentId: string; file: File | null; linkUrl: string; submissionKind: SubmissionKind; memberCodes: string[] };
-type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string; rawMax: number; finalMax: number; assignments: ScoreAssignment[]; classroomIds: string[]; hasMixedValues: boolean };
+type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string; assignmentType: string; rawMax: number; finalMax: number; assignments: ScoreAssignment[]; classroomIds: string[]; hasMixedValues: boolean };
 type ThemeMode = "light" | "dark";
 type ScoreAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 type ProfileRow = { full_name?: string | null; role?: string | null; class_name?: string | null; school_name?: string | null; student_code?: string | null };
@@ -113,6 +113,7 @@ const gradeLevels = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"] as co
 const filters: Array<"ทั้งหมด" | MaterialType | (typeof gradeLevels)[number]> = ["ทั้งหมด", ...gradeLevels, "VIDEO", "PDF"];
 const materialTypes: MaterialType[] = ["PDF", "VIDEO", "IMG"];
 const submissionStatuses: SubmissionStatus[] = ["ยังไม่ส่ง", "ส่งแล้ว", "รอตรวจ", "ตรวจแล้ว", "ให้แก้ไข", "ส่งช้า"];
+const assignmentTypes = ["ทั่วไป", "ใบงาน", "แบบฝึกหัด", "กิจกรรม", "สอบ", "โครงงาน"] as const;
 const scoreEntryStatusOptions: Array<{ value: ScoreEntryStatus; label: string }> = [
   { value: "ungraded", label: "ยังไม่กรอก" },
   { value: "scored", label: "คะแนน" },
@@ -994,7 +995,8 @@ function App() {
     const targetClassrooms = classroomItems.filter((classroom) => draft.classroomIds.includes(classroom.id));
     if (!targetClassrooms.length) return flashAndFail("ไม่พบห้องเรียนที่เลือก กรุณาเลือกใหม่", flash);
     const assignmentGroupId = crypto.randomUUID();
-    const payload = targetClassrooms.map((classroom) => ({ assignment_group_id: assignmentGroupId, title: draft.title.trim(), class_name: classroom.displayName, classroom_id: classroom.id, raw_max: rawMax, final_max: finalMax }));
+    const assignmentType = normalizeAssignmentType(draft.assignmentType);
+    const payload = targetClassrooms.map((classroom) => ({ assignment_group_id: assignmentGroupId, title: draft.title.trim(), assignment_type: assignmentType, class_name: classroom.displayName, classroom_id: classroom.id, raw_max: rawMax, final_max: finalMax }));
     setBusy(true);
     try {
       const result = await supabase!.from("score_assignments").insert(payload).select("*");
@@ -1013,6 +1015,7 @@ function App() {
 
   async function updateAssignmentDetails(targetAssignments: ScoreAssignment[], draft: AssignmentDraft) {
     const title = draft.title.trim();
+    const assignmentType = normalizeAssignmentType(draft.assignmentType);
     const rawMax = Number(draft.rawMax);
     const finalMax = Number(draft.finalMax);
     if (!targetAssignments.length) return flashAndFail("เลือกห้องเรียนที่ต้องการแก้ไขอย่างน้อย 1 ห้อง", flash);
@@ -1039,6 +1042,7 @@ function App() {
         p_assignment_group_id: assignmentGroupId,
         p_classroom_ids: targetAssignments.map((assignment) => assignment.classroomId!),
         p_title: title,
+        p_assignment_type: assignmentType,
         p_raw_max: rawMax,
         p_final_max: finalMax
       });
@@ -1977,7 +1981,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
 }
 
 function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, moveAssignment, updateScoreDraft, updateScoreStatus, saveScoreSheet, saveAllScoreSheets }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; allAssignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; scoreAutoSaveStatus: ScoreAutoSaveStatus; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; updateAssignment: (assignments: ScoreAssignment[], draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; updateScoreStatus: (assignment: ScoreAssignment, student: StudentRecord, status: ScoreEntryStatus) => void; saveScoreSheet: (assignment: ScoreAssignment) => void; saveAllScoreSheets: () => void }) {
-  const [draft, setDraft] = useState<AssignmentDraft>({ title: "", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
+  const [draft, setDraft] = useState<AssignmentDraft>({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   const [editingGroupKey, setEditingGroupKey] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
@@ -2017,6 +2021,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
       if (editingGroup?.hasMixedValues && !current.classroomIds.length && assignment) {
         return {
           title: assignment.title,
+          assignmentType: assignment.assignmentType,
           rawMax: numericInputValue(assignment.rawMax),
           finalMax: numericInputValue(assignment.finalMax),
           classroomIds: [classroomId]
@@ -2028,13 +2033,14 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
 
   function resetAssignmentForm() {
     setEditingGroupKey("");
-    setDraft({ title: "", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
+    setDraft({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   }
 
   function beginEditAssignment(group: AssignmentGroup) {
     setEditingGroupKey(group.key);
     setDraft({
       title: group.hasMixedValues ? "" : group.title,
+      assignmentType: group.hasMixedValues ? "ทั่วไป" : group.assignmentType,
       rawMax: group.hasMixedValues ? "" : numericInputValue(group.rawMax),
       finalMax: group.hasMixedValues ? "" : numericInputValue(group.finalMax),
       classroomIds: group.hasMixedValues ? [] : group.classroomIds
@@ -2065,6 +2071,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
           <SectionTitle title={editingGroup ? "แก้ไขงานคะแนน" : "เพิ่มงานคะแนน"} note={editingGroup ? `เลือกแล้ว ${draft.classroomIds.length} จาก ${editingGroup.assignments.length} ห้อง` : "งานที่เพิ่มก่อนจะแสดงก่อน"} />
           <div className="form-grid">
             <label className="field">ชื่องาน / แบบประเมิน<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น ใบงานที่ 1" /></label>
+            <label className="field">ประเภทงาน<select value={draft.assignmentType} onChange={(event) => setDraft({ ...draft, assignmentType: event.target.value })}>{assignmentTypes.map((type) => <option value={type} key={type}>{type}</option>)}</select></label>
             <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => setDraft({ ...draft, rawMax: event.target.value })} placeholder="เช่น 10" /></label>
             <label className="field">คิดเป็นคะแนนเก็บ<input type="number" min="1" value={draft.finalMax} onChange={(event) => setDraft({ ...draft, finalMax: event.target.value })} placeholder="เช่น 5" /></label>
           </div>
@@ -2079,10 +2086,10 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
           </div>
           <div className="assignment-catalog">
             <div className="assignment-catalog-heading"><SectionTitle title="งานคะแนนที่สร้างแล้ว" note={`${assignmentGroups.length} งาน`} /><div className="created-score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${scoreRingPercent * 3.6}deg, var(--ring-track) ${scoreRingPercent * 3.6}deg 360deg)` }} aria-label={`สร้างคะแนนแล้ว ${formatScore(totalCreatedScore)} คะแนน`}><div><strong>{formatScore(totalCreatedScore)}</strong><span>คะแนน</span></div></div></div>
-            {assignmentGroups.length ? <div className="assignment-catalog-list">{assignmentGroups.map((group) => {
+            {assignmentGroups.length ? <div className="assignment-type-sections">{groupAssignmentGroupsByType(assignmentGroups).map((section) => <section className="assignment-type-section" key={section.type}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.groups.length} งาน</small></div><div className="assignment-catalog-list">{section.groups.map((group) => {
               const groupLabel = assignmentGroupLabels.get(group.key);
               return <article className={`assignment-catalog-item ${editingGroupKey === group.key ? "editing" : ""}`} key={group.key}><div><strong>{group.title}{groupLabel ? ` · ${groupLabel}` : ""}</strong><span>{group.hasMixedValues ? "ค่าคะแนนต่างกันตามห้อง" : `ดิบ ${formatScore(group.rawMax)} → เก็บ ${formatScore(group.finalMax)}`} · {group.assignments.length} ห้อง</span><small>{group.assignments.map((assignment) => assignment.className).join(" · ")}</small></div><button className="assignment-edit-button" type="button" disabled={busy} onClick={() => beginEditAssignment(group)} aria-label={`แก้ไข ${group.title}${groupLabel ? ` ${groupLabel}` : ""}`}><Pencil aria-hidden /><span>แก้ไข</span></button></article>;
-            })}</div> : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานแรกแล้วรายการจะแสดงที่นี่" />}
+            })}</div></section>)}</div> : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานแรกแล้วรายการจะแสดงที่นี่" />}
           </div>
         </section>}
       {teacherView === "entry" &&
@@ -2091,13 +2098,13 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
           {assignments.length ? (
             <>
-              {students.length ? <div className="desktop-score-matrix"><div className="score-matrix-scroll"><table className="score-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment, index) => <th className="matrix-assignment" key={assignment.id}><div><strong>{assignment.title}</strong><span>ดิบ {formatScore(assignment.rawMax)} → เก็บ {formatScore(assignment.finalMax)}</span><div className="matrix-header-actions"><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} title={`ย้าย ${assignment.title} ไปก่อนหน้า`} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} title={`ย้าย ${assignment.title} ไปถัดไป`} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button><button className="matrix-delete" type="button" disabled={busy} onClick={() => deleteAssignment(assignment)} title={`ลบ ${assignment.title}`} aria-label={`ลบ ${assignment.title}`}><Trash2 aria-hidden /></button></div></div></th>)}</tr></thead><tbody>{students.map((student) => <tr key={student.id}><td className="matrix-no">{student.no}</td><td className="matrix-id">{student.studentId}</td><th className="matrix-name" scope="row">{student.name}</th>{assignments.map((assignment) => {
+              {students.length ? <div className="desktop-score-matrix"><div className="score-matrix-scroll"><table className="score-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment, index) => <th className="matrix-assignment" key={assignment.id}><div><span className="assignment-type-badge compact">{assignment.assignmentType}</span><strong>{assignment.title}</strong><span>ดิบ {formatScore(assignment.rawMax)} → เก็บ {formatScore(assignment.finalMax)}</span><div className="matrix-header-actions"><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} title={`ย้าย ${assignment.title} ไปก่อนหน้า`} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} title={`ย้าย ${assignment.title} ไปถัดไป`} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button><button className="matrix-delete" type="button" disabled={busy} onClick={() => deleteAssignment(assignment)} title={`ลบ ${assignment.title}`} aria-label={`ลบ ${assignment.title}`}><Trash2 aria-hidden /></button></div></div></th>)}</tr></thead><tbody>{students.map((student) => <tr key={student.id}><td className="matrix-no">{student.no}</td><td className="matrix-id">{student.studentId}</td><th className="matrix-name" scope="row">{student.name}</th>{assignments.map((assignment) => {
                 const entry = findScoreEntry(entries, assignment.id, student.id);
                 const status = entry?.status ?? "ungraded";
                 return <td className={`matrix-score-cell score-status-${status}`} key={assignment.id}><ScoreEntryControls assignment={assignment} student={student} entry={entry} onScore={updateScoreDraft} onStatus={updateScoreStatus} /></td>;
               })}</tr>)}</tbody></table></div><div className="matrix-actions"><div className="matrix-save-copy"><span>กรอกคะแนนดิบ ระบบคำนวณคะแนนเก็บและบันทึกให้อัตโนมัติ</span><ScoreAutoSaveIndicator status={scoreAutoSaveStatus} /></div><button className="primary-button" disabled={busy || !students.length} onClick={saveAllScoreSheets}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกทั้งหมดตอนนี้"}</button></div></div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
               <div className="mobile-score-editor">
-                <div className="assignment-list">{assignments.map((assignment, index) => <div className="assignment-order-item" key={assignment.id}><button className={`assignment-chip ${selected?.id === assignment.id ? "active" : ""}`} type="button" onClick={() => setSelectedId(assignment.id)}>{assignment.title}<span>{formatScore(assignment.rawMax)}{" → "}{formatScore(assignment.finalMax)}</span></button><div><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button></div></div>)}</div>
+                <div className="assignment-list">{assignments.map((assignment, index) => <div className="assignment-order-item" key={assignment.id}><button className={`assignment-chip ${selected?.id === assignment.id ? "active" : ""}`} type="button" onClick={() => setSelectedId(assignment.id)}><span className="assignment-type-badge compact">{assignment.assignmentType}</span>{assignment.title}<span>{formatScore(assignment.rawMax)}{" → "}{formatScore(assignment.finalMax)}</span></button><div><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button></div></div>)}</div>
                 <div className="score-tabs"><button className={mode === "raw" ? "active" : ""} onClick={() => setMode("raw")}>คะแนนดิบ</button><button className={mode === "scaled" ? "active" : ""} onClick={() => setMode("scaled")}>คะแนนที่หารแล้ว</button></div>
                 {selected && students.length ? <div className="score-table">{students.map((student) => {
                   const entry = findScoreEntry(entries, selected.id, student.id);
@@ -2147,7 +2154,7 @@ function ScoreAutoSaveIndicator({ status }: { status: ScoreAutoSaveStatus }) {
 }
 
 function TeacherScoreOverview({ classrooms, selectedClassroomId, onClassroomChange, students, assignments, entries, onEdit }: { classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; entries: ScoreEntry[]; onEdit: () => void }) {
-  return <section className="score-manager teacher-score-overview score-workspace-panel"><div className="score-overview-heading"><SectionTitle title="คะแนนรวมทุกงาน" note={`${students.length} คน · ${assignments.length} งาน`} /><button className="primary-button" type="button" onClick={onEdit}><Pencil aria-hidden />แก้ไขคะแนน</button></div><div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>{assignments.length && students.length ? <><div className="desktop-score-overview"><div className="score-matrix-scroll"><table className="score-matrix score-overview-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment) => <th className="matrix-assignment overview-assignment" key={assignment.id}><strong>{assignment.title}</strong><span>เต็ม {formatScore(assignment.finalMax)}</span></th>)}<th className="matrix-total">รวม</th></tr></thead><tbody>{students.map((student) => {
+  return <section className="score-manager teacher-score-overview score-workspace-panel"><div className="score-overview-heading"><SectionTitle title="คะแนนรวมทุกงาน" note={`${students.length} คน · ${assignments.length} งาน`} /><button className="primary-button" type="button" onClick={onEdit}><Pencil aria-hidden />แก้ไขคะแนน</button></div><div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>{assignments.length && students.length ? <><div className="desktop-score-overview"><div className="score-matrix-scroll"><table className="score-matrix score-overview-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment) => <th className="matrix-assignment overview-assignment" key={assignment.id}><span className="assignment-type-badge compact">{assignment.assignmentType}</span><strong>{assignment.title}</strong><span>เต็ม {formatScore(assignment.finalMax)}</span></th>)}<th className="matrix-total">รวม</th></tr></thead><tbody>{students.map((student) => {
     const studentEntries = assignments.map((assignment) => findScoreEntry(entries, assignment.id, student.id));
     const total = studentEntries.reduce((sum, entry) => sum + (scoreEntryCountsTowardTotal(entry) ? entry?.finalScore ?? 0 : 0), 0);
     const studentTotalMax = assignments.reduce((sum, assignment, index) => sum + (scoreEntryCountsTowardTotal(studentEntries[index]) ? assignment.finalMax : 0), 0);
@@ -2156,7 +2163,7 @@ function TeacherScoreOverview({ classrooms, selectedClassroomId, onClassroomChan
     const studentEntries = assignments.map((assignment) => findScoreEntry(entries, assignment.id, student.id));
     const total = studentEntries.reduce((sum, entry) => sum + (scoreEntryCountsTowardTotal(entry) ? entry?.finalScore ?? 0 : 0), 0);
     const studentTotalMax = assignments.reduce((sum, assignment, index) => sum + (scoreEntryCountsTowardTotal(studentEntries[index]) ? assignment.finalMax : 0), 0);
-    return <article className="mobile-score-overview-card" key={student.id}><header><div><strong>{student.no}. {student.name}</strong><span>รหัสนักเรียน {student.studentId}</span></div><div className="mobile-score-total"><strong>{formatScore(total)}</strong><span>/ {formatScore(studentTotalMax)}</span></div></header><div>{assignments.map((assignment, index) => <div className={`mobile-assignment-score score-status-${studentEntries[index]?.status ?? "ungraded"}`} key={assignment.id}><span>{assignment.title}</span><ScoreEntryResult entry={studentEntries[index]} assignment={assignment} /></div>)}</div></article>;
+    return <article className="mobile-score-overview-card" key={student.id}><header><div><strong>{student.no}. {student.name}</strong><span>รหัสนักเรียน {student.studentId}</span></div><div className="mobile-score-total"><strong>{formatScore(total)}</strong><span>/ {formatScore(studentTotalMax)}</span></div></header><div>{assignments.map((assignment, index) => <div className={`mobile-assignment-score score-status-${studentEntries[index]?.status ?? "ungraded"}`} key={assignment.id}><span><span className="assignment-type-badge compact">{assignment.assignmentType}</span>{assignment.title}</span><ScoreEntryResult entry={studentEntries[index]} assignment={assignment} /></div>)}</div></article>;
   })}</div></> : <EmptyState title={assignments.length ? "ยังไม่มีรายชื่อนักเรียน" : "ยังไม่มีงานคะแนน"} body={assignments.length ? "เพิ่มรายชื่อนักเรียนก่อนดูคะแนนรวม" : "เพิ่มงานและบันทึกคะแนนก่อนดูภาพรวม"} />}</section>;
 }
 
@@ -2168,7 +2175,7 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   const ringPercent = totalMax > 0 ? Math.max(0, Math.min(100, (totalFinal / totalMax) * 100)) : 0;
   return <div className="page-stack"><PageHeader title="คะแนนของฉัน" eyebrow={student?.name || "ยังไม่มีข้อมูลนักเรียน"} />{studentEntries.length ? <><section className="panel score-overview student-score-simple"><SectionTitle title="คะแนนทั้งหมด" note={`รวม ${studentEntries.length} รายการ`} /><div className="score-overview-layout"><div className="score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${ringPercent * 3.6}deg, var(--ring-track) ${ringPercent * 3.6}deg 360deg)` }}><div><strong>{formatScore(totalFinal)}</strong><span>คะแนน</span></div></div><div className="score-overview-copy"><p>คะแนนสะสมจากงานที่ครูบันทึกแล้ว</p></div></div></section><section className="panel"><SectionTitle title="คะแนนทั้งหมด" note={`${studentEntries.length} รายการ`} /><div className="score-summary-table student-score-table"><div className="score-summary-head"><span>งานคะแนน</span><span>คะแนนที่ได้</span></div>{studentEntries.map((entry) => {
     const assignment = assignments.find((item) => item.id === entry.assignmentId);
-    return <div className={`score-summary-row static score-status-${entry.status}`} key={entry.id}><strong>{assignment?.title || "งานคะแนน"}</strong><span>{studentScoreEntryLabel(entry)}</span></div>;
+    return <div className={`score-summary-row static score-status-${entry.status}`} key={entry.id}><strong><span className="assignment-type-badge compact">{assignment?.assignmentType || "ทั่วไป"}</span>{assignment?.title || "งานคะแนน"}</strong><span>{studentScoreEntryLabel(entry)}</span></div>;
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
@@ -2181,6 +2188,9 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
   const [memberCodes, setMemberCodes] = useState<string[]>([]);
   const ownCode = currentStudent?.studentId || "";
   const selectableClassmates = classmates.filter((student) => student.studentId !== ownCode);
+  const assignmentSections = useMemo(() => groupAssignmentsByType(assignments), [assignments]);
+  const assignmentTypeById = useMemo(() => new Map(assignments.map((assignment) => [assignment.id, assignment.assignmentType])), [assignments]);
+  const submissionSections = useMemo(() => groupSubmissionsByAssignmentType(submissions, assignmentTypeById), [submissions, assignmentTypeById]);
   useEffect(() => {
     if (!assignments.some((assignment) => assignment.id === assignmentId)) setAssignmentId(assignments[0]?.id || "");
   }, [assignmentId, assignments]);
@@ -2210,7 +2220,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
         <section className="panel">
           <SectionTitle title="รายการงานส่ง" note={`${submissions.length} รายการ`} />
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
-          {submissions.length ? <div className="submission-list">{submissions.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={openSubmission} />)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
+          {submissions.length ? <div className="assignment-type-sections">{submissionSections.map((section) => <section className="assignment-type-section" key={section.type}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.items.length} รายการ</small></div><div className="submission-list">{section.items.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={openSubmission} />)}</div></section>)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
         </section>
       </div>
     );
@@ -2224,7 +2234,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
             <label className="field">
               ชื่องาน
               <select value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)}>
-                {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.title}</option>)}
+                {assignmentSections.map((section) => <optgroup label={section.type} key={section.type}>{section.items.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.title}</option>)}</optgroup>)}
               </select>
             </label>
             <fieldset className="submission-option-group">
@@ -2514,6 +2524,7 @@ function groupAssignments(items: ScoreAssignment[]): AssignmentGroup[] {
       key,
       assignmentGroupId: assignment.assignmentGroupId,
       title: assignment.title,
+      assignmentType: assignment.assignmentType,
       rawMax: assignment.rawMax,
       finalMax: assignment.finalMax,
       assignments: [assignment],
@@ -2523,8 +2534,40 @@ function groupAssignments(items: ScoreAssignment[]): AssignmentGroup[] {
   });
   return [...grouped.values()].map((group) => ({
     ...group,
-    hasMixedValues: group.assignments.some((assignment) => assignment.title !== group.title || assignment.rawMax !== group.rawMax || assignment.finalMax !== group.finalMax)
+    hasMixedValues: group.assignments.some((assignment) => assignment.title !== group.title || assignment.assignmentType !== group.assignmentType || assignment.rawMax !== group.rawMax || assignment.finalMax !== group.finalMax)
   }));
+}
+
+function normalizeAssignmentType(value: string) {
+  const trimmed = value.trim();
+  return trimmed || "ทั่วไป";
+}
+
+function groupAssignmentsByType(items: ScoreAssignment[]) {
+  const grouped = new Map<string, ScoreAssignment[]>();
+  orderAssignments(items).forEach((assignment) => {
+    const type = normalizeAssignmentType(assignment.assignmentType);
+    grouped.set(type, [...(grouped.get(type) ?? []), assignment]);
+  });
+  return [...grouped.entries()].map(([type, assignments]) => ({ type, items: assignments }));
+}
+
+function groupAssignmentGroupsByType(groups: AssignmentGroup[]) {
+  const grouped = new Map<string, AssignmentGroup[]>();
+  groups.forEach((group) => {
+    const type = group.hasMixedValues ? "หลายประเภท" : normalizeAssignmentType(group.assignmentType);
+    grouped.set(type, [...(grouped.get(type) ?? []), group]);
+  });
+  return [...grouped.entries()].map(([type, items]) => ({ type, groups: items }));
+}
+
+function groupSubmissionsByAssignmentType(items: SubmissionRecord[], assignmentTypeById: Map<string, string>) {
+  const grouped = new Map<string, SubmissionRecord[]>();
+  items.forEach((item) => {
+    const type = normalizeAssignmentType(item.assignmentId ? assignmentTypeById.get(item.assignmentId) || "" : "");
+    grouped.set(type, [...(grouped.get(type) ?? []), item]);
+  });
+  return [...grouped.entries()].map(([type, submissions]) => ({ type, items: submissions }));
 }
 
 function buildScoreEntry(assignment: ScoreAssignment, student: StudentRecord, rawScore: number, status: ScoreEntryStatus): ScoreEntry {

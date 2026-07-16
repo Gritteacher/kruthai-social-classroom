@@ -160,6 +160,7 @@ export function mapAssignmentRow(row: DatabaseRow): ScoreAssignment {
     id: text(row, ["id"]),
     assignmentGroupId: optionalText(row, ["assignment_group_id", "assignmentGroupId"]),
     title: text(row, ["title"], "งานคะแนน"),
+    assignmentType: text(row, ["assignment_type", "assignmentType"], "ทั่วไป"),
     className: text(row, ["class_name", "className"], NO_CLASS_LABEL),
     classroomId: optionalText(row, ["classroom_id", "classroomId"]),
     rawMax: number(row, ["raw_max", "rawMax"], 10),

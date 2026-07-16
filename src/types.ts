@@ -83,6 +83,7 @@ export interface ScoreAssignment {
   id: string;
   assignmentGroupId?: string;
   title: string;
+  assignmentType: string;
   className: string;
   classroomId?: string;
   rawMax: number;

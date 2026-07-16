@@ -53,6 +53,7 @@ create table if not exists public.students (
 create table if not exists public.score_assignments (
   id uuid primary key default uuid_generate_v4(),
   title text not null,
+  assignment_type text not null default 'ทั่วไป',
   class_name text not null default 'ยังไม่ได้เลือกห้องเรียน',
   classroom_id uuid references public.classrooms (id) on delete set null,
   raw_max numeric not null check (raw_max > 0),
@@ -218,7 +219,11 @@ alter table public.students add column if not exists account_created_at timestam
 alter table public.students alter column class_name set default 'ยังไม่ได้เลือกห้องเรียน';
 alter table public.score_assignments add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
 alter table public.score_assignments add column if not exists assignment_group_id uuid;
+alter table public.score_assignments add column if not exists assignment_type text not null default 'ทั่วไป';
 alter table public.score_assignments alter column class_name set default 'ยังไม่ได้เลือกห้องเรียน';
+update public.score_assignments
+set assignment_type = 'ทั่วไป'
+where nullif(trim(assignment_type), '') is null;
 alter table public.submissions add column if not exists assignment_id uuid references public.score_assignments (id) on delete set null;
 alter table public.submissions add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
 alter table public.submissions add column if not exists link_url text;
@@ -760,6 +765,7 @@ create or replace function public.update_score_assignment_group(
   p_assignment_group_id uuid,
   p_classroom_ids uuid[],
   p_title text,
+  p_assignment_type text,
   p_raw_max numeric,
   p_final_max numeric
 )
@@ -772,6 +778,7 @@ declare
   selected_assignment_ids uuid[];
   selected_classroom_count integer;
   highest_recorded_score numeric;
+  v_assignment_type text := coalesce(nullif(trim(p_assignment_type), ''), 'ทั่วไป');
 begin
   if not public.is_teacher() then
     raise exception 'TEACHER_REQUIRED' using errcode = '42501';
@@ -827,6 +834,7 @@ begin
   update public.score_assignments
   set
     title = trim(p_title),
+    assignment_type = v_assignment_type,
     raw_max = p_raw_max,
     final_max = p_final_max
   where id = any(selected_assignment_ids);
@@ -834,7 +842,7 @@ begin
   update public.score_entries
   set
     raw_max = p_raw_max,
-    final_score = case when score_status = 'scored' then round((raw_score / p_raw_max) * p_final_max, 2) else 0 end,
+    final_score = case when score_status = 'scored' then round((raw_score / p_raw_max) * p_final_max) else 0 end,
     final_max = p_final_max,
     updated_at = now()
   where assignment_id = any(selected_assignment_ids);
@@ -843,7 +851,7 @@ begin
   set
     assignment_title = trim(p_title),
     raw_max = p_raw_max,
-    final_score = round((raw_score / p_raw_max) * p_final_max, 2),
+    final_score = round((raw_score / p_raw_max) * p_final_max),
     final_max = p_final_max
   where assignment_id = any(selected_assignment_ids);
 
@@ -855,9 +863,9 @@ begin
 end;
 $$;
 
-revoke all on function public.update_score_assignment_group(uuid, uuid[], text, numeric, numeric) from public;
-grant execute on function public.update_score_assignment_group(uuid, uuid[], text, numeric, numeric) to authenticated;
-comment on function public.update_score_assignment_group(uuid, uuid[], text, numeric, numeric)
+revoke all on function public.update_score_assignment_group(uuid, uuid[], text, text, numeric, numeric) from public;
+grant execute on function public.update_score_assignment_group(uuid, uuid[], text, text, numeric, numeric) to authenticated;
+comment on function public.update_score_assignment_group(uuid, uuid[], text, text, numeric, numeric)
 is 'Atomically updates selected classrooms in one score-assignment group and recalculates related scores.';
 
 create or replace function public.guard_student_profile_update()
