@@ -1307,54 +1307,24 @@ function App() {
 
   async function saveSubmissionReview(item: SubmissionRecord) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
-    if (!item.assignmentId) return flash("รายการส่งงานนี้ยังไม่เชื่อมกับงานคะแนน จึงส่งคะแนนไปหน้ากรอกคะแนนไม่ได้");
     const rawScore = Math.max(0, Math.min(item.rawMax, item.rawScore));
     const finalScore = Math.max(0, Math.min(item.finalMax, scaledScore(rawScore, item.rawMax, item.finalMax)));
-    const targetCodes = Array.from(new Set((item.groupMemberCodes.length ? item.groupMemberCodes : [item.studentId]).map((code) => code.trim()).filter(Boolean)));
-    if (!targetCodes.length) return flash("ไม่พบรหัสนักเรียนสำหรับบันทึกคะแนน");
     setBusy(true);
     try {
       const client = supabase!;
-      const result = await client
-        .from("submissions")
-        .update({ status: item.status, raw_score: rawScore, raw_max: item.rawMax, final_score: finalScore, final_max: item.finalMax })
-        .eq("id", item.id);
-      if (result.error) throw result.error;
-
-      let studentQuery = client.from("students").select("*").in("student_code", targetCodes);
-      if (item.classroomId) studentQuery = studentQuery.eq("classroom_id", item.classroomId);
-      const studentResult = await studentQuery;
-      if (studentResult.error) throw studentResult.error;
-      const targetStudents = (studentResult.data ?? []).map(mapStudentRow);
-      if (!targetStudents.length) throw new Error("ไม่พบรายชื่อนักเรียนสำหรับส่งคะแนนไปหน้ากรอกคะแนน");
-
-      const assignment = assignments.find((entry) => entry.id === item.assignmentId);
-      const rawMax = assignment?.rawMax ?? item.rawMax;
-      const finalMax = assignment?.finalMax ?? item.finalMax;
-      const boundedRawScore = Math.max(0, Math.min(rawMax, rawScore));
-      const boundedFinalScore = Math.max(0, Math.min(finalMax, scaledScore(boundedRawScore, rawMax, finalMax)));
-      const scorePayload = targetStudents.map((student) => ({
-        assignment_id: item.assignmentId,
-        student_id: student.id,
-        student_code: student.studentId,
-        score_status: "scored",
-        raw_score: boundedRawScore,
-        raw_max: rawMax,
-        final_score: boundedFinalScore,
-        final_max: finalMax,
-        updated_at: new Date().toISOString()
-      }));
-      const scoreResult = await client.from("score_entries").upsert(scorePayload, { onConflict: "assignment_id,student_id" }).select("*");
-      if (scoreResult.error) throw scoreResult.error;
-
-      const updatedScoreEntries = (scoreResult.data ?? []).map(mapScoreEntryRow);
-      cancelScoreAutoSaves(new Set(targetStudents.map((student) => scoreEntryKey(item.assignmentId!, student.id))));
-      setSubmissionItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, rawScore, finalScore } : entry));
-      setScoreEntries((current) => {
-        const updatedKeys = new Set(updatedScoreEntries.map((entry) => scoreEntryKey(entry.assignmentId, entry.studentRecordId)));
-        return [...current.filter((entry) => !updatedKeys.has(scoreEntryKey(entry.assignmentId, entry.studentRecordId))), ...updatedScoreEntries];
+      const result = await client.rpc("review_submission_and_sync_scores", {
+        p_submission_id: item.id,
+        p_status: item.status,
+        p_raw_score: rawScore,
+        p_raw_max: item.rawMax,
+        p_final_max: item.finalMax
       });
-      const groupSuffix = targetStudents.length > 1 ? ` และสมาชิกกลุ่มรวม ${targetStudents.length} คน` : "";
+      if (result.error) throw result.error;
+      const savedRow = Array.isArray(result.data) ? result.data[0] : result.data;
+      cancelScoreAutoSaves(new Set(Array.from(scoreAutoSaveTimers.current.keys())));
+      if (savedRow) setSubmissionItems((current) => current.map((entry) => entry.id === item.id ? mapSubmissionRow(savedRow) : entry));
+      await loadClassroomData();
+      const groupSuffix = item.submissionKind === "group" ? ` และสมาชิกกลุ่มรวม ${item.groupMemberCodes.length} คน` : "";
       flash(`บันทึกผลตรวจงานของ ${item.studentName}${groupSuffix} แล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย`);
     } catch (error) {
       flash(userFacingError(error, "บันทึกผลตรวจงานไม่สำเร็จ"));
