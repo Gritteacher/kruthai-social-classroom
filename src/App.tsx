@@ -104,6 +104,38 @@ type ScoreAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 type ProfileRow = { full_name?: string | null; role?: string | null; class_name?: string | null; school_name?: string | null; student_code?: string | null };
 type ChatTypingStatus = { role: Role; name: string; at: number };
 type ChatTypingPayload = { studentCode?: string; role?: Role; name?: string; isTyping?: boolean };
+type ScoresViewProps = {
+  role: Role;
+  classrooms: Classroom[];
+  selectedClassroomId: string;
+  onClassroomChange: (id: string) => void;
+  students: StudentRecord[];
+  assignments: ScoreAssignment[];
+  allAssignments: ScoreAssignment[];
+  entries: ScoreEntry[];
+  busy: boolean;
+  scoreAutoSaveStatus: ScoreAutoSaveStatus;
+  activeClassName: string;
+  addAssignment: (draft: AssignmentDraft) => Promise<boolean>;
+  updateAssignment: (assignments: ScoreAssignment[], draft: AssignmentDraft) => Promise<boolean>;
+  deleteAssignment: (assignment: ScoreAssignment) => void;
+  moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void;
+  updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void;
+  updateScoreStatus: (assignment: ScoreAssignment, student: StudentRecord, status: ScoreEntryStatus) => void;
+  saveScoreSheet: (assignment: ScoreAssignment) => void;
+  saveAllScoreSheets: () => void;
+  applySameScoreSheet: (assignment: ScoreAssignment, value: string) => Promise<void>;
+};
+type BulkSameScorePanelProps = {
+  assignments: ScoreAssignment[];
+  selectedAssignmentId: string;
+  scoreValue: string;
+  busy: boolean;
+  studentsCount: number;
+  onAssignmentChange: (id: string) => void;
+  onScoreChange: (value: string) => void;
+  onApply: () => void;
+};
 
 const SCHOOL_LOGO = `${import.meta.env.BASE_URL}kruthai-logo.png`;
 const SCHOOL_NAME = "โรงเรียนเทพศิรินทร์ นนทบุรี";
@@ -1270,6 +1302,39 @@ function App() {
     }
   }
 
+  async function applySameScoreSheet(assignment: ScoreAssignment, value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return flash("กรอกคะแนนที่ต้องการให้ทั้งงานก่อน");
+    const rawScore = Number(trimmed);
+    if (!Number.isFinite(rawScore)) return flash("คะแนนต้องเป็นตัวเลข");
+    if (rawScore < 0) return flash("คะแนนต้องไม่ติดลบ");
+    if (rawScore > assignment.rawMax) return flash(`คะแนนต้องไม่เกิน ${formatScore(assignment.rawMax)}`);
+    if (!activeStudents.length) return flash("ยังไม่มีรายชื่อนักเรียนในห้องนี้");
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+    cancelScoreAutoSaves(new Set(activeStudents.map((student) => scoreEntryKey(assignment.id, student.id))));
+    const payload: Record<string, unknown>[] = activeStudents.map((student) => ({
+      assignment_id: assignment.id,
+      student_id: student.id,
+      student_code: student.studentId,
+      score_status: "scored",
+      raw_score: rawScore,
+      raw_max: assignment.rawMax,
+      final_score: scaledScore(rawScore, assignment.rawMax, assignment.finalMax),
+      final_max: assignment.finalMax
+    }));
+    setBusy(true);
+    try {
+      const result = await supabase!.from("score_entries").upsert(payload, { onConflict: "assignment_id,student_id" });
+      if (result.error) throw result.error;
+      await loadClassroomData();
+      flash(`ให้คะแนน ${formatScore(rawScore)} กับงาน "${assignment.title}" ทั้งห้องแล้ว`);
+    } catch (error) {
+      flash(userFacingError(error, "ให้คะแนนเท่ากันทั้งงานไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveAllScoreSheets() {
     if (!activeStudents.length) return flash("ยังไม่มีรายชื่อนักเรียนในห้องนี้");
     if (!activeAssignments.length) return flash("ยังไม่มีงานคะแนนในห้องนี้");
@@ -1529,7 +1594,7 @@ function App() {
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
-          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} />}
+          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} />}
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
@@ -1981,12 +2046,14 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
   );
 }
 
-function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, moveAssignment, updateScoreDraft, updateScoreStatus, saveScoreSheet, saveAllScoreSheets }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; students: StudentRecord[]; assignments: ScoreAssignment[]; allAssignments: ScoreAssignment[]; entries: ScoreEntry[]; busy: boolean; scoreAutoSaveStatus: ScoreAutoSaveStatus; activeClassName: string; addAssignment: (draft: AssignmentDraft) => Promise<boolean>; updateAssignment: (assignments: ScoreAssignment[], draft: AssignmentDraft) => Promise<boolean>; deleteAssignment: (assignment: ScoreAssignment) => void; moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void; updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; updateScoreStatus: (assignment: ScoreAssignment, student: StudentRecord, status: ScoreEntryStatus) => void; saveScoreSheet: (assignment: ScoreAssignment) => void; saveAllScoreSheets: () => void }) {
+function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, moveAssignment, updateScoreDraft, updateScoreStatus, saveScoreSheet, saveAllScoreSheets, applySameScoreSheet }: ScoresViewProps) {
   const [draft, setDraft] = useState<AssignmentDraft>({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   const [editingGroupKey, setEditingGroupKey] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
   const [teacherView, setTeacherView] = useState<"add" | "entry" | "overview">("add");
+  const [sameScoreAssignmentId, setSameScoreAssignmentId] = useState("");
+  const [sameScoreValue, setSameScoreValue] = useState("");
   const assignmentGroups = useMemo(() => groupAssignments(allAssignments), [allAssignments]);
   const assignmentGroupLabels = useMemo(() => {
     const totals = new Map<string, number>();
@@ -2007,6 +2074,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
   const totalCreatedScore = assignmentGroups.reduce((sum, group) => sum + group.finalMax, 0);
   const scoreRingPercent = Math.max(0, Math.min(100, totalCreatedScore));
   const selected = assignments.find((assignment) => assignment.id === selectedId) || assignments[0];
+  const sameScoreAssignment = assignments.find((assignment) => assignment.id === sameScoreAssignmentId) || selected;
   const editingGroup = assignmentGroups.find((group) => group.key === editingGroupKey);
   const note = selected ? `คะแนนดิบเต็ม ${formatScore(selected.rawMax)} หารเป็นคะแนนเก็บ ${formatScore(selected.finalMax)}` : "สร้างงานคะแนนก่อน";
 
@@ -2014,6 +2082,14 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
     if (editingGroupKey) return;
     setDraft((current) => ({ ...current, classroomIds: selectedClassroomId ? [selectedClassroomId] : [] }));
   }, [editingGroupKey, selectedClassroomId]);
+
+  useEffect(() => {
+    if (!assignments.length) {
+      setSameScoreAssignmentId("");
+      return;
+    }
+    if (!assignments.some((assignment) => assignment.id === sameScoreAssignmentId)) setSameScoreAssignmentId(assignments[0].id);
+  }, [assignments, sameScoreAssignmentId]);
 
   function toggleAssignmentClassroom(classroomId: string) {
     setDraft((current) => {
@@ -2053,6 +2129,12 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
     const ok = editingGroup ? await updateAssignment(selectedAssignments, draft) : await addAssignment(draft);
     if (!ok) return;
     resetAssignmentForm();
+  }
+
+  async function submitSameScore() {
+    if (!sameScoreAssignment) return;
+    await applySameScoreSheet(sameScoreAssignment, sameScoreValue);
+    setSameScoreValue("");
   }
 
   if (role === "student") {
@@ -2103,7 +2185,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
                 const entry = findScoreEntry(entries, assignment.id, student.id);
                 const status = entry?.status ?? "ungraded";
                 return <td className={`matrix-score-cell score-status-${status}`} key={assignment.id}><ScoreEntryControls assignment={assignment} student={student} entry={entry} onScore={updateScoreDraft} onStatus={updateScoreStatus} /></td>;
-              })}</tr>)}</tbody></table></div><div className="matrix-actions"><div className="matrix-save-copy"><span>กรอกคะแนนดิบ ระบบคำนวณคะแนนเก็บและบันทึกให้อัตโนมัติ</span><ScoreAutoSaveIndicator status={scoreAutoSaveStatus} /></div><button className="primary-button" disabled={busy || !students.length} onClick={saveAllScoreSheets}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกทั้งหมดตอนนี้"}</button></div></div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
+              })}</tr>)}</tbody></table></div><BulkSameScorePanel assignments={assignments} selectedAssignmentId={sameScoreAssignment?.id || ""} scoreValue={sameScoreValue} busy={busy} studentsCount={students.length} onAssignmentChange={setSameScoreAssignmentId} onScoreChange={setSameScoreValue} onApply={() => void submitSameScore()} /><div className="matrix-actions"><div className="matrix-save-copy"><span>กรอกคะแนนดิบ ระบบคำนวณคะแนนเก็บและบันทึกให้อัตโนมัติ</span><ScoreAutoSaveIndicator status={scoreAutoSaveStatus} /></div><button className="primary-button" disabled={busy || !students.length} onClick={saveAllScoreSheets}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกทั้งหมดตอนนี้"}</button></div></div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
               <div className="mobile-score-editor">
                 <div className="assignment-list">{assignments.map((assignment, index) => <div className="assignment-order-item" key={assignment.id}><button className={`assignment-chip ${selected?.id === assignment.id ? "active" : ""}`} type="button" onClick={() => setSelectedId(assignment.id)}><span className="assignment-type-badge compact">{assignment.assignmentType}</span>{assignment.title}<span>{formatScore(assignment.rawMax)}{" → "}{formatScore(assignment.finalMax)}</span></button><div><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button></div></div>)}</div>
                 <div className="score-tabs"><button className={mode === "raw" ? "active" : ""} onClick={() => setMode("raw")}>คะแนนดิบ</button><button className={mode === "scaled" ? "active" : ""} onClick={() => setMode("scaled")}>คะแนนที่หารแล้ว</button></div>
@@ -2112,6 +2194,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
                   const status = entry?.status ?? "ungraded";
                   return <article className={`score-row score-row-wide score-status-${status}`} key={student.id}><div className="student-score-identity"><strong>{student.name}</strong><span>รหัสนักเรียน {student.studentId}</span></div>{mode === "raw" ? <ScoreEntryControls assignment={selected} student={student} entry={entry} onScore={updateScoreDraft} onStatus={updateScoreStatus} /> : <ScoreEntryResult entry={entry} assignment={selected} />}</article>;
                 })}</div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
+                <BulkSameScorePanel assignments={assignments} selectedAssignmentId={sameScoreAssignment?.id || ""} scoreValue={sameScoreValue} busy={busy} studentsCount={students.length} onAssignmentChange={setSameScoreAssignmentId} onScoreChange={setSameScoreValue} onApply={() => void submitSameScore()} />
                 <ScoreAutoSaveIndicator status={scoreAutoSaveStatus} />
                 <div className="form-actions">{selected && <button className="primary-button" disabled={busy || !students.length} onClick={() => saveScoreSheet(selected)}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกงานนี้ตอนนี้"}</button>}{selected && <button className="danger-button" disabled={busy} onClick={() => deleteAssignment(selected)}><Trash2 aria-hidden />ลบงานนี้</button>}</div>
               </div>
@@ -2121,6 +2204,20 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
       {teacherView === "overview" && <TeacherScoreOverview classrooms={classrooms} selectedClassroomId={selectedClassroomId} onClassroomChange={onClassroomChange} students={students} assignments={assignments} entries={entries} onEdit={() => setTeacherView("entry")} />}
     </div>
   );
+}
+
+function BulkSameScorePanel({ assignments, selectedAssignmentId, scoreValue, busy, studentsCount, onAssignmentChange, onScoreChange, onApply }: BulkSameScorePanelProps) {
+  const assignment = assignments.find((item) => item.id === selectedAssignmentId) || assignments[0];
+  if (!assignment) return null;
+  return <div className="bulk-same-score-panel">
+    <div>
+      <strong>ให้คะแนนเท่ากันทั้งงาน</strong>
+      <span>เลือกงาน ใส่คะแนนดิบ แล้วบันทึกให้ {studentsCount} คนในห้องนี้</span>
+    </div>
+    <label className="field compact-field">งาน<select value={assignment.id} onChange={(event) => onAssignmentChange(event.target.value)}>{assignments.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
+    <label className="field compact-field">คะแนนดิบ<input type="number" min="0" max={assignment.rawMax} value={scoreValue} onChange={(event) => onScoreChange(event.target.value)} placeholder={`เต็ม ${formatScore(assignment.rawMax)}`} /></label>
+    <button className="primary-button" type="button" disabled={busy || !studentsCount || !scoreValue.trim()} onClick={onApply}><Save aria-hidden />{busy ? "กำลังบันทึก" : "ให้คะแนนทั้งงาน"}</button>
+  </div>;
 }
 
 function ScoreEntryControls({ assignment, student, entry, onScore, onStatus }: { assignment: ScoreAssignment; student: StudentRecord; entry?: ScoreEntry; onScore: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; onStatus: (assignment: ScoreAssignment, student: StudentRecord, status: ScoreEntryStatus) => void }) {

@@ -960,6 +960,47 @@ textarea {
   gap: 16px;
 }
 
+.bulk-same-score-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px) minmax(120px, 150px) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.bulk-same-score-panel > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.bulk-same-score-panel strong {
+  color: var(--ink);
+}
+
+.bulk-same-score-panel span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bulk-same-score-panel .compact-field {
+  gap: 5px;
+  font-size: 12px;
+}
+
+.bulk-same-score-panel .compact-field input,
+.bulk-same-score-panel .compact-field select {
+  min-height: 42px;
+}
+
+.bulk-same-score-panel .primary-button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
 .matrix-save-copy {
   display: grid;
   gap: 5px;
@@ -1636,6 +1677,10 @@ textarea {
   .matrix-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .bulk-same-score-panel {
+    grid-template-columns: 1fr;
   }
 }
 
