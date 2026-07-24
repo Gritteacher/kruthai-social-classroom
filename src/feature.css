@@ -1138,6 +1138,61 @@ textarea {
   grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.4fr);
 }
 
+.submission-status-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.submission-status-section {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--blue);
+  border-radius: 14px;
+  background: var(--surface-subtle);
+}
+
+.submission-status-section.pass {
+  border-left-color: var(--green-700);
+}
+
+.submission-status-section.fail {
+  border-left-color: var(--coral);
+}
+
+.submission-status-section.pending {
+  border-left-color: var(--amber);
+}
+
+.submission-status-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.submission-status-heading div {
+  display: grid;
+  gap: 2px;
+}
+
+.submission-status-heading strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.submission-status-heading span,
+.submission-status-heading small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.assignment-type-sections.compact {
+  gap: 12px;
+}
+
 .review-card small {
   display: block;
   margin-top: 4px;
@@ -1662,6 +1717,10 @@ textarea {
   .score-list,
   .submission-list {
     gap: 10px;
+  }
+
+  .submission-status-section {
+    padding: 12px;
   }
 
   .review-card,

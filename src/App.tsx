@@ -104,6 +104,25 @@ type ScoreAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 type ProfileRow = { full_name?: string | null; role?: string | null; class_name?: string | null; school_name?: string | null; student_code?: string | null };
 type ChatTypingStatus = { role: Role; name: string; at: number };
 type ChatTypingPayload = { studentCode?: string; role?: Role; name?: string; isTyping?: boolean };
+type SubmissionTypeSection = { type: string; items: SubmissionRecord[] };
+type SubmissionReviewSection = { status: SubmissionStatus; total: number; typeSections: SubmissionTypeSection[] };
+type WorkViewProps = {
+  role: Role;
+  classrooms: Classroom[];
+  selectedClassroomId: string;
+  onClassroomChange: (id: string) => void;
+  assignments: ScoreAssignment[];
+  submissions: SubmissionRecord[];
+  classmates: StudentRecord[];
+  currentStudent?: StudentRecord;
+  busy: boolean;
+  activeClassName: string;
+  submitWork: (draft: SubmissionDraft) => Promise<boolean | void>;
+  updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void;
+  saveSubmission: (item: SubmissionRecord) => void;
+  deleteSubmission: (item: SubmissionRecord) => void;
+  openSubmission: (item: SubmissionRecord) => void;
+};
 type ScoresViewProps = {
   role: Role;
   classrooms: Classroom[];
@@ -2299,7 +2318,7 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
-function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: { role: Role; classrooms: Classroom[]; selectedClassroomId: string; onClassroomChange: (id: string) => void; assignments: ScoreAssignment[]; submissions: SubmissionRecord[]; classmates: StudentRecord[]; currentStudent?: StudentRecord; busy: boolean; activeClassName: string; submitWork: (draft: SubmissionDraft) => Promise<boolean | void>; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
+function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: WorkViewProps) {
   const [file, setFile] = useState<File | null>(null);
   const [assignmentId, setAssignmentId] = useState("");
   const [submissionKind, setSubmissionKind] = useState<SubmissionKind>("individual");
@@ -2310,7 +2329,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
   const selectableClassmates = classmates.filter((student) => student.studentId !== ownCode);
   const assignmentSections = useMemo(() => groupAssignmentsByType(assignments), [assignments]);
   const assignmentTypeById = useMemo(() => new Map(assignments.map((assignment) => [assignment.id, assignment.assignmentType])), [assignments]);
-  const submissionSections = useMemo(() => groupSubmissionsByAssignmentType(submissions, assignmentTypeById), [submissions, assignmentTypeById]);
+  const submissionReviewSections = useMemo(() => groupSubmissionsByStatusAndType(submissions, assignmentTypeById), [submissions, assignmentTypeById]);
   useEffect(() => {
     if (!assignments.some((assignment) => assignment.id === assignmentId)) setAssignmentId(assignments[0]?.id || "");
   }, [assignmentId, assignments]);
@@ -2340,7 +2359,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
         <section className="panel">
           <SectionTitle title="รายการงานส่ง" note={`${submissions.length} รายการ`} />
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
-          {submissions.length ? <div className="assignment-type-sections">{submissionSections.map((section) => <section className="assignment-type-section" key={section.type}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.items.length} รายการ</small></div><div className="submission-list">{section.items.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={openSubmission} />)}</div></section>)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
+          {submissions.length ? <div className="submission-status-sections">{submissionReviewSections.map((statusSection) => <section className={`submission-status-section ${statusTone(statusSection.status)}`} key={statusSection.status}><div className="submission-status-heading"><div><strong>{statusSection.status}</strong><span>{activeClassName}</span></div><small>{statusSection.total} รายการ</small></div><div className="assignment-type-sections compact">{statusSection.typeSections.map((section) => <section className="assignment-type-section" key={`${statusSection.status}-${section.type}`}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.items.length} รายการ</small></div><div className="submission-list">{section.items.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={openSubmission} />)}</div></section>)}</div></section>)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
         </section>
       </div>
     );
@@ -2681,7 +2700,27 @@ function groupAssignmentGroupsByType(groups: AssignmentGroup[]) {
   return [...grouped.entries()].map(([type, items]) => ({ type, groups: items }));
 }
 
-function groupSubmissionsByAssignmentType(items: SubmissionRecord[], assignmentTypeById: Map<string, string>) {
+function groupSubmissionsByStatusAndType(items: SubmissionRecord[], assignmentTypeById: Map<string, string>): SubmissionReviewSection[] {
+  const statusOrder: SubmissionStatus[] = ["รอตรวจ", "ส่งแล้ว", "ส่งช้า", "ให้แก้ไข", "ตรวจแล้ว", "ยังไม่ส่ง"];
+  const grouped = new Map<SubmissionStatus, SubmissionRecord[]>();
+  items.forEach((item) => {
+    grouped.set(item.status, [...(grouped.get(item.status) ?? []), item]);
+  });
+  return [...grouped.entries()]
+    .sort(([a], [b]) => submissionStatusOrder(statusOrder, a) - submissionStatusOrder(statusOrder, b))
+    .map(([status, statusItems]) => ({
+      status,
+      total: statusItems.length,
+      typeSections: groupSubmissionsByAssignmentType(statusItems, assignmentTypeById)
+    }));
+}
+
+function submissionStatusOrder(order: SubmissionStatus[], status: SubmissionStatus) {
+  const index = order.indexOf(status);
+  return index >= 0 ? index : order.length;
+}
+
+function groupSubmissionsByAssignmentType(items: SubmissionRecord[], assignmentTypeById: Map<string, string>): SubmissionTypeSection[] {
   const grouped = new Map<string, SubmissionRecord[]>();
   items.forEach((item) => {
     const type = normalizeAssignmentType(item.assignmentId ? assignmentTypeById.get(item.assignmentId) || "" : "");
