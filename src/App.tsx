@@ -198,6 +198,19 @@ const studentNav: NavItem[] = [
   { key: "profile", label: "โปรไฟล์", icon: User }
 ];
 
+const bottomNavKeys: Record<Role, ViewKey[]> = {
+  teacher: ["home", "materials", "scores", "work", "students"],
+  student: ["home", "materials", "work", "scores", "profile"]
+};
+
+function getBottomNavItems(role: Role | undefined, items: NavItem[]) {
+  const keys = bottomNavKeys[role ?? "teacher"];
+  return keys.flatMap((key) => {
+    const item = items.find((candidate) => candidate.key === key);
+    return item ? [item] : [];
+  });
+}
+
 function isRole(value: unknown): value is Role {
   return value === "teacher" || value === "student";
 }
@@ -254,7 +267,7 @@ function App() {
   const chatTypingChannel = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(null);
   const chatTypingClearTimers = useRef(new Map<string, number>());
   const nav = session?.role === "student" ? studentNav : teacherNav;
-  const bottomNav = nav.filter((item) => item.key !== "profile");
+  const bottomNav = getBottomNavItems(session?.role, nav);
   const effectiveSelectedClassroomId = selectedClassroomId || classroomItems[0]?.id || "";
   const selectedClassroom = classroomItems.find((item) => item.id === effectiveSelectedClassroomId);
   const currentStudent = session?.studentCode ? students.find((student) => student.studentId === session.studentCode) : undefined;
@@ -1576,7 +1589,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell role-${session.role}`}>
       <aside className="side-nav">
         <div className="side-brand">
           <img className="side-logo" src={SCHOOL_LOGO} alt="โลโก้โรงเรียน" />
@@ -1604,8 +1617,9 @@ function App() {
           <div className="top-actions">
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
             <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
+            <button className={`mobile-chat-button ${view === "chat" ? "active" : ""}`} type="button" onClick={() => setView("chat")} title="แชท"><MessageCircle aria-hidden /><span>แชท</span></button>
             <button className="theme-toggle-button" type="button" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title="เปลี่ยนธีม">{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}<span>{theme === "light" ? "โทนมืด" : "โทนสว่าง"}</span></button>
-            <button className={`mobile-profile-button ${view === "profile" ? "active" : ""}`} type="button" onClick={() => setView("profile")} title="โปรไฟล์"><User aria-hidden /><span>โปรไฟล์</span></button>
+            {session.role === "teacher" && <button className={`mobile-profile-button ${view === "profile" ? "active" : ""}`} type="button" onClick={() => setView("profile")} title="โปรไฟล์"><User aria-hidden /><span>โปรไฟล์</span></button>}
             <button className="mobile-logout-button" onClick={logout} title="ออกจากระบบ"><LogOut aria-hidden /><span>ออกจากระบบ</span></button>
           </div>
         </header>
