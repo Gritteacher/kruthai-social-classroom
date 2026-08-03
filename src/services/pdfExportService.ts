@@ -3,6 +3,16 @@
 // third-party type resolution while the public API remains typed in pdfExportService.d.ts.
 const FONT_NAME = "PromptPdf";
 const FONT_FILE = "Prompt-Regular.ttf";
+const PDF_PAGE_MARGIN = 8;
+
+const ASSIGNMENT_TYPE_COLORS = {
+  "ทั่วไป": { fill: [238, 240, 243], text: [63, 63, 70] },
+  "ใบงาน": { fill: [225, 239, 255], text: [24, 77, 140] },
+  "แบบฝึกหัด": { fill: [222, 246, 239], text: [20, 100, 78] },
+  "กิจกรรม": { fill: [255, 239, 213], text: [146, 78, 0] },
+  "สอบ": { fill: [255, 226, 226], text: [158, 44, 44] },
+  "โครงงาน": { fill: [238, 229, 255], text: [98, 58, 148] }
+};
 
 let fontReady = null;
 
@@ -13,15 +23,21 @@ export async function exportClassroomScorePdf(payload) {
     import("jspdf"),
     import("jspdf-autotable")
   ]);
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const assignmentRefs = buildAssignmentRefs(payload.assignments);
+  const paperFormat = pdfPaperFormat(payload.students.length, assignmentRefs.length);
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: paperFormat });
   await ensurePromptFont(doc);
   doc.setFont(FONT_NAME, "normal");
 
   const generatedAt = new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(new Date());
   const totalMax = payload.assignments.reduce((sum, assignment) => sum + assignment.finalMax, 0);
   const classroomName = payload.classroom.displayName;
-  const assignmentRefs = buildAssignmentRefs(payload.assignments);
-  const metrics = pdfLayoutMetrics(payload.students.length, assignmentRefs.length);
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const assignmentTypeRuns = buildAssignmentTypeRuns(assignmentRefs);
+  const legendColumns = pageWidth > 350 ? 5 : 3;
+  const legendRows = buildAssignmentLegendRows(assignmentRefs, legendColumns);
+  const metrics = pdfLayoutMetrics(payload.students.length, assignmentRefs.length, pageHeight, legendRows.length);
 
   doc.setFontSize(15);
   doc.text("รายงานคะแนนนักเรียนรายห้อง", 8, 12);
@@ -31,13 +47,23 @@ export async function exportClassroomScorePdf(payload) {
   doc.text(`ส่งออกเมื่อ ${generatedAt} · นักเรียน ${payload.students.length} คน · งาน ${payload.assignments.length} งาน · คะแนนเต็มรวม ${formatPdfScore(totalMax)} คะแนน`, 8, 28);
 
   autoTable(doc, {
-    head: [[
-      "เลขที่",
-      "รหัส",
-      "ชื่อ-นามสกุล",
-      ...assignmentRefs.map((assignment) => String(assignment.no)),
-      "รวม"
-    ]],
+    head: [
+      [
+        { content: "ข้อมูลนักเรียน", colSpan: 3, styles: { fillColor: [247, 248, 250], textColor: [24, 24, 27] } },
+        ...assignmentTypeRuns.map((run) => {
+          const color = assignmentTypeColor(run.type);
+          return { content: run.type, colSpan: run.count, styles: { fillColor: color.fill, textColor: color.text } };
+        }),
+        { content: "คะแนน", styles: { fillColor: [247, 248, 250], textColor: [24, 24, 27] } }
+      ],
+      [
+        "เลขที่",
+        "รหัส",
+        "ชื่อ-นามสกุล",
+        ...assignmentRefs.map((assignment) => String(assignment.no)),
+        "รวม"
+      ]
+    ],
     body: payload.students.map((student) => buildStudentScoreRow(student, assignmentRefs, payload.entries)),
     startY: 32,
     theme: "grid",
@@ -64,16 +90,18 @@ export async function exportClassroomScorePdf(payload) {
     alternateRowStyles: {
       fillColor: [252, 252, 253]
     },
-    columnStyles: pdfScoreColumnStyles(assignmentRefs.length),
-    margin: { left: 8, right: 8, top: 6, bottom: 6 },
-    pageBreak: "avoid"
+    columnStyles: pdfScoreColumnStyles(assignmentRefs.length, pageWidth),
+    didParseCell: (hook) => styleAssignmentCell(hook, assignmentRefs),
+    margin: { left: PDF_PAGE_MARGIN, right: PDF_PAGE_MARGIN, top: 6, bottom: 6 },
+    pageBreak: "avoid",
+    rowPageBreak: "avoid"
   });
 
   const tableEndY = (doc.lastAutoTable?.finalY ?? 146) + 5;
   doc.setFontSize(8);
   doc.text("รหัสงาน", 8, tableEndY);
   autoTable(doc, {
-    body: buildAssignmentLegendRows(assignmentRefs),
+    body: legendRows,
     startY: tableEndY + 2,
     theme: "plain",
     styles: {
@@ -85,19 +113,21 @@ export async function exportClassroomScorePdf(payload) {
       textColor: [63, 63, 70],
       overflow: "ellipsize"
     },
-    columnStyles: {
-      0: { cellWidth: 7, fontStyle: "normal", textColor: [24, 24, 27], halign: "right" },
-      1: { cellWidth: 84 },
-      2: { cellWidth: 7, fontStyle: "normal", textColor: [24, 24, 27], halign: "right" },
-      3: { cellWidth: 84 },
-      4: { cellWidth: 7, fontStyle: "normal", textColor: [24, 24, 27], halign: "right" },
-      5: { cellWidth: 84 }
-    },
-    margin: { left: 8, right: 8, top: 6, bottom: 6 },
-    pageBreak: "avoid"
+    columnStyles: pdfLegendColumnStyles(legendColumns, pageWidth),
+    didParseCell: (hook) => styleLegendCell(hook, legendColumns),
+    margin: { left: PDF_PAGE_MARGIN, right: PDF_PAGE_MARGIN, top: 6, bottom: 6 },
+    pageBreak: "avoid",
+    rowPageBreak: "avoid"
   });
 
+  const result = {
+    pageCount: doc.getNumberOfPages(),
+    paperFormat,
+    studentCount: payload.students.length,
+    assignmentCount: assignmentRefs.length
+  };
   doc.save(`คะแนน-${safeExportFileName(classroomName)}.pdf`);
+  return result;
 }
 
 export async function exportClassroomScoreExcel(payload) {
@@ -203,24 +233,35 @@ function validateScoreExportPayload(payload, format) {
   if (!payload.assignments.length) throw new Error("ยังไม่มีงานคะแนนในห้องนี้");
 }
 
-function pdfLayoutMetrics(studentCount, assignmentCount) {
+function pdfPaperFormat(studentCount, assignmentCount) {
+  if (studentCount > 65 || assignmentCount > 40) return "a2";
+  if (studentCount > 45 || assignmentCount > 24) return "a3";
+  return "a4";
+}
+
+function pdfLayoutMetrics(studentCount, assignmentCount, pageHeight, legendRowCount) {
   const denseRows = studentCount > 38 || assignmentCount > 14;
   const veryDenseRows = studentCount > 46 || assignmentCount > 22;
+  const legendHeight = Math.max(8, legendRowCount * (assignmentCount > 24 ? 3.1 : 3.6));
+  const availableTableHeight = pageHeight - 38 - legendHeight - 10;
+  const fittedRowHeight = availableTableHeight / Math.max(1, studentCount + 2);
   return {
-    tableFontSize: veryDenseRows ? 4.6 : denseRows ? 5.2 : 6,
-    legendFontSize: assignmentCount > 18 ? 4.8 : 5.4,
-    cellPadding: veryDenseRows ? 0.3 : denseRows ? 0.45 : 0.65,
-    minCellHeight: veryDenseRows ? 2.55 : denseRows ? 2.9 : 3.25
+    tableFontSize: veryDenseRows ? 5 : denseRows ? 5.5 : 6.2,
+    legendFontSize: assignmentCount > 24 ? 4.8 : 5.4,
+    cellPadding: veryDenseRows ? 0.25 : denseRows ? 0.4 : 0.6,
+    minCellHeight: Math.max(2.5, Math.min(3.4, fittedRowHeight))
   };
 }
 
-function pdfScoreColumnStyles(assignmentCount) {
-  const assignmentWidth = Math.max(5.2, Math.min(12, (281 - 10 - 17 - 52 - 17) / Math.max(1, assignmentCount)));
+function pdfScoreColumnStyles(assignmentCount, pageWidth) {
+  const fixedWidth = 10 + 17 + 52 + 20;
+  const fitAllowance = 20;
+  const assignmentWidth = Math.max(3.4, Math.min(12, (pageWidth - PDF_PAGE_MARGIN * 2 - fixedWidth - fitAllowance) / Math.max(1, assignmentCount)));
   const styles = {
     0: { cellWidth: 10, halign: "center" },
     1: { cellWidth: 17, halign: "center" },
     2: { cellWidth: 52 },
-    [assignmentCount + 3]: { cellWidth: 17, halign: "center", fillColor: [250, 250, 250] }
+    [assignmentCount + 3]: { cellWidth: 20, halign: "center", fillColor: [250, 250, 250] }
   };
   for (let index = 0; index < assignmentCount; index += 1) {
     styles[index + 3] = { cellWidth: assignmentWidth, halign: "center" };
@@ -228,18 +269,76 @@ function pdfScoreColumnStyles(assignmentCount) {
   return styles;
 }
 
-function buildAssignmentLegendRows(assignments) {
+function buildAssignmentTypeRuns(assignments) {
+  return assignments.reduce((runs, assignment) => {
+    const type = normalizeAssignmentType(assignment.assignmentType);
+    const previous = runs[runs.length - 1];
+    if (previous?.type === type) previous.count += 1;
+    else runs.push({ type, count: 1 });
+    return runs;
+  }, []);
+}
+
+function buildAssignmentLegendRows(assignments, columnCount) {
   const rows = [];
-  const perColumn = Math.ceil(assignments.length / 3);
+  const perColumn = Math.ceil(assignments.length / columnCount);
   for (let rowIndex = 0; rowIndex < perColumn; rowIndex += 1) {
     const row = [];
-    for (let column = 0; column < 3; column += 1) {
+    for (let column = 0; column < columnCount; column += 1) {
       const assignment = assignments[rowIndex + column * perColumn];
-      row.push(assignment ? `${assignment.no}.` : "", assignment ? `${assignment.title} (${assignment.assignmentType || "ทั่วไป"} · ${formatPdfScore(assignment.finalMax)})` : "");
+      row.push(
+        assignment ? `${assignment.no}.` : "",
+        assignment ? `${assignment.title} (${normalizeAssignmentType(assignment.assignmentType)} · ${formatPdfScore(assignment.finalMax)})` : ""
+      );
     }
     rows.push(row);
   }
   return rows;
+}
+
+function pdfLegendColumnStyles(columnCount, pageWidth) {
+  const numberWidth = 7;
+  const labelWidth = (pageWidth - PDF_PAGE_MARGIN * 2 - numberWidth * columnCount) / columnCount;
+  const styles = {};
+  for (let column = 0; column < columnCount; column += 1) {
+    styles[column * 2] = { cellWidth: numberWidth, fontStyle: "normal", textColor: [24, 24, 27], halign: "right" };
+    styles[column * 2 + 1] = { cellWidth: labelWidth };
+  }
+  return styles;
+}
+
+function styleAssignmentCell(hook, assignments) {
+  if (hook.section !== "body") return;
+  const assignmentIndex = hook.column.index - 3;
+  const assignment = assignments[assignmentIndex];
+  if (!assignment) return;
+  const color = assignmentTypeColor(assignment.assignmentType);
+  hook.cell.styles.fillColor = mixWithWhite(color.fill, hook.row.index % 2 === 0 ? 0.62 : 0.76);
+}
+
+function styleLegendCell(hook, columnCount) {
+  if (hook.section !== "body" || hook.column.index % 2 === 0) return;
+  const assignmentIndex = hook.row.index + Math.floor(hook.column.index / 2) * Math.ceil(hook.table.body.length ? hook.table.body.length : 1);
+  if (assignmentIndex < 0 || Math.floor(hook.column.index / 2) >= columnCount) return;
+  const value = String(hook.cell.raw || "");
+  const typeMatch = value.match(/\(([^·()]+)\s*·/);
+  if (!typeMatch) return;
+  const color = assignmentTypeColor(typeMatch[1].trim());
+  hook.cell.styles.fillColor = mixWithWhite(color.fill, 0.68);
+  hook.cell.styles.textColor = color.text;
+}
+
+function normalizeAssignmentType(value) {
+  const type = String(value || "").trim();
+  return type || "ทั่วไป";
+}
+
+function assignmentTypeColor(type) {
+  return ASSIGNMENT_TYPE_COLORS[normalizeAssignmentType(type)] || ASSIGNMENT_TYPE_COLORS["ทั่วไป"];
+}
+
+function mixWithWhite(color, ratio) {
+  return color.map((channel) => Math.round(channel + (255 - channel) * ratio));
 }
 
 function formatPdfScore(value) {
