@@ -1411,12 +1411,13 @@ function App() {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     const rawScore = Math.max(0, Math.min(item.rawMax, item.rawScore));
     const finalScore = Math.max(0, Math.min(item.finalMax, scaledScore(rawScore, item.rawMax, item.finalMax)));
+    const reviewedItem: SubmissionRecord = { ...item, status: "ตรวจแล้ว", rawScore, finalScore };
     setBusy(true);
     try {
       const client = supabase!;
       const result = await client.rpc("review_submission_and_sync_scores", {
         p_submission_id: item.id,
-        p_status: item.status,
+        p_status: "ตรวจแล้ว",
         p_raw_score: rawScore,
         p_raw_max: item.rawMax,
         p_final_max: item.finalMax
@@ -1424,10 +1425,12 @@ function App() {
       if (result.error) throw result.error;
       const savedRow = Array.isArray(result.data) ? result.data[0] : result.data;
       cancelScoreAutoSaves(new Set(Array.from(scoreAutoSaveTimers.current.keys())));
-      if (savedRow) setSubmissionItems((current) => current.map((entry) => entry.id === item.id ? mapSubmissionRow(savedRow) : entry));
+      setSubmissionItems((current) => current.map((entry) => entry.id === item.id
+        ? savedRow ? { ...mapSubmissionRow(savedRow), status: "ตรวจแล้ว" } : reviewedItem
+        : entry));
       await loadClassroomData();
       const groupSuffix = item.submissionKind === "group" ? ` และสมาชิกกลุ่มรวม ${item.groupMemberCodes.length} คน` : "";
-      flash(`บันทึกผลตรวจงานของ ${item.studentName}${groupSuffix} แล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย`);
+      flash(`ตรวจงานของ ${item.studentName}${groupSuffix} แล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย`);
     } catch (error) {
       flash(userFacingError(error, "บันทึกผลตรวจงานไม่สำเร็จ"));
     } finally {
