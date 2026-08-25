@@ -39,7 +39,8 @@ import {
   Users,
   Moon,
   Pencil,
-  Sun
+  Sun,
+  X
 } from "lucide-react";
 import { isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
 import {
@@ -124,6 +125,7 @@ type WorkViewProps = {
   saveSubmissions: (items: SubmissionRecord[]) => Promise<boolean>;
   deleteSubmission: (item: SubmissionRecord) => void;
   openSubmission: (item: SubmissionRecord) => void;
+  getSubmissionPreviewUrl: (item: SubmissionRecord) => Promise<string>;
 };
 type ScoresViewProps = {
   role: Role;
@@ -619,17 +621,27 @@ function App() {
     flash("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเปิดไฟล์ไม่ได้");
   }
 
-  async function openSubmissionFile(item: SubmissionRecord) {
+  async function getSubmissionPreviewUrl(item: SubmissionRecord) {
     if (item.linkUrl) {
-      window.open(item.linkUrl, "_blank", "noopener,noreferrer");
-      return flash(`เปิดลิงก์งาน ${item.assignmentTitle} ในแท็บใหม่`);
+      const normalized = normalizeExternalUrl(item.linkUrl);
+      if (normalized.error || !normalized.url) throw new Error(normalized.error || "ลิงก์งานไม่ถูกต้อง");
+      return normalized.url;
     }
-    if (!item.filePath) return flash(item.fileDeletedAtRaw ? "ไฟล์แนบถูกลบอัตโนมัติหลังตรวจครบ 7 วันแล้ว" : "งานนี้ยังไม่มีไฟล์หรือลิงก์แนบ");
-    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเปิดไฟล์ไม่ได้");
+    if (!item.filePath) throw new Error(item.fileDeletedAtRaw ? "ไฟล์แนบถูกลบอัตโนมัติหลังตรวจครบ 7 วันแล้ว" : "งานนี้ยังไม่มีไฟล์หรือลิงก์แนบ");
+    if (!isSupabaseConfigured) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเปิดไฟล์ไม่ได้");
     const { data, error } = await supabase!.storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
-    if (error || !data?.signedUrl) return flash(error?.message || "เปิดไฟล์งานไม่ได้");
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-    flash(`เปิดไฟล์งาน ${item.assignmentTitle} ในแท็บใหม่`);
+    if (error || !data?.signedUrl) throw error || new Error("เปิดไฟล์งานไม่ได้");
+    return data.signedUrl;
+  }
+
+  async function openSubmissionFile(item: SubmissionRecord) {
+    try {
+      const url = await getSubmissionPreviewUrl(item);
+      window.open(url, "_blank", "noopener,noreferrer");
+      flash(`เปิด${item.linkUrl ? "ลิงก์" : "ไฟล์"}งาน ${item.assignmentTitle} ในแท็บใหม่`);
+    } catch (error) {
+      flash(userFacingError(error, "เปิดงานที่ส่งมาไม่สำเร็จ"));
+    }
   }
 
   async function addAnnouncement(draft: AnnouncementDraft) {
@@ -1690,7 +1702,7 @@ function App() {
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} deleteAssignmentGroup={deleteAssignments} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} />}
-          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
+          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
@@ -2399,7 +2411,7 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
-function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission }: WorkViewProps) {
+function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission, getSubmissionPreviewUrl }: WorkViewProps) {
   const [file, setFile] = useState<File | null>(null);
   const [assignmentId, setAssignmentId] = useState("");
   const [submissionKind, setSubmissionKind] = useState<SubmissionKind>("individual");
@@ -2407,6 +2419,11 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
   const [linkUrl, setLinkUrl] = useState("");
   const [memberCodes, setMemberCodes] = useState<string[]>([]);
   const [teacherReviewMode, setTeacherReviewMode] = useState<"assignments" | "students">("assignments");
+  const [previewTarget, setPreviewTarget] = useState<SubmissionRecord | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewError, setPreviewError] = useState("");
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const previewRequestId = useRef(0);
   const ownCode = currentStudent?.studentId || "";
   const selectableClassmates = classmates.filter((student) => student.studentId !== ownCode);
   const assignmentSections = useMemo(() => groupAssignmentsByType(assignments), [assignments]);
@@ -2415,6 +2432,45 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
   useEffect(() => {
     if (!assignments.some((assignment) => assignment.id === assignmentId)) setAssignmentId(assignments[0]?.id || "");
   }, [assignmentId, assignments]);
+
+  useEffect(() => {
+    if (!previewTarget) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSubmissionPreview();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [previewTarget]);
+
+  function closeSubmissionPreview() {
+    previewRequestId.current += 1;
+    setPreviewTarget(null);
+    setPreviewUrl("");
+    setPreviewError("");
+    setPreviewBusy(false);
+  }
+
+  async function showSubmissionPreview(item: SubmissionRecord) {
+    const requestId = previewRequestId.current + 1;
+    previewRequestId.current = requestId;
+    setPreviewTarget(item);
+    setPreviewUrl("");
+    setPreviewError("");
+    setPreviewBusy(true);
+    try {
+      const url = await getSubmissionPreviewUrl(item);
+      if (previewRequestId.current === requestId) setPreviewUrl(url);
+    } catch (error) {
+      if (previewRequestId.current === requestId) setPreviewError(userFacingError(error, "เปิดตัวอย่างงานไม่สำเร็จ"));
+    } finally {
+      if (previewRequestId.current === requestId) setPreviewBusy(false);
+    }
+  }
 
   function toggleGroupMember(studentCode: string) {
     setMemberCodes((current) => current.includes(studentCode) ? current.filter((code) => code !== studentCode) : [...current, studentCode]);
@@ -2442,8 +2498,9 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
           <SectionTitle title="รายการงานส่ง" note={`${submissions.length} รายการ`} />
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
           <div className="review-mode-switch" role="tablist" aria-label="รูปแบบการตรวจงาน"><button className={teacherReviewMode === "assignments" ? "active" : ""} type="button" role="tab" aria-selected={teacherReviewMode === "assignments"} onClick={() => setTeacherReviewMode("assignments")}><ClipboardCheck aria-hidden />ตามงาน</button><button className={teacherReviewMode === "students" ? "active" : ""} type="button" role="tab" aria-selected={teacherReviewMode === "students"} onClick={() => setTeacherReviewMode("students")}><Users aria-hidden />ตามนักเรียน</button></div>
-          {submissions.length ? teacherReviewMode === "assignments" ? <div className="submission-status-sections">{submissionReviewSections.map((statusSection) => <section className={`submission-status-section ${statusTone(statusSection.status)}`} key={statusSection.status}><div className="submission-status-heading"><div><strong>{statusSection.status}</strong><span>{activeClassName}</span></div><small>{statusSection.total} รายการ</small></div><div className="assignment-type-sections compact">{statusSection.typeSections.map((section) => <section className="assignment-type-section" key={`${statusSection.status}-${section.type}`}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.items.length} รายการ</small></div><div className="submission-list">{section.items.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={openSubmission} />)}</div></section>)}</div></section>)}</div> : <StudentSubmissionReview submissions={submissions} busy={busy} updateSubmission={updateSubmission} saveSubmissions={saveSubmissions} openSubmission={openSubmission} /> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
+          {submissions.length ? teacherReviewMode === "assignments" ? <div className="submission-status-sections">{submissionReviewSections.map((statusSection) => <section className={`submission-status-section ${statusTone(statusSection.status)}`} key={statusSection.status}><div className="submission-status-heading"><div><strong>{statusSection.status}</strong><span>{activeClassName}</span></div><small>{statusSection.total} รายการ</small></div><div className="assignment-type-sections compact">{statusSection.typeSections.map((section) => <section className="assignment-type-section" key={`${statusSection.status}-${section.type}`}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.items.length} รายการ</small></div><div className="submission-list">{section.items.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={showSubmissionPreview} />)}</div></section>)}</div></section>)}</div> : <StudentSubmissionReview submissions={submissions} busy={busy} updateSubmission={updateSubmission} saveSubmissions={saveSubmissions} openSubmission={showSubmissionPreview} /> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
         </section>
+        {previewTarget && <SubmissionPreviewModal item={previewTarget} url={previewUrl} loading={previewBusy} error={previewError} onClose={closeSubmissionPreview} />}
       </div>
     );
   }
@@ -2488,6 +2545,51 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
       <section className="panel">
         <SectionTitle title="ประวัติการส่งงาน" note={`${submissions.length} รายการ`} />
         {submissions.length ? <SubmissionList items={submissions} onOpen={openSubmission} /> : <EmptyState title="ยังไม่มีประวัติ" body="เมื่อส่งงานแล้วจะแสดงรายการที่นี่" />}
+      </section>
+    </div>
+  );
+}
+
+type SubmissionPreviewKind = "image" | "video" | "pdf" | "link" | "document";
+
+function submissionPreviewKind(item: SubmissionRecord): SubmissionPreviewKind {
+  if (item.linkUrl) return "link";
+  const fileName = item.originalFileName || fileNameFromPath(item.filePath || "");
+  const extension = fileName.split(".").pop()?.toLowerCase() || "";
+  if (["jpg", "jpeg", "png", "webp"].includes(extension)) return "image";
+  if (["mp4", "mov", "m4v", "webm"].includes(extension)) return "video";
+  if (extension === "pdf") return "pdf";
+  return "document";
+}
+
+function SubmissionPreviewModal({ item, url, loading, error, onClose }: { item: SubmissionRecord; url: string; loading: boolean; error: string; onClose: () => void }) {
+  const kind = submissionPreviewKind(item);
+  const attachmentName = item.linkUrl || item.originalFileName || fileNameFromPath(item.filePath || "") || "งานที่นักเรียนส่ง";
+  return (
+    <div className="modal-backdrop submission-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <section className="submission-preview-panel" role="dialog" aria-modal="true" aria-labelledby="submission-preview-title">
+        <header className="submission-preview-header">
+          <div>
+            <span>ตัวอย่างงานที่ส่งมา</span>
+            <h2 id="submission-preview-title">{item.assignmentTitle}</h2>
+            <p>{item.studentName} · รหัสนักเรียน {item.studentId}</p>
+          </div>
+          <button className="icon-button submission-preview-close" type="button" onClick={onClose} title="ปิดตัวอย่างงาน" aria-label="ปิดตัวอย่างงาน"><X aria-hidden /></button>
+        </header>
+        <div className="submission-preview-meta"><span className="submission-kind-badge">{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"}</span><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span><span className="submission-preview-file-name">{attachmentName}</span></div>
+        <div className={`submission-preview-stage preview-${kind}`}>
+          {loading && <div className="submission-preview-message"><span className="submission-preview-spinner" aria-hidden /><strong>กำลังเตรียมตัวอย่างงาน</strong><span>ระบบกำลังสร้างลิงก์ที่ปลอดภัยสำหรับไฟล์นี้</span></div>}
+          {!loading && error && <div className="submission-preview-message error"><FileText aria-hidden /><strong>แสดงตัวอย่างไม่ได้</strong><span>{error}</span></div>}
+          {!loading && !error && url && kind === "image" && <img src={url} alt={`งาน ${item.assignmentTitle} ของ ${item.studentName}`} />}
+          {!loading && !error && url && kind === "video" && <video src={url} controls preload="metadata" />}
+          {!loading && !error && url && kind === "pdf" && <iframe src={url} title={`ตัวอย่าง ${item.assignmentTitle}`} />}
+          {!loading && !error && url && kind === "link" && <iframe src={url} title={`ลิงก์งาน ${item.assignmentTitle}`} referrerPolicy="no-referrer" sandbox="allow-forms allow-scripts allow-same-origin" />}
+          {!loading && !error && url && kind === "document" && <div className="submission-preview-message"><FileText aria-hidden /><strong>ไฟล์นี้ไม่รองรับการแสดงภายในเว็บ</strong><span>กด “เปิดต้นฉบับ” เพื่อดูไฟล์ด้วยแอปที่รองรับ</span></div>}
+        </div>
+        <footer className="submission-preview-actions">
+          <span>{kind === "link" ? "เว็บไซต์บางแห่งอาจไม่อนุญาตให้แสดงใน popup" : "ตัวอย่างนี้ใช้สำหรับตรวจงานเท่านั้น"}</span>
+          <div><button className="template-button" type="button" onClick={onClose}>ปิด</button><button className="primary-button" type="button" disabled={!url || loading} onClick={() => window.open(url, "_blank", "noopener,noreferrer")}><ExternalLink aria-hidden />เปิดต้นฉบับ</button></div>
+        </footer>
       </section>
     </div>
   );
@@ -2553,9 +2655,8 @@ function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubm
         <div className="student-review-toolbar"><button className="template-button" type="button" disabled={busy || !pendingItems.length} onClick={togglePendingItems}><CheckCircle2 aria-hidden />{allPendingSelected ? "ยกเลิกงานรอตรวจ" : "เลือกงานรอตรวจทั้งหมด"}</button><span>เลือกแล้ว {selectedItems.length} งาน</span></div>
         <div className="student-review-work-list">{selectedStudent.items.map((item) => {
           const checked = selectedSubmissionIds.includes(item.id);
-          const isLink = Boolean(item.linkUrl);
           const retentionNote = submissionFileRetentionNote(item);
-          return <article className={`student-review-work ${checked ? "selected" : ""}`} key={item.id}><label className="student-review-work-check"><input type="checkbox" checked={checked} disabled={busy} onChange={() => toggleSubmission(item.id)} /><span className="sr-only">เลือก {item.assignmentTitle}</span></label><div className="student-review-work-info"><div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div><span>{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"} · {item.submittedAt}</span><SubmissionMemberList item={item} />{retentionNote && <span className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</span>}</div><button className="icon-button student-review-open" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl} title={isLink ? "เปิดลิงก์" : item.fileDeletedAtRaw ? "ไฟล์ถูกลบอัตโนมัติแล้ว" : "เปิดไฟล์"} aria-label={`${isLink ? "เปิดลิงก์" : "เปิดไฟล์"} ${item.assignmentTitle}`}><ExternalLink aria-hidden /></button><label className="field student-review-score">คะแนนดิบ<input type="number" min="0" max={item.rawMax} value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="คะแนน" /><small>เต็ม {formatScore(item.rawMax)} · เก็บ {formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}/{formatScore(item.finalMax)}</small></label></article>;
+          return <article className={`student-review-work ${checked ? "selected" : ""}`} key={item.id}><label className="student-review-work-check"><input type="checkbox" checked={checked} disabled={busy} onChange={() => toggleSubmission(item.id)} /><span className="sr-only">เลือก {item.assignmentTitle}</span></label><div className="student-review-work-info"><div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div><span>{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"} · {item.submittedAt}</span><SubmissionMemberList item={item} />{retentionNote && <span className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</span>}</div><button className="icon-button student-review-open" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl} title={item.fileDeletedAtRaw ? "ไฟล์ถูกลบอัตโนมัติแล้ว" : "ดูตัวอย่างงาน"} aria-label={`ดูตัวอย่างงาน ${item.assignmentTitle}`}><Eye aria-hidden /></button><label className="field student-review-score">คะแนนดิบ<input type="number" min="0" max={item.rawMax} value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="คะแนน" /><small>เต็ม {formatScore(item.rawMax)} · เก็บ {formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}/{formatScore(item.finalMax)}</small></label></article>;
         })}</div>
         <div className="student-review-savebar"><div><strong>{selectedItems.length ? `พร้อมบันทึก ${selectedItems.length} งาน` : "เลือกงานที่ต้องการให้คะแนน"}</strong><span>แต่ละงานใช้คะแนนเต็มตามที่กำหนดไว้</span></div><button className="primary-button" type="button" disabled={busy || !selectedItems.length} onClick={() => void saveSelectedItems()}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกงานที่เลือก"}</button></div>
       </section>
@@ -2574,7 +2675,7 @@ function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmis
         <div className="student-submission-identity"><span>ผู้ส่ง {item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>
         <SubmissionMemberList item={item} />
         <small>{item.submittedAt}</small>
-        <div className="review-file-box">{isLink ? <ExternalLink aria-hidden /> : <FileText aria-hidden />}<div><span>{isLink ? "ลิงก์งาน" : item.fileDeletedAtRaw ? "ไฟล์ถูกลบแล้ว" : "ไฟล์งาน"}</span><strong>{isLink ? item.linkUrl : attachmentName}</strong>{retentionNote && <small className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</small>}</div><button className="template-button" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl}><ExternalLink aria-hidden />{isLink ? "เปิดลิงก์" : item.fileDeletedAtRaw ? "ลบแล้ว" : "เปิดไฟล์"}</button></div>
+        <div className="review-file-box">{isLink ? <ExternalLink aria-hidden /> : <FileText aria-hidden />}<div><span>{isLink ? "ลิงก์งาน" : item.fileDeletedAtRaw ? "ไฟล์ถูกลบแล้ว" : "ไฟล์งาน"}</span><strong>{isLink ? item.linkUrl : attachmentName}</strong>{retentionNote && <small className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</small>}</div><button className="template-button submission-preview-trigger" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl}><Eye aria-hidden />{item.fileDeletedAtRaw ? "ลบแล้ว" : "ดูตัวอย่าง"}</button></div>
       </div>
       <div className="review-grid">
         <label className="field">สถานะ<select value={item.status} onChange={(event) => updateSubmission(item.id, { status: event.target.value as SubmissionStatus })}>{submissionStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
