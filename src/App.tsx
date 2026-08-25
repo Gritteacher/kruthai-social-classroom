@@ -106,6 +106,7 @@ type ChatTypingStatus = { role: Role; name: string; at: number };
 type ChatTypingPayload = { studentCode?: string; role?: Role; name?: string; isTyping?: boolean };
 type SubmissionTypeSection = { type: string; items: SubmissionRecord[] };
 type SubmissionReviewSection = { status: SubmissionStatus; total: number; typeSections: SubmissionTypeSection[] };
+type SubmissionStudentGroup = { studentId: string; studentName: string; items: SubmissionRecord[]; pendingCount: number; reviewedCount: number };
 type WorkViewProps = {
   role: Role;
   classrooms: Classroom[];
@@ -120,6 +121,7 @@ type WorkViewProps = {
   submitWork: (draft: SubmissionDraft) => Promise<boolean | void>;
   updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void;
   saveSubmission: (item: SubmissionRecord) => void;
+  saveSubmissions: (items: SubmissionRecord[]) => Promise<boolean>;
   deleteSubmission: (item: SubmissionRecord) => void;
   openSubmission: (item: SubmissionRecord) => void;
 };
@@ -1429,32 +1431,67 @@ function App() {
     }));
   }
 
-  async function saveSubmissionReview(item: SubmissionRecord) {
-    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  async function reviewSubmissionAndSyncScores(item: SubmissionRecord) {
     const rawScore = Math.max(0, Math.min(item.rawMax, item.rawScore));
     const finalScore = Math.max(0, Math.min(item.finalMax, scaledScore(rawScore, item.rawMax, item.finalMax)));
     const reviewedItem: SubmissionRecord = { ...item, status: "ตรวจแล้ว", rawScore, finalScore };
+    const result = await supabase!.rpc("review_submission_and_sync_scores", {
+      p_submission_id: item.id,
+      p_status: "ตรวจแล้ว",
+      p_raw_score: rawScore,
+      p_raw_max: item.rawMax,
+      p_final_max: item.finalMax
+    });
+    if (result.error) throw result.error;
+    const savedRow = Array.isArray(result.data) ? result.data[0] : result.data;
+    return savedRow ? { ...mapSubmissionRow(savedRow), status: "ตรวจแล้ว" as SubmissionStatus } : reviewedItem;
+  }
+
+  async function saveSubmissionReview(item: SubmissionRecord) {
+    if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
-      const client = supabase!;
-      const result = await client.rpc("review_submission_and_sync_scores", {
-        p_submission_id: item.id,
-        p_status: "ตรวจแล้ว",
-        p_raw_score: rawScore,
-        p_raw_max: item.rawMax,
-        p_final_max: item.finalMax
-      });
-      if (result.error) throw result.error;
-      const savedRow = Array.isArray(result.data) ? result.data[0] : result.data;
+      const savedItem = await reviewSubmissionAndSyncScores(item);
       cancelScoreAutoSaves(new Set(Array.from(scoreAutoSaveTimers.current.keys())));
-      setSubmissionItems((current) => current.map((entry) => entry.id === item.id
-        ? savedRow ? { ...mapSubmissionRow(savedRow), status: "ตรวจแล้ว" } : reviewedItem
-        : entry));
+      setSubmissionItems((current) => current.map((entry) => entry.id === item.id ? savedItem : entry));
       await loadClassroomData();
       const groupSuffix = item.submissionKind === "group" ? ` และสมาชิกกลุ่มรวม ${item.groupMemberCodes.length} คน` : "";
       flash(`ตรวจงานของ ${item.studentName}${groupSuffix} แล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย`);
     } catch (error) {
       flash(userFacingError(error, "บันทึกผลตรวจงานไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveSubmissionReviews(items: SubmissionRecord[]) {
+    if (!isSupabaseConfigured) {
+      flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+      return false;
+    }
+    const uniqueItems = Array.from(new Map(items.map((item) => [item.id, item])).values());
+    if (!uniqueItems.length) {
+      flash("เลือกงานที่ต้องการบันทึกคะแนนก่อน");
+      return false;
+    }
+    setBusy(true);
+    try {
+      const results = await Promise.allSettled(uniqueItems.map(reviewSubmissionAndSyncScores));
+      const savedItems = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      const savedById = new Map(savedItems.map((item) => [item.id, item]));
+      cancelScoreAutoSaves(new Set(Array.from(scoreAutoSaveTimers.current.keys())));
+      setSubmissionItems((current) => current.map((item) => savedById.get(item.id) ?? item));
+      await loadClassroomData();
+      const failedCount = results.length - savedItems.length;
+      if (failedCount) {
+        flash(`บันทึกสำเร็จ ${savedItems.length} งาน และไม่สำเร็จ ${failedCount} งาน กรุณาตรวจคะแนนแล้วลองอีกครั้ง`);
+        return false;
+      }
+      flash(`บันทึกคะแนน ${savedItems.length} งานแล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "บันทึกคะแนนหลายงานไม่สำเร็จ"));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1653,7 +1690,7 @@ function App() {
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} deleteAssignmentGroup={deleteAssignments} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} />}
-          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
+          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
@@ -2362,13 +2399,14 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
-function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: WorkViewProps) {
+function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission }: WorkViewProps) {
   const [file, setFile] = useState<File | null>(null);
   const [assignmentId, setAssignmentId] = useState("");
   const [submissionKind, setSubmissionKind] = useState<SubmissionKind>("individual");
   const [deliveryMethod, setDeliveryMethod] = useState<"file" | "link">("file");
   const [linkUrl, setLinkUrl] = useState("");
   const [memberCodes, setMemberCodes] = useState<string[]>([]);
+  const [teacherReviewMode, setTeacherReviewMode] = useState<"assignments" | "students">("assignments");
   const ownCode = currentStudent?.studentId || "";
   const selectableClassmates = classmates.filter((student) => student.studentId !== ownCode);
   const assignmentSections = useMemo(() => groupAssignmentsByType(assignments), [assignments]);
@@ -2403,7 +2441,8 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
         <section className="panel">
           <SectionTitle title="รายการงานส่ง" note={`${submissions.length} รายการ`} />
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
-          {submissions.length ? <div className="submission-status-sections">{submissionReviewSections.map((statusSection) => <section className={`submission-status-section ${statusTone(statusSection.status)}`} key={statusSection.status}><div className="submission-status-heading"><div><strong>{statusSection.status}</strong><span>{activeClassName}</span></div><small>{statusSection.total} รายการ</small></div><div className="assignment-type-sections compact">{statusSection.typeSections.map((section) => <section className="assignment-type-section" key={`${statusSection.status}-${section.type}`}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.items.length} รายการ</small></div><div className="submission-list">{section.items.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={openSubmission} />)}</div></section>)}</div></section>)}</div> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
+          <div className="review-mode-switch" role="tablist" aria-label="รูปแบบการตรวจงาน"><button className={teacherReviewMode === "assignments" ? "active" : ""} type="button" role="tab" aria-selected={teacherReviewMode === "assignments"} onClick={() => setTeacherReviewMode("assignments")}><ClipboardCheck aria-hidden />ตามงาน</button><button className={teacherReviewMode === "students" ? "active" : ""} type="button" role="tab" aria-selected={teacherReviewMode === "students"} onClick={() => setTeacherReviewMode("students")}><Users aria-hidden />ตามนักเรียน</button></div>
+          {submissions.length ? teacherReviewMode === "assignments" ? <div className="submission-status-sections">{submissionReviewSections.map((statusSection) => <section className={`submission-status-section ${statusTone(statusSection.status)}`} key={statusSection.status}><div className="submission-status-heading"><div><strong>{statusSection.status}</strong><span>{activeClassName}</span></div><small>{statusSection.total} รายการ</small></div><div className="assignment-type-sections compact">{statusSection.typeSections.map((section) => <section className="assignment-type-section" key={`${statusSection.status}-${section.type}`}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.items.length} รายการ</small></div><div className="submission-list">{section.items.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={openSubmission} />)}</div></section>)}</div></section>)}</div> : <StudentSubmissionReview submissions={submissions} busy={busy} updateSubmission={updateSubmission} saveSubmissions={saveSubmissions} openSubmission={openSubmission} /> : <EmptyState title="ยังไม่มีงานส่ง" body="เมื่อนักเรียนอัปโหลดงานของห้องที่เลือก รายการจะปรากฏที่นี่" />}
         </section>
       </div>
     );
@@ -2449,6 +2488,75 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
       <section className="panel">
         <SectionTitle title="ประวัติการส่งงาน" note={`${submissions.length} รายการ`} />
         {submissions.length ? <SubmissionList items={submissions} onOpen={openSubmission} /> : <EmptyState title="ยังไม่มีประวัติ" body="เมื่อส่งงานแล้วจะแสดงรายการที่นี่" />}
+      </section>
+    </div>
+  );
+}
+
+function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubmissions, openSubmission }: { submissions: SubmissionRecord[]; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmissions: (items: SubmissionRecord[]) => Promise<boolean>; openSubmission: (item: SubmissionRecord) => void }) {
+  const studentGroups = useMemo(() => groupSubmissionsByStudent(submissions), [submissions]);
+  const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<string[]>([]);
+  const selectedStudent = studentGroups.find((group) => group.studentId === selectedStudentId) || studentGroups[0];
+  const selectedItems = selectedStudent?.items.filter((item) => selectedSubmissionIds.includes(item.id)) ?? [];
+  const pendingItems = selectedStudent?.items.filter((item) => item.status !== "ตรวจแล้ว") ?? [];
+  const allPendingSelected = pendingItems.length > 0 && pendingItems.every((item) => selectedSubmissionIds.includes(item.id));
+
+  useEffect(() => {
+    if (!studentGroups.length) {
+      setSelectedStudentId("");
+      setSelectedSubmissionIds([]);
+      return;
+    }
+    if (!studentGroups.some((group) => group.studentId === selectedStudentId)) {
+      setSelectedStudentId(studentGroups[0].studentId);
+      setSelectedSubmissionIds([]);
+    }
+  }, [selectedStudentId, studentGroups]);
+
+  useEffect(() => {
+    const availableIds = new Set(selectedStudent?.items.map((item) => item.id) ?? []);
+    setSelectedSubmissionIds((current) => current.filter((id) => availableIds.has(id)));
+  }, [selectedStudent]);
+
+  function selectStudent(studentId: string) {
+    setSelectedStudentId(studentId);
+    setSelectedSubmissionIds([]);
+  }
+
+  function toggleSubmission(id: string) {
+    setSelectedSubmissionIds((current) => current.includes(id) ? current.filter((itemId) => itemId !== id) : [...current, id]);
+  }
+
+  function togglePendingItems() {
+    const pendingIds = pendingItems.map((item) => item.id);
+    setSelectedSubmissionIds((current) => allPendingSelected
+      ? current.filter((id) => !pendingIds.includes(id))
+      : Array.from(new Set([...current, ...pendingIds])));
+  }
+
+  async function saveSelectedItems() {
+    const saved = await saveSubmissions(selectedItems);
+    if (saved) setSelectedSubmissionIds([]);
+  }
+
+  if (!selectedStudent) return <EmptyState title="ยังไม่มีนักเรียนส่งงาน" body="รายชื่อนักเรียนจะแสดงเมื่อมีการส่งงาน" />;
+
+  return (
+    <div className="student-review-layout">
+      <aside className="student-review-roster" aria-label="รายชื่อนักเรียนที่ส่งงาน">
+        <div className="student-review-roster-heading"><strong>ผู้ส่งงาน</strong><span>{studentGroups.length} คน</span></div>
+        <div className="student-review-roster-list">{studentGroups.map((group) => <button className={group.studentId === selectedStudent.studentId ? "active" : ""} type="button" key={group.studentId} onClick={() => selectStudent(group.studentId)}><div><strong>{group.studentName}</strong><span>รหัส {group.studentId}</span></div><div className="student-review-counts"><span className={group.pendingCount ? "pending" : "pass"}>รอตรวจ {group.pendingCount}</span><small>{group.items.length} งาน</small></div></button>)}</div>
+      </aside>
+      <section className="student-review-detail">
+        <div className="student-review-detail-heading"><div><span>งานของนักเรียน</span><strong>{selectedStudent.studentName}</strong><small>รหัสนักเรียน {selectedStudent.studentId}</small></div><div><span className="status-pill pending">รอตรวจ {selectedStudent.pendingCount}</span><span className="status-pill pass">ตรวจแล้ว {selectedStudent.reviewedCount}</span></div></div>
+        <div className="student-review-toolbar"><button className="template-button" type="button" disabled={busy || !pendingItems.length} onClick={togglePendingItems}><CheckCircle2 aria-hidden />{allPendingSelected ? "ยกเลิกงานรอตรวจ" : "เลือกงานรอตรวจทั้งหมด"}</button><span>เลือกแล้ว {selectedItems.length} งาน</span></div>
+        <div className="student-review-work-list">{selectedStudent.items.map((item) => {
+          const checked = selectedSubmissionIds.includes(item.id);
+          const isLink = Boolean(item.linkUrl);
+          return <article className={`student-review-work ${checked ? "selected" : ""}`} key={item.id}><label className="student-review-work-check"><input type="checkbox" checked={checked} disabled={busy} onChange={() => toggleSubmission(item.id)} /><span className="sr-only">เลือก {item.assignmentTitle}</span></label><div className="student-review-work-info"><div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div><span>{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"} · {item.submittedAt}</span><SubmissionMemberList item={item} /></div><button className="icon-button student-review-open" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl} title={isLink ? "เปิดลิงก์" : "เปิดไฟล์"} aria-label={`${isLink ? "เปิดลิงก์" : "เปิดไฟล์"} ${item.assignmentTitle}`}><ExternalLink aria-hidden /></button><label className="field student-review-score">คะแนนดิบ<input type="number" min="0" max={item.rawMax} value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="คะแนน" /><small>เต็ม {formatScore(item.rawMax)} · เก็บ {formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}/{formatScore(item.finalMax)}</small></label></article>;
+        })}</div>
+        <div className="student-review-savebar"><div><strong>{selectedItems.length ? `พร้อมบันทึก ${selectedItems.length} งาน` : "เลือกงานที่ต้องการให้คะแนน"}</strong><span>แต่ละงานใช้คะแนนเต็มตามที่กำหนดไว้</span></div><button className="primary-button" type="button" disabled={busy || !selectedItems.length} onClick={() => void saveSelectedItems()}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกงานที่เลือก"}</button></div>
       </section>
     </div>
   );
@@ -2771,6 +2879,23 @@ function groupSubmissionsByAssignmentType(items: SubmissionRecord[], assignmentT
     grouped.set(type, [...(grouped.get(type) ?? []), item]);
   });
   return [...grouped.entries()].map(([type, submissions]) => ({ type, items: submissions }));
+}
+
+function groupSubmissionsByStudent(items: SubmissionRecord[]): SubmissionStudentGroup[] {
+  const grouped = new Map<string, { studentId: string; studentName: string; items: SubmissionRecord[] }>();
+  items.forEach((item) => {
+    const key = item.studentId || item.studentName;
+    const current = grouped.get(key);
+    if (current) current.items.push(item);
+    else grouped.set(key, { studentId: item.studentId, studentName: item.studentName, items: [item] });
+  });
+  return [...grouped.values()]
+    .map((group) => ({
+      ...group,
+      pendingCount: group.items.filter((item) => item.status !== "ตรวจแล้ว").length,
+      reviewedCount: group.items.filter((item) => item.status === "ตรวจแล้ว").length
+    }))
+    .sort((a, b) => a.studentName.localeCompare(b.studentName, "th", { numeric: true }));
 }
 
 function buildScoreEntry(assignment: ScoreAssignment, student: StudentRecord, rawScore: number, status: ScoreEntryStatus): ScoreEntry {

@@ -3068,6 +3068,10 @@ textarea {
   color: #8ecbff;
 }
 
+:root[data-theme="dark"] .student-review-counts span {
+  color: #ffd36a;
+}
+
 :root[data-theme="dark"] .chat-roster button.active {
   border-color: rgba(41, 151, 255, 0.62);
   background: rgba(41, 151, 255, 0.14);

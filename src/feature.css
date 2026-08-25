@@ -1237,6 +1237,288 @@ textarea {
   padding: 0 10px;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.review-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-width: 360px;
+  margin: 16px 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.review-mode-switch button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+}
+
+.review-mode-switch button.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.review-mode-switch svg {
+  width: 17px;
+  height: 17px;
+}
+
+.student-review-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  gap: 18px;
+  min-width: 0;
+  align-items: start;
+}
+
+.student-review-roster,
+.student-review-detail {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-subtle);
+}
+
+.student-review-roster {
+  position: sticky;
+  top: 92px;
+  overflow: hidden;
+}
+
+.student-review-roster-heading,
+.student-review-detail-heading,
+.student-review-toolbar,
+.student-review-savebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.student-review-roster-heading {
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.student-review-roster-heading span,
+.student-review-toolbar > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.student-review-roster-list {
+  display: grid;
+  max-height: 620px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.student-review-roster-list > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.student-review-roster-list > button:hover,
+.student-review-roster-list > button.active {
+  background: var(--surface-selected);
+}
+
+.student-review-roster-list > button.active {
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.student-review-roster-list > button > div:first-child,
+.student-review-detail-heading > div:first-child,
+.student-review-savebar > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.student-review-roster-list strong,
+.student-review-roster-list span,
+.student-review-detail-heading strong,
+.student-review-work-info strong,
+.student-review-work-info span {
+  overflow-wrap: anywhere;
+}
+
+.student-review-roster-list > button > div:first-child span,
+.student-review-detail-heading small,
+.student-review-detail-heading > div:first-child > span,
+.student-review-savebar span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.student-review-counts {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
+.student-review-counts span {
+  color: #8a6200;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.student-review-counts span.pass,
+.student-review-counts small {
+  color: var(--muted);
+}
+
+.student-review-detail {
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.student-review-detail-heading {
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.student-review-detail-heading strong {
+  font-size: 20px;
+}
+
+.student-review-detail-heading > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.student-review-toolbar {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-subtle);
+}
+
+.student-review-toolbar .template-button {
+  min-height: 40px;
+  height: 40px;
+}
+
+.student-review-work-list {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.student-review-work {
+  display: grid;
+  grid-template-columns: 28px minmax(180px, 1fr) 42px minmax(150px, 190px);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.student-review-work.selected {
+  border-color: var(--blue);
+  background: var(--surface-selected);
+  box-shadow: inset 0 0 0 1px var(--blue);
+}
+
+.student-review-work-check {
+  display: inline-flex;
+  width: 28px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+}
+
+.student-review-work-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--blue);
+}
+
+.student-review-work-info {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.student-review-work-info > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.student-review-work-info .submission-member-list {
+  margin-top: 0;
+}
+
+.student-review-open {
+  width: 42px;
+  min-width: 42px;
+}
+
+.student-review-score {
+  gap: 4px;
+  font-size: 12px;
+}
+
+.student-review-score input {
+  min-height: 40px;
+}
+
+.student-review-score small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.student-review-savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+.student-review-savebar .primary-button {
+  flex: 0 0 auto;
+}
+
 .inline-link {
   display: inline-flex;
   align-items: center;
@@ -1570,6 +1852,25 @@ textarea {
   .mobile-logout-button {
     display: inline-flex;
   }
+
+  .student-review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .student-review-roster {
+    position: static;
+  }
+
+  .student-review-roster-list {
+    display: flex;
+    max-height: none;
+    overflow-x: auto;
+    padding: 8px;
+  }
+
+  .student-review-roster-list > button {
+    flex: 0 0 230px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1595,6 +1896,36 @@ textarea {
   .mobile-score-editor {
     display: grid;
     gap: 14px;
+  }
+
+  .review-mode-switch {
+    width: 100%;
+    max-width: none;
+  }
+
+  .student-review-detail-heading,
+  .student-review-toolbar,
+  .student-review-savebar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .student-review-detail-heading > div:last-child {
+    justify-content: flex-start;
+  }
+
+  .student-review-toolbar .template-button,
+  .student-review-savebar .primary-button {
+    width: 100%;
+  }
+
+  .student-review-work {
+    grid-template-columns: 28px minmax(0, 1fr) 42px;
+    align-items: start;
+  }
+
+  .student-review-score {
+    grid-column: 2 / -1;
   }
 
   .teacher-score-view-switch {
