@@ -488,6 +488,13 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.assignment-catalog-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .assignment-edit-button {
   display: inline-flex;
   flex: 0 0 auto;
@@ -506,6 +513,19 @@ textarea {
 .assignment-edit-button svg {
   width: 15px;
   height: 15px;
+}
+
+.assignment-delete-button {
+  flex: 0 0 38px;
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+}
+
+.assignment-delete-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .assignment-order-item {
@@ -1821,6 +1841,10 @@ textarea {
   }
 
   .assignment-edit-button {
+    flex: 1 1 auto;
+  }
+
+  .assignment-catalog-actions {
     width: 100%;
   }
 
