@@ -1482,6 +1482,22 @@ textarea {
   font-size: 12px;
 }
 
+.submission-retention-note,
+.student-review-work-info > .submission-retention-note {
+  color: #8a6200;
+  font-weight: 600;
+}
+
+.submission-retention-note.deleted,
+.student-review-work-info > .submission-retention-note.deleted {
+  color: #b73514;
+}
+
+.review-file-box .submission-retention-note {
+  margin-top: 3px;
+  white-space: normal;
+}
+
 .student-review-work-info .submission-member-list {
   margin-top: 0;
 }

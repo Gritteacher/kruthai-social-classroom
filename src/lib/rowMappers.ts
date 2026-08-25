@@ -195,6 +195,8 @@ export function mapSubmissionRow(row: DatabaseRow): SubmissionRecord {
   const studentName = text(row, ["student_name", "studentName"], "นักเรียน");
   const groupMemberCodes = stringArray(row, ["group_member_codes", "groupMemberCodes"]);
   const groupMemberNames = stringArray(row, ["group_member_names", "groupMemberNames"]);
+  const reviewedAtRaw = optionalText(row, ["reviewed_at", "reviewedAt"]);
+  const fileDeletedAtRaw = optionalText(row, ["file_deleted_at", "fileDeletedAt"]);
   return {
     id: text(row, ["id"]),
     assignmentId: optionalText(row, ["assignment_id", "assignmentId"]),
@@ -209,6 +211,11 @@ export function mapSubmissionRow(row: DatabaseRow): SubmissionRecord {
     groupMemberNames: groupMemberNames.length ? groupMemberNames : [studentName].filter(Boolean),
     status: submissionStatuses.has(rawStatus) ? rawStatus : "รอตรวจ",
     submittedAt: formatDate(value(row, "submitted_at", "submittedAt")),
+    reviewedAt: reviewedAtRaw ? formatDate(reviewedAtRaw) : undefined,
+    reviewedAtRaw,
+    fileDeletedAt: fileDeletedAtRaw ? formatDate(fileDeletedAtRaw) : undefined,
+    fileDeletedAtRaw,
+    originalFileName: optionalText(row, ["original_file_name", "originalFileName"]),
     rawScore,
     rawMax,
     finalScore: roundedScore(row, ["final_score", "finalScore"], scaledScore(rawScore, rawMax, finalMax)),

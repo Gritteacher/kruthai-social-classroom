@@ -624,7 +624,7 @@ function App() {
       window.open(item.linkUrl, "_blank", "noopener,noreferrer");
       return flash(`เปิดลิงก์งาน ${item.assignmentTitle} ในแท็บใหม่`);
     }
-    if (!item.filePath) return flash("งานนี้ยังไม่มีไฟล์หรือลิงก์แนบ");
+    if (!item.filePath) return flash(item.fileDeletedAtRaw ? "ไฟล์แนบถูกลบอัตโนมัติหลังตรวจครบ 7 วันแล้ว" : "งานนี้ยังไม่มีไฟล์หรือลิงก์แนบ");
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเปิดไฟล์ไม่ได้");
     const { data, error } = await supabase!.storage.from(STORAGE_BUCKET).createSignedUrl(item.filePath, 60 * 10);
     if (error || !data?.signedUrl) return flash(error?.message || "เปิดไฟล์งานไม่ได้");
@@ -2554,7 +2554,8 @@ function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubm
         <div className="student-review-work-list">{selectedStudent.items.map((item) => {
           const checked = selectedSubmissionIds.includes(item.id);
           const isLink = Boolean(item.linkUrl);
-          return <article className={`student-review-work ${checked ? "selected" : ""}`} key={item.id}><label className="student-review-work-check"><input type="checkbox" checked={checked} disabled={busy} onChange={() => toggleSubmission(item.id)} /><span className="sr-only">เลือก {item.assignmentTitle}</span></label><div className="student-review-work-info"><div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div><span>{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"} · {item.submittedAt}</span><SubmissionMemberList item={item} /></div><button className="icon-button student-review-open" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl} title={isLink ? "เปิดลิงก์" : "เปิดไฟล์"} aria-label={`${isLink ? "เปิดลิงก์" : "เปิดไฟล์"} ${item.assignmentTitle}`}><ExternalLink aria-hidden /></button><label className="field student-review-score">คะแนนดิบ<input type="number" min="0" max={item.rawMax} value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="คะแนน" /><small>เต็ม {formatScore(item.rawMax)} · เก็บ {formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}/{formatScore(item.finalMax)}</small></label></article>;
+          const retentionNote = submissionFileRetentionNote(item);
+          return <article className={`student-review-work ${checked ? "selected" : ""}`} key={item.id}><label className="student-review-work-check"><input type="checkbox" checked={checked} disabled={busy} onChange={() => toggleSubmission(item.id)} /><span className="sr-only">เลือก {item.assignmentTitle}</span></label><div className="student-review-work-info"><div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div><span>{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"} · {item.submittedAt}</span><SubmissionMemberList item={item} />{retentionNote && <span className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</span>}</div><button className="icon-button student-review-open" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl} title={isLink ? "เปิดลิงก์" : item.fileDeletedAtRaw ? "ไฟล์ถูกลบอัตโนมัติแล้ว" : "เปิดไฟล์"} aria-label={`${isLink ? "เปิดลิงก์" : "เปิดไฟล์"} ${item.assignmentTitle}`}><ExternalLink aria-hidden /></button><label className="field student-review-score">คะแนนดิบ<input type="number" min="0" max={item.rawMax} value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="คะแนน" /><small>เต็ม {formatScore(item.rawMax)} · เก็บ {formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}/{formatScore(item.finalMax)}</small></label></article>;
         })}</div>
         <div className="student-review-savebar"><div><strong>{selectedItems.length ? `พร้อมบันทึก ${selectedItems.length} งาน` : "เลือกงานที่ต้องการให้คะแนน"}</strong><span>แต่ละงานใช้คะแนนเต็มตามที่กำหนดไว้</span></div><button className="primary-button" type="button" disabled={busy || !selectedItems.length} onClick={() => void saveSelectedItems()}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกงานที่เลือก"}</button></div>
       </section>
@@ -2564,6 +2565,8 @@ function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubm
 
 function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
   const isLink = Boolean(item.linkUrl);
+  const retentionNote = submissionFileRetentionNote(item);
+  const attachmentName = item.filePath ? fileNameFromPath(item.filePath) : item.originalFileName || "ยังไม่มีสิ่งที่แนบ";
   return (
     <article className="submission-card review-card">
       <div>
@@ -2571,7 +2574,7 @@ function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmis
         <div className="student-submission-identity"><span>ผู้ส่ง {item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>
         <SubmissionMemberList item={item} />
         <small>{item.submittedAt}</small>
-        <div className="review-file-box">{isLink ? <ExternalLink aria-hidden /> : <FileText aria-hidden />}<div><span>{isLink ? "ลิงก์งาน" : "ไฟล์งาน"}</span><strong>{isLink ? item.linkUrl : item.filePath ? fileNameFromPath(item.filePath) : "ยังไม่มีสิ่งที่แนบ"}</strong></div><button className="template-button" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl}><ExternalLink aria-hidden />{isLink ? "เปิดลิงก์" : "เปิดไฟล์"}</button></div>
+        <div className="review-file-box">{isLink ? <ExternalLink aria-hidden /> : <FileText aria-hidden />}<div><span>{isLink ? "ลิงก์งาน" : item.fileDeletedAtRaw ? "ไฟล์ถูกลบแล้ว" : "ไฟล์งาน"}</span><strong>{isLink ? item.linkUrl : attachmentName}</strong>{retentionNote && <small className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</small>}</div><button className="template-button" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl}><ExternalLink aria-hidden />{isLink ? "เปิดลิงก์" : item.fileDeletedAtRaw ? "ลบแล้ว" : "เปิดไฟล์"}</button></div>
       </div>
       <div className="review-grid">
         <label className="field">สถานะ<select value={item.status} onChange={(event) => updateSubmission(item.id, { status: event.target.value as SubmissionStatus })}>{submissionStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
@@ -2754,7 +2757,17 @@ function MaterialCard({ item, role, downloadCount, onOpen, onDownload, onDelete 
 }
 
 function SubmissionList({ items, onOpen, compact = false }: { items: SubmissionRecord[]; onOpen?: (item: SubmissionRecord) => void; compact?: boolean }) {
-  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => <article className="submission-card compact-submission-card" key={item.id}><div><div className="submission-title-line"><strong>{item.assignmentTitle}</strong>{item.submissionKind === "group" && <span className="submission-kind-badge">งานกลุ่ม {item.groupMemberCodes.length} คน</span>}</div><div className="student-submission-identity"><span>ผู้ส่ง {item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>{!compact && <SubmissionMemberList item={item} />}{!compact && <small className="submission-file-name">{item.linkUrl ? `ลิงก์: ${item.linkUrl}` : item.filePath ? `ไฟล์: ${fileNameFromPath(item.filePath)}` : "ยังไม่มีสิ่งที่แนบ"}</small>}</div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath && !item.linkUrl}><Eye aria-hidden />{item.linkUrl ? "เปิดลิงก์" : "เปิดไฟล์"}</button>}</div></article>)}</div>;
+  return <div className="submission-list">{items.slice(0, compact ? 2 : items.length).map((item) => {
+    const retentionNote = submissionFileRetentionNote(item);
+    const attachmentLabel = item.linkUrl
+      ? `ลิงก์: ${item.linkUrl}`
+      : item.filePath
+        ? `ไฟล์: ${fileNameFromPath(item.filePath)}`
+        : item.originalFileName
+          ? `ไฟล์เดิม: ${item.originalFileName}`
+          : "ยังไม่มีสิ่งที่แนบ";
+    return <article className="submission-card compact-submission-card" key={item.id}><div><div className="submission-title-line"><strong>{item.assignmentTitle}</strong>{item.submissionKind === "group" && <span className="submission-kind-badge">งานกลุ่ม {item.groupMemberCodes.length} คน</span>}</div><div className="student-submission-identity"><span>ผู้ส่ง {item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>{!compact && <SubmissionMemberList item={item} />}{!compact && <small className="submission-file-name">{attachmentLabel}</small>}{!compact && retentionNote && <small className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</small>}</div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath && !item.linkUrl}><Eye aria-hidden />{item.linkUrl ? "เปิดลิงก์" : item.fileDeletedAtRaw ? "ลบแล้ว" : "เปิดไฟล์"}</button>}</div></article>;
+  })}</div>;
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {
@@ -3069,6 +3082,18 @@ function cleanFileTitle(name: string) {
 function fileNameFromPath(filePath: string) {
   const raw = filePath.split("/").pop() || filePath;
   return raw.replace(/^\d+-/, "");
+}
+
+function submissionFileRetentionNote(item: SubmissionRecord) {
+  if (item.linkUrl) return "";
+  if (item.fileDeletedAtRaw || (!item.filePath && item.originalFileName)) {
+    return item.fileDeletedAt ? `ไฟล์ถูกลบอัตโนมัติแล้วเมื่อ ${item.fileDeletedAt}` : "ไฟล์ถูกลบอัตโนมัติแล้ว";
+  }
+  if (!item.filePath || item.status !== "ตรวจแล้ว" || !item.reviewedAtRaw) return "";
+  const deletionDate = new Date(item.reviewedAtRaw);
+  if (Number.isNaN(deletionDate.getTime())) return "ไฟล์จะถูกลบอัตโนมัติหลังตรวจครบ 7 วัน";
+  deletionDate.setDate(deletionDate.getDate() + 7);
+  return `ไฟล์จะถูกลบอัตโนมัติวันที่ ${deletionDate.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" })}`;
 }
 
 async function triggerFileDownload(url: string, item: Material) {

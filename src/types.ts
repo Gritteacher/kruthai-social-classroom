@@ -118,6 +118,11 @@ export interface SubmissionRecord {
   previewUrl?: string;
   status: SubmissionStatus;
   submittedAt: string;
+  reviewedAt?: string;
+  reviewedAtRaw?: string;
+  fileDeletedAt?: string;
+  fileDeletedAtRaw?: string;
+  originalFileName?: string;
   rawScore: number;
   rawMax: number;
   finalScore: number;
