@@ -3467,6 +3467,16 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .student-review-work .student-review-open {
+    display: grid;
+    grid-column: 3;
+    grid-row: 1;
+    align-self: start;
+    border: 1px solid rgba(0, 113, 227, 0.2);
+    background: var(--surface-selected);
+    color: var(--blue);
+  }
+
   .review-file-box {
     grid-template-columns: 24px minmax(0, 1fr);
   }
