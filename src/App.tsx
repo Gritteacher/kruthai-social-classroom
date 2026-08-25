@@ -2494,7 +2494,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
 }
 
 function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubmissions, openSubmission }: { submissions: SubmissionRecord[]; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmissions: (items: SubmissionRecord[]) => Promise<boolean>; openSubmission: (item: SubmissionRecord) => void }) {
-  const studentGroups = useMemo(() => groupSubmissionsByStudent(submissions), [submissions]);
+  const studentGroups = useMemo(() => groupSubmissionsByStudent(submissions).filter((group) => group.pendingCount > 0), [submissions]);
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<string[]>([]);
   const selectedStudent = studentGroups.find((group) => group.studentId === selectedStudentId) || studentGroups[0];
@@ -2540,7 +2540,7 @@ function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubm
     if (saved) setSelectedSubmissionIds([]);
   }
 
-  if (!selectedStudent) return <EmptyState title="ยังไม่มีนักเรียนส่งงาน" body="รายชื่อนักเรียนจะแสดงเมื่อมีการส่งงาน" />;
+  if (!selectedStudent) return <EmptyState title="ไม่มีงานรอตรวจ" body="รายชื่อนักเรียนจะกลับมาแสดงเมื่อมีงานใหม่ส่งเข้ามา" />;
 
   return (
     <div className="student-review-layout">
