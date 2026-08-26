@@ -3770,6 +3770,7 @@ textarea {
   }
 
   .student-review-work-actions .student-review-open {
+    display: grid;
     border: 1px solid rgba(0, 113, 227, 0.2);
     background: var(--surface-selected);
     color: var(--blue);
