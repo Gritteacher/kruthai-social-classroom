@@ -58,6 +58,9 @@ create table if not exists public.score_assignments (
   classroom_id uuid references public.classrooms (id) on delete set null,
   raw_max numeric not null check (raw_max > 0),
   final_max numeric not null check (final_max > 0),
+  accepting_submissions boolean not null default true,
+  submission_open_at timestamptz,
+  submission_close_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -223,6 +226,12 @@ alter table public.students alter column class_name set default 'ยังไม
 alter table public.score_assignments add column if not exists classroom_id uuid references public.classrooms (id) on delete set null;
 alter table public.score_assignments add column if not exists assignment_group_id uuid;
 alter table public.score_assignments add column if not exists assignment_type text not null default 'ทั่วไป';
+alter table public.score_assignments add column if not exists accepting_submissions boolean not null default true;
+alter table public.score_assignments add column if not exists submission_open_at timestamptz;
+alter table public.score_assignments add column if not exists submission_close_at timestamptz;
+alter table public.score_assignments drop constraint if exists score_assignments_submission_window_check;
+alter table public.score_assignments add constraint score_assignments_submission_window_check
+check (submission_open_at is null or submission_close_at is null or submission_open_at < submission_close_at);
 alter table public.score_assignments alter column class_name set default 'ยังไม่ได้เลือกห้องเรียน';
 update public.score_assignments
 set assignment_type = 'ทั่วไป'
@@ -550,6 +559,16 @@ begin
   where id = p_assignment_id and classroom_id = v_classroom_id;
   if not found then raise exception 'ไม่พบงานในห้องเรียนของนักเรียน'; end if;
 
+  if not v_assignment.accepting_submissions then
+    raise exception 'ASSIGNMENT_SUBMISSIONS_CLOSED' using errcode = '22023';
+  end if;
+  if v_assignment.submission_open_at is not null and now() < v_assignment.submission_open_at then
+    raise exception 'ASSIGNMENT_SUBMISSIONS_NOT_OPEN' using errcode = '22023';
+  end if;
+  if v_assignment.submission_close_at is not null and now() >= v_assignment.submission_close_at then
+    raise exception 'ASSIGNMENT_SUBMISSIONS_EXPIRED' using errcode = '22023';
+  end if;
+
   if (v_file_path is null) = (v_link_url is null) then
     raise exception 'เลือกส่งไฟล์หรือลิงก์เพียงอย่างเดียว';
   end if;
@@ -822,7 +841,10 @@ create or replace function public.update_score_assignment_group(
   p_title text,
   p_assignment_type text,
   p_raw_max numeric,
-  p_final_max numeric
+  p_final_max numeric,
+  p_accepting_submissions boolean,
+  p_submission_open_at timestamptz,
+  p_submission_close_at timestamptz
 )
 returns setof public.score_assignments
 language plpgsql
@@ -853,6 +875,11 @@ begin
 
   if p_raw_max is null or p_raw_max <= 0 or p_final_max is null or p_final_max <= 0 then
     raise exception 'INVALID_SCORE_MAX' using errcode = '22023';
+  end if;
+
+  if p_submission_open_at is not null and p_submission_close_at is not null
+    and p_submission_open_at >= p_submission_close_at then
+    raise exception 'INVALID_SUBMISSION_WINDOW' using errcode = '22023';
   end if;
 
   select count(distinct classroom_id), array_agg(id)
@@ -891,7 +918,10 @@ begin
     title = trim(p_title),
     assignment_type = v_assignment_type,
     raw_max = p_raw_max,
-    final_max = p_final_max
+    final_max = p_final_max,
+    accepting_submissions = coalesce(p_accepting_submissions, false),
+    submission_open_at = p_submission_open_at,
+    submission_close_at = p_submission_close_at
   where id = any(selected_assignment_ids);
 
   update public.score_entries
@@ -918,9 +948,9 @@ begin
 end;
 $$;
 
-revoke all on function public.update_score_assignment_group(uuid, uuid[], text, text, numeric, numeric) from public;
-grant execute on function public.update_score_assignment_group(uuid, uuid[], text, text, numeric, numeric) to authenticated;
-comment on function public.update_score_assignment_group(uuid, uuid[], text, text, numeric, numeric)
+revoke all on function public.update_score_assignment_group(uuid, uuid[], text, text, numeric, numeric, boolean, timestamptz, timestamptz) from public;
+grant execute on function public.update_score_assignment_group(uuid, uuid[], text, text, numeric, numeric, boolean, timestamptz, timestamptz) to authenticated;
+comment on function public.update_score_assignment_group(uuid, uuid[], text, text, numeric, numeric, boolean, timestamptz, timestamptz)
 is 'Atomically updates selected classrooms in one score-assignment group and recalculates related scores.';
 
 create or replace function public.guard_student_profile_update()

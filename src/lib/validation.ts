@@ -101,6 +101,10 @@ export function userFacingError(error: unknown, fallback: string) {
   if (/duplicate|unique constraint/i.test(message)) return "ข้อมูลนี้มีอยู่ในระบบแล้ว";
   if (/invalid key/i.test(message)) return "ชื่อหรือเส้นทางไฟล์ไม่ถูกต้อง";
   if (/ASSIGNMENT_NOT_FOUND_FOR_SUBMISSION/i.test(message)) return "รายการส่งงานนี้ยังไม่พบงานคะแนนที่ตรงกัน กรุณาตรวจชื่องานหรือสร้างงานคะแนนก่อน";
+  if (/ASSIGNMENT_SUBMISSIONS_NOT_OPEN/i.test(message)) return "งานนี้ยังไม่เปิดรับการส่ง กรุณาตรวจวันเวลาเริ่มรับงาน";
+  if (/ASSIGNMENT_SUBMISSIONS_EXPIRED/i.test(message)) return "งานนี้หมดเวลาส่งแล้ว";
+  if (/ASSIGNMENT_SUBMISSIONS_CLOSED/i.test(message)) return "ครูปิดรับการส่งงานนี้แล้ว";
+  if (/INVALID_SUBMISSION_WINDOW/i.test(message)) return "วันเวลาปิดรับงานต้องอยู่หลังเวลาเริ่มรับ";
   if (/STUDENT_NOT_FOUND_FOR_SCORE/i.test(message)) return "ไม่พบรายชื่อนักเรียนสำหรับบันทึกคะแนน กรุณาตรวจรายชื่อในห้องเรียน";
   if (/TEACHER_REQUIRED/i.test(message)) return "ต้องเข้าสู่ระบบด้วยบัญชีครูเพื่อบันทึกผลตรวจงาน";
   return message ? `${message}${debugCode}` : fallback;

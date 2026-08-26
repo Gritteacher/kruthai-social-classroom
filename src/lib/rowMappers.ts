@@ -165,6 +165,9 @@ export function mapAssignmentRow(row: DatabaseRow): ScoreAssignment {
     classroomId: optionalText(row, ["classroom_id", "classroomId"]),
     rawMax: number(row, ["raw_max", "rawMax"], 10),
     finalMax: number(row, ["final_max", "finalMax"], 10),
+    acceptingSubmissions: value(row, "accepting_submissions", "acceptingSubmissions") !== false,
+    submissionOpenAt: optionalText(row, ["submission_open_at", "submissionOpenAt"]),
+    submissionCloseAt: optionalText(row, ["submission_close_at", "submissionCloseAt"]),
     createdAt: text(row, ["created_at", "createdAt"], new Date().toISOString())
   };
 }

@@ -8,6 +8,7 @@ import {
   BarChart3,
   Bell,
   BookOpen,
+  CalendarClock,
   CheckCircle2,
   ChevronDown,
   ClipboardCheck,
@@ -97,9 +98,9 @@ type StudentDraft = { no: string; studentId: string; name: string; gender: strin
 type RosterStudent = { no: number; studentId: string; name: string; gender: string };
 type AnnouncementDraft = { title: string; body: string; classroomId: string };
 type StudentHomeCardDraft = { title: string; description: string; url: string; classroomIds: string[]; showToAll: boolean };
-type AssignmentDraft = { title: string; assignmentType: string; rawMax: string; finalMax: string; classroomIds: string[] };
+type AssignmentDraft = { title: string; assignmentType: string; rawMax: string; finalMax: string; acceptingSubmissions: boolean; submissionOpenAt: string; submissionCloseAt: string; classroomIds: string[] };
 type SubmissionDraft = { assignmentId: string; file: File | null; linkUrl: string; submissionKind: SubmissionKind; memberCodes: string[] };
-type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string; assignmentType: string; rawMax: number; finalMax: number; assignments: ScoreAssignment[]; classroomIds: string[]; hasMixedValues: boolean };
+type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string; assignmentType: string; rawMax: number; finalMax: number; acceptingSubmissions: boolean; submissionOpenAt?: string; submissionCloseAt?: string; assignments: ScoreAssignment[]; classroomIds: string[]; hasMixedValues: boolean };
 type ThemeMode = "light" | "dark";
 type ScoreAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 type ProfileRow = { full_name?: string | null; role?: string | null; class_name?: string | null; school_name?: string | null; student_code?: string | null };
@@ -1072,11 +1073,13 @@ function App() {
     const finalMax = Number(draft.finalMax);
     if (!Number.isFinite(rawMax) || rawMax <= 0) return flashAndFail("คะแนนเต็มดิบต้องมากกว่า 0", flash);
     if (!Number.isFinite(finalMax) || finalMax <= 0) return flashAndFail("คะแนนเก็บเต็มต้องมากกว่า 0", flash);
+    const scheduleError = validateAssignmentScheduleDraft(draft);
+    if (scheduleError) return flashAndFail(scheduleError, flash);
     const targetClassrooms = classroomItems.filter((classroom) => draft.classroomIds.includes(classroom.id));
     if (!targetClassrooms.length) return flashAndFail("ไม่พบห้องเรียนที่เลือก กรุณาเลือกใหม่", flash);
     const assignmentGroupId = crypto.randomUUID();
     const assignmentType = normalizeAssignmentType(draft.assignmentType);
-    const payload = targetClassrooms.map((classroom) => ({ assignment_group_id: assignmentGroupId, title: draft.title.trim(), assignment_type: assignmentType, class_name: classroom.displayName, classroom_id: classroom.id, raw_max: rawMax, final_max: finalMax }));
+    const payload = targetClassrooms.map((classroom) => ({ assignment_group_id: assignmentGroupId, title: draft.title.trim(), assignment_type: assignmentType, class_name: classroom.displayName, classroom_id: classroom.id, raw_max: rawMax, final_max: finalMax, accepting_submissions: draft.acceptingSubmissions, submission_open_at: dateTimeInputToIso(draft.submissionOpenAt), submission_close_at: dateTimeInputToIso(draft.submissionCloseAt) }));
     setBusy(true);
     try {
       const result = await supabase!.from("score_assignments").insert(payload).select("*");
@@ -1102,6 +1105,8 @@ function App() {
     if (!title) return flashAndFail("กรอกชื่องานหรือแบบประเมินก่อน", flash);
     if (!Number.isFinite(rawMax) || rawMax <= 0) return flashAndFail("คะแนนเต็มดิบต้องมากกว่า 0", flash);
     if (!Number.isFinite(finalMax) || finalMax <= 0) return flashAndFail("คะแนนเก็บเต็มต้องมากกว่า 0", flash);
+    const scheduleError = validateAssignmentScheduleDraft(draft);
+    if (scheduleError) return flashAndFail(scheduleError, flash);
     if (!isSupabaseConfigured) return flashAndFail("ระบบยังไม่ได้เชื่อมต่อ Supabase", flash);
 
     const assignmentIds = new Set(targetAssignments.map((assignment) => assignment.id));
@@ -1124,7 +1129,10 @@ function App() {
         p_title: title,
         p_assignment_type: assignmentType,
         p_raw_max: rawMax,
-        p_final_max: finalMax
+        p_final_max: finalMax,
+        p_accepting_submissions: draft.acceptingSubmissions,
+        p_submission_open_at: dateTimeInputToIso(draft.submissionOpenAt),
+        p_submission_close_at: dateTimeInputToIso(draft.submissionCloseAt)
       });
       if (assignmentResult.error) throw assignmentResult.error;
 
@@ -1530,6 +1538,8 @@ function App() {
   async function submitWork(draft: SubmissionDraft) {
     const assignment = activeAssignments.find((item) => item.id === draft.assignmentId);
     if (!assignment) return flash("เลือกงานที่คุณต้องการส่งก่อน");
+    const submissionAvailability = assignmentSubmissionAvailability(assignment);
+    if (!submissionAvailability.canSubmit) return flash(submissionAvailability.detail);
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     const studentCode = (currentStudent?.studentId || session?.studentCode || "").trim();
     const codeError = validateStudentCode(studentCode);
@@ -2154,7 +2164,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
 }
 
 function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, deleteAssignmentGroup, moveAssignment, updateScoreDraft, updateScoreStatus, saveScoreSheet, saveAllScoreSheets, applySameScoreSheet }: ScoresViewProps) {
-  const [draft, setDraft] = useState<AssignmentDraft>({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
+  const [draft, setDraft] = useState<AssignmentDraft>({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", acceptingSubmissions: true, submissionOpenAt: "", submissionCloseAt: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   const [editingGroupKey, setEditingGroupKey] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
@@ -2208,6 +2218,9 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
           assignmentType: assignment.assignmentType,
           rawMax: numericInputValue(assignment.rawMax),
           finalMax: numericInputValue(assignment.finalMax),
+          acceptingSubmissions: assignment.acceptingSubmissions,
+          submissionOpenAt: isoToDateTimeInput(assignment.submissionOpenAt),
+          submissionCloseAt: isoToDateTimeInput(assignment.submissionCloseAt),
           classroomIds: [classroomId]
         };
       }
@@ -2217,7 +2230,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
 
   function resetAssignmentForm() {
     setEditingGroupKey("");
-    setDraft({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
+    setDraft({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", acceptingSubmissions: true, submissionOpenAt: "", submissionCloseAt: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   }
 
   function beginEditAssignment(group: AssignmentGroup) {
@@ -2227,6 +2240,9 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
       assignmentType: group.hasMixedValues ? "ทั่วไป" : group.assignmentType,
       rawMax: group.hasMixedValues ? "" : numericInputValue(group.rawMax),
       finalMax: group.hasMixedValues ? "" : numericInputValue(group.finalMax),
+      acceptingSubmissions: group.hasMixedValues ? true : group.acceptingSubmissions,
+      submissionOpenAt: group.hasMixedValues ? "" : isoToDateTimeInput(group.submissionOpenAt),
+      submissionCloseAt: group.hasMixedValues ? "" : isoToDateTimeInput(group.submissionCloseAt),
       classroomIds: group.hasMixedValues ? [] : group.classroomIds
     });
   }
@@ -2270,6 +2286,14 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
             <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => setDraft({ ...draft, rawMax: event.target.value })} placeholder="เช่น 10" /></label>
             <label className="field">คิดเป็นคะแนนเก็บ<input type="number" min="1" value={draft.finalMax} onChange={(event) => setDraft({ ...draft, finalMax: event.target.value })} placeholder="เช่น 5" /></label>
           </div>
+          <fieldset className={`assignment-schedule-fieldset ${draft.acceptingSubmissions ? "is-open" : "is-closed"}`}>
+            <legend><CalendarClock aria-hidden />กำหนดการส่งงาน</legend>
+            <label className="assignment-accept-toggle"><input type="checkbox" checked={draft.acceptingSubmissions} onChange={(event) => setDraft({ ...draft, acceptingSubmissions: event.target.checked })} /><span><strong>เปิดรับการส่งงาน</strong><small>{draft.acceptingSubmissions ? "นักเรียนส่งได้ตามช่วงเวลาที่กำหนด" : "ปิดรับทันทีทุกห้องที่เลือก"}</small></span></label>
+            <div className="assignment-schedule-grid">
+              <label className="field">เริ่มรับงาน<input type="datetime-local" value={draft.submissionOpenAt} disabled={!draft.acceptingSubmissions} onChange={(event) => setDraft({ ...draft, submissionOpenAt: event.target.value })} /></label>
+              <label className="field">ปิดรับงาน<input type="datetime-local" value={draft.submissionCloseAt} disabled={!draft.acceptingSubmissions} onChange={(event) => setDraft({ ...draft, submissionCloseAt: event.target.value })} /></label>
+            </div>
+          </fieldset>
           <fieldset className="assignment-classroom-fieldset">
             <legend>{editingGroup ? "เลือกห้องเรียนที่ต้องการแก้ไข" : "เลือกห้องเรียนที่ได้รับงาน"}</legend>
             <div className="classroom-checkbox-grid">{(editingGroup ? classrooms.filter((classroom) => editingGroup.classroomIds.includes(classroom.id)) : classrooms).map((classroom) => <label className="classroom-checkbox" key={classroom.id}><input type="checkbox" checked={draft.classroomIds.includes(classroom.id)} onChange={() => toggleAssignmentClassroom(classroom.id)} /><span>{classroom.displayName}</span></label>)}</div>
@@ -2283,7 +2307,8 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
             <div className="assignment-catalog-heading"><SectionTitle title="งานคะแนนที่สร้างแล้ว" note={`${assignmentGroups.length} งาน`} /><div className="created-score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${scoreRingPercent * 3.6}deg, var(--ring-track) ${scoreRingPercent * 3.6}deg 360deg)` }} aria-label={`สร้างคะแนนแล้ว ${formatScore(totalCreatedScore)} คะแนน`}><div><strong>{formatScore(totalCreatedScore)}</strong><span>คะแนน</span></div></div></div>
             {assignmentGroups.length ? <div className="assignment-type-sections">{groupAssignmentGroupsByType(assignmentGroups).map((section) => <section className="assignment-type-section" key={section.type}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.groups.length} งาน</small></div><div className="assignment-catalog-list">{section.groups.map((group) => {
               const groupLabel = assignmentGroupLabels.get(group.key);
-              return <article className={`assignment-catalog-item ${editingGroupKey === group.key ? "editing" : ""}`} key={group.key}><div><strong>{group.title}{groupLabel ? ` · ${groupLabel}` : ""}</strong><span>{group.hasMixedValues ? "ค่าคะแนนต่างกันตามห้อง" : `ดิบ ${formatScore(group.rawMax)} → เก็บ ${formatScore(group.finalMax)}`} · {group.assignments.length} ห้อง</span><small>{group.assignments.map((assignment) => assignment.className).join(" · ")}</small></div><div className="assignment-catalog-actions"><button className="assignment-edit-button" type="button" disabled={busy} onClick={() => beginEditAssignment(group)} aria-label={`แก้ไข ${group.title}${groupLabel ? ` ${groupLabel}` : ""}`}><Pencil aria-hidden /><span>แก้ไข</span></button><button className="icon-danger assignment-delete-button" type="button" disabled={busy} onClick={() => void removeAssignmentGroup(group)} title={`ลบ ${group.title} ทุกห้อง`} aria-label={`ลบ ${group.title} ทุกห้อง`}><Trash2 aria-hidden /></button></div></article>;
+              const schedule = group.hasMixedValues ? null : assignmentSubmissionAvailability(group.assignments[0]);
+              return <article className={`assignment-catalog-item ${editingGroupKey === group.key ? "editing" : ""}`} key={group.key}><div><strong>{group.title}{groupLabel ? ` · ${groupLabel}` : ""}</strong><span>{group.hasMixedValues ? "ค่าคะแนนหรือกำหนดการต่างกันตามห้อง" : `ดิบ ${formatScore(group.rawMax)} → เก็บ ${formatScore(group.finalMax)}`} · {group.assignments.length} ห้อง</span>{schedule && <span className={`assignment-schedule-badge ${schedule.state}`}><CalendarClock aria-hidden />{schedule.label} · {schedule.shortDetail}</span>}<small>{group.assignments.map((assignment) => assignment.className).join(" · ")}</small></div><div className="assignment-catalog-actions"><button className="assignment-edit-button" type="button" disabled={busy} onClick={() => beginEditAssignment(group)} aria-label={`แก้ไข ${group.title}${groupLabel ? ` ${groupLabel}` : ""}`}><Pencil aria-hidden /><span>แก้ไข</span></button><button className="icon-danger assignment-delete-button" type="button" disabled={busy} onClick={() => void removeAssignmentGroup(group)} title={`ลบ ${group.title} ทุกห้อง`} aria-label={`ลบ ${group.title} ทุกห้อง`}><Trash2 aria-hidden /></button></div></article>;
             })}</div></section>)}</div> : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานแรกแล้วรายการจะแสดงที่นี่" />}
           </div>
         </section>}
@@ -2423,15 +2448,27 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState("");
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [scheduleNow, setScheduleNow] = useState(Date.now());
   const previewRequestId = useRef(0);
   const ownCode = currentStudent?.studentId || "";
   const selectableClassmates = classmates.filter((student) => student.studentId !== ownCode);
   const assignmentSections = useMemo(() => groupAssignmentsByType(assignments), [assignments]);
   const assignmentTypeById = useMemo(() => new Map(assignments.map((assignment) => [assignment.id, assignment.assignmentType])), [assignments]);
   const submissionReviewSections = useMemo(() => groupSubmissionsByStatusAndType(submissions, assignmentTypeById), [submissions, assignmentTypeById]);
+  const selectedAssignment = assignments.find((assignment) => assignment.id === assignmentId) || assignments[0];
+  const selectedAvailability = selectedAssignment ? assignmentSubmissionAvailability(selectedAssignment, scheduleNow) : null;
   useEffect(() => {
-    if (!assignments.some((assignment) => assignment.id === assignmentId)) setAssignmentId(assignments[0]?.id || "");
+    if (!assignments.some((assignment) => assignment.id === assignmentId)) {
+      const firstOpenAssignment = assignments.find((assignment) => assignmentSubmissionAvailability(assignment).canSubmit);
+      setAssignmentId(firstOpenAssignment?.id || assignments[0]?.id || "");
+    }
   }, [assignmentId, assignments]);
+
+  useEffect(() => {
+    if (role !== "student") return;
+    const timer = window.setInterval(() => setScheduleNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [role]);
 
   useEffect(() => {
     if (!previewTarget) return;
@@ -2513,9 +2550,10 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
             <label className="field">
               ชื่องาน
               <select value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)}>
-                {assignmentSections.map((section) => <optgroup label={section.type} key={section.type}>{section.items.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.title}</option>)}</optgroup>)}
+                {assignmentSections.map((section) => <optgroup label={section.type} key={section.type}>{section.items.map((assignment) => { const availability = assignmentSubmissionAvailability(assignment, scheduleNow); return <option key={assignment.id} value={assignment.id}>{assignment.title} · {availability.label}</option>; })}</optgroup>)}
               </select>
             </label>
+            {selectedAvailability && <div className={`student-assignment-schedule ${selectedAvailability.state}`}><CalendarClock aria-hidden /><div><strong>{selectedAvailability.label}</strong><span>{selectedAvailability.detail}</span></div></div>}
             <fieldset className="submission-option-group">
               <legend>รูปแบบการส่ง</legend>
               <div className="submission-segmented-control">
@@ -2538,7 +2576,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
             {deliveryMethod === "file"
               ? <UploadPanel file={file} setFile={setFile} accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.mp4,.mov" label="เลือกไฟล์งาน" help="ขนาดไม่เกิน 25MB" />
               : <label className="field submission-link-field">ลิงก์งาน<input type="url" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://..." /></label>}
-            <button className="primary-button full-button" disabled={busy} onClick={() => void handleSubmitWork()}><CloudUpload aria-hidden />{busy ? "กำลังส่งงาน" : submissionKind === "group" ? `ส่งงานกลุ่ม ${memberCodes.length + 1} คน` : "ส่งงาน"}</button>
+            <button className="primary-button full-button" disabled={busy || !selectedAvailability?.canSubmit} onClick={() => void handleSubmitWork()}><CloudUpload aria-hidden />{busy ? "กำลังส่งงาน" : !selectedAvailability?.canSubmit ? selectedAvailability?.label || "ยังไม่เปิดรับ" : submissionKind === "group" ? `ส่งงานกลุ่ม ${memberCodes.length + 1} คน` : "ส่งงาน"}</button>
           </>
         ) : <EmptyState title="ยังไม่มีงานให้ส่ง" body="รอคุณครูกำหนดงานในหน้าจัดการคะแนนก่อน" />}
       </section>
@@ -2932,6 +2970,9 @@ function groupAssignments(items: ScoreAssignment[]): AssignmentGroup[] {
       assignmentType: assignment.assignmentType,
       rawMax: assignment.rawMax,
       finalMax: assignment.finalMax,
+      acceptingSubmissions: assignment.acceptingSubmissions,
+      submissionOpenAt: assignment.submissionOpenAt,
+      submissionCloseAt: assignment.submissionCloseAt,
       assignments: [assignment],
       classroomIds: assignment.classroomId ? [assignment.classroomId] : [],
       hasMixedValues: false
@@ -2939,13 +2980,71 @@ function groupAssignments(items: ScoreAssignment[]): AssignmentGroup[] {
   });
   return [...grouped.values()].map((group) => ({
     ...group,
-    hasMixedValues: group.assignments.some((assignment) => assignment.title !== group.title || assignment.assignmentType !== group.assignmentType || assignment.rawMax !== group.rawMax || assignment.finalMax !== group.finalMax)
+    hasMixedValues: group.assignments.some((assignment) => assignment.title !== group.title || assignment.assignmentType !== group.assignmentType || assignment.rawMax !== group.rawMax || assignment.finalMax !== group.finalMax || assignment.acceptingSubmissions !== group.acceptingSubmissions || assignment.submissionOpenAt !== group.submissionOpenAt || assignment.submissionCloseAt !== group.submissionCloseAt)
   }));
 }
 
 function normalizeAssignmentType(value: string) {
   const trimmed = value.trim();
   return trimmed || "ทั่วไป";
+}
+
+type AssignmentSubmissionAvailability = {
+  state: "open" | "scheduled" | "closed";
+  canSubmit: boolean;
+  label: string;
+  detail: string;
+  shortDetail: string;
+};
+
+function assignmentSubmissionAvailability(assignment: ScoreAssignment, now = Date.now()): AssignmentSubmissionAvailability {
+  if (!assignment.acceptingSubmissions) {
+    return { state: "closed", canSubmit: false, label: "ปิดรับ", detail: "ครูปิดรับการส่งงานนี้แล้ว", shortDetail: "ครูปิดรับ" };
+  }
+  const opensAt = assignment.submissionOpenAt ? Date.parse(assignment.submissionOpenAt) : Number.NaN;
+  const closesAt = assignment.submissionCloseAt ? Date.parse(assignment.submissionCloseAt) : Number.NaN;
+  if (Number.isFinite(opensAt) && now < opensAt) {
+    const formatted = formatAssignmentScheduleDate(assignment.submissionOpenAt!);
+    return { state: "scheduled", canSubmit: false, label: "ยังไม่เปิด", detail: `เริ่มรับงาน ${formatted}`, shortDetail: `เริ่ม ${formatted}` };
+  }
+  if (Number.isFinite(closesAt) && now >= closesAt) {
+    const formatted = formatAssignmentScheduleDate(assignment.submissionCloseAt!);
+    return { state: "closed", canSubmit: false, label: "หมดเวลาส่ง", detail: `ปิดรับงานแล้วเมื่อ ${formatted}`, shortDetail: `ปิดเมื่อ ${formatted}` };
+  }
+  if (Number.isFinite(closesAt)) {
+    const formatted = formatAssignmentScheduleDate(assignment.submissionCloseAt!);
+    return { state: "open", canSubmit: true, label: "เปิดรับ", detail: `ส่งได้ถึง ${formatted}`, shortDetail: `ปิด ${formatted}` };
+  }
+  return { state: "open", canSubmit: true, label: "เปิดรับ", detail: "เปิดรับการส่งงานโดยไม่กำหนดเวลาปิด", shortDetail: "ไม่กำหนดเวลาปิด" };
+}
+
+function formatAssignmentScheduleDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "ไม่พบวันเวลา";
+  return date.toLocaleString("th-TH", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function isoToDateTimeInput(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function dateTimeInputToIso(value: string) {
+  if (!value.trim()) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function validateAssignmentScheduleDraft(draft: AssignmentDraft) {
+  const opensAt = draft.submissionOpenAt ? new Date(draft.submissionOpenAt).getTime() : Number.NaN;
+  const closesAt = draft.submissionCloseAt ? new Date(draft.submissionCloseAt).getTime() : Number.NaN;
+  if (draft.submissionOpenAt && !Number.isFinite(opensAt)) return "วันเวลาเริ่มรับงานไม่ถูกต้อง";
+  if (draft.submissionCloseAt && !Number.isFinite(closesAt)) return "วันเวลาปิดรับงานไม่ถูกต้อง";
+  if (Number.isFinite(opensAt) && Number.isFinite(closesAt) && opensAt >= closesAt) return "วันเวลาปิดรับงานต้องอยู่หลังเวลาเริ่มรับ";
+  return "";
 }
 
 function groupAssignmentsByType(items: ScoreAssignment[]) {

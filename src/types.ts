@@ -88,6 +88,9 @@ export interface ScoreAssignment {
   classroomId?: string;
   rawMax: number;
   finalMax: number;
+  acceptingSubmissions: boolean;
+  submissionOpenAt?: string;
+  submissionCloseAt?: string;
   createdAt: string;
 }
 
