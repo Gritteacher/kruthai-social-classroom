@@ -2301,6 +2301,90 @@ textarea {
   border: 0;
 }
 
+.assignment-edit-backdrop {
+  z-index: 70;
+  padding: 16px;
+}
+
+.assignment-edit-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(880px, 100%);
+  max-height: calc(100dvh - 32px);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 36px 110px rgba(15, 23, 42, 0.24);
+}
+
+.assignment-edit-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.assignment-edit-modal-header > div {
+  min-width: 0;
+}
+
+.assignment-edit-modal-header span,
+.assignment-edit-modal-header p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.assignment-edit-modal-header h2,
+.assignment-edit-modal-header p {
+  margin: 0;
+}
+
+.assignment-edit-modal-header h2 {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  font-size: 24px;
+  line-height: 1.3;
+}
+
+.assignment-edit-modal-header p {
+  margin-top: 4px;
+}
+
+.assignment-edit-modal-header .icon-button {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+}
+
+.assignment-edit-modal-body {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  min-width: 0;
+  padding: 20px 22px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.assignment-edit-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.assignment-edit-modal-actions .primary-button,
+.assignment-edit-modal-actions .template-button {
+  min-height: 44px;
+}
+
 .assignment-schedule-fieldset {
   display: grid;
   gap: 14px;
@@ -2547,6 +2631,12 @@ textarea {
   background: rgba(255, 255, 255, 0.045);
 }
 
+:root[data-theme="dark"] .assignment-edit-modal,
+:root[data-theme="dark"] .assignment-edit-modal-actions {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: #1c1c1e;
+}
+
 :root[data-theme="dark"] .assignment-catalog-item .assignment-schedule-badge,
 :root[data-theme="dark"] .student-assignment-schedule {
   border-color: rgba(41, 151, 255, 0.3);
@@ -2573,6 +2663,37 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  .assignment-edit-backdrop {
+    padding: 8px;
+  }
+
+  .assignment-edit-modal {
+    max-height: calc(100dvh - 16px);
+    border-radius: 16px;
+  }
+
+  .assignment-edit-modal-header {
+    padding: 14px 14px 12px;
+  }
+
+  .assignment-edit-modal-header h2 {
+    font-size: 20px;
+  }
+
+  .assignment-edit-modal-body {
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .assignment-edit-modal-actions {
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .assignment-edit-modal-actions .primary-button,
+  .assignment-edit-modal-actions .template-button {
+    flex: 1 1 0;
+  }
+
   .student-home-welcome {
     padding-inline: 2px;
   }

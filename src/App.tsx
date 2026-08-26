@@ -2166,6 +2166,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
 function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, deleteAssignmentGroup, moveAssignment, updateScoreDraft, updateScoreStatus, saveScoreSheet, saveAllScoreSheets, applySameScoreSheet }: ScoresViewProps) {
   const [draft, setDraft] = useState<AssignmentDraft>({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", acceptingSubmissions: true, submissionOpenAt: "", submissionCloseAt: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   const [editingGroupKey, setEditingGroupKey] = useState("");
+  const [editDraft, setEditDraft] = useState<AssignmentDraft | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
   const [teacherView, setTeacherView] = useState<"add" | "entry" | "overview">("add");
@@ -2196,9 +2197,22 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
   const note = selected ? `คะแนนดิบเต็ม ${formatScore(selected.rawMax)} หารเป็นคะแนนเก็บ ${formatScore(selected.finalMax)}` : "สร้างงานคะแนนก่อน";
 
   useEffect(() => {
-    if (editingGroupKey) return;
     setDraft((current) => ({ ...current, classroomIds: selectedClassroomId ? [selectedClassroomId] : [] }));
-  }, [editingGroupKey, selectedClassroomId]);
+  }, [selectedClassroomId]);
+
+  useEffect(() => {
+    if (!editingGroupKey) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) closeAssignmentEditor();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [busy, editingGroupKey]);
 
   useEffect(() => {
     if (!assignments.length) {
@@ -2208,8 +2222,16 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
     if (!assignments.some((assignment) => assignment.id === sameScoreAssignmentId)) setSameScoreAssignmentId(assignments[0].id);
   }, [assignments, sameScoreAssignmentId]);
 
-  function toggleAssignmentClassroom(classroomId: string) {
+  function toggleNewAssignmentClassroom(classroomId: string) {
     setDraft((current) => {
+      if (current.classroomIds.includes(classroomId)) return { ...current, classroomIds: current.classroomIds.filter((id) => id !== classroomId) };
+      return { ...current, classroomIds: [...current.classroomIds, classroomId] };
+    });
+  }
+
+  function toggleEditAssignmentClassroom(classroomId: string) {
+    setEditDraft((current) => {
+      if (!current) return current;
       if (current.classroomIds.includes(classroomId)) return { ...current, classroomIds: current.classroomIds.filter((id) => id !== classroomId) };
       const assignment = editingGroup?.assignments.find((item) => item.classroomId === classroomId);
       if (editingGroup?.hasMixedValues && !current.classroomIds.length && assignment) {
@@ -2228,14 +2250,18 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
     });
   }
 
-  function resetAssignmentForm() {
-    setEditingGroupKey("");
+  function resetNewAssignmentForm() {
     setDraft({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", acceptingSubmissions: true, submissionOpenAt: "", submissionCloseAt: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
+  }
+
+  function closeAssignmentEditor() {
+    setEditingGroupKey("");
+    setEditDraft(null);
   }
 
   function beginEditAssignment(group: AssignmentGroup) {
     setEditingGroupKey(group.key);
-    setDraft({
+    setEditDraft({
       title: group.hasMixedValues ? "" : group.title,
       assignmentType: group.hasMixedValues ? "ทั่วไป" : group.assignmentType,
       rawMax: group.hasMixedValues ? "" : numericInputValue(group.rawMax),
@@ -2247,11 +2273,18 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
     });
   }
 
-  async function submitAssignment() {
-    const selectedAssignments = editingGroup?.assignments.filter((assignment) => assignment.classroomId && draft.classroomIds.includes(assignment.classroomId)) ?? [];
-    const ok = editingGroup ? await updateAssignment(selectedAssignments, draft) : await addAssignment(draft);
+  async function submitNewAssignment() {
+    const ok = await addAssignment(draft);
     if (!ok) return;
-    resetAssignmentForm();
+    resetNewAssignmentForm();
+  }
+
+  async function submitEditedAssignment() {
+    if (!editingGroup || !editDraft) return;
+    const selectedAssignments = editingGroup.assignments.filter((assignment) => assignment.classroomId && editDraft.classroomIds.includes(assignment.classroomId));
+    const ok = await updateAssignment(selectedAssignments, editDraft);
+    if (!ok) return;
+    closeAssignmentEditor();
   }
 
   async function submitSameScore() {
@@ -2262,7 +2295,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
 
   async function removeAssignmentGroup(group: AssignmentGroup) {
     const deleted = await deleteAssignmentGroup(group.assignments);
-    if (deleted && editingGroupKey === group.key) resetAssignmentForm();
+    if (deleted && editingGroupKey === group.key) closeAssignmentEditor();
   }
 
   if (role === "student") {
@@ -2279,29 +2312,10 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
       </div>
       {teacherView === "add" &&
         <section className="panel compact-form">
-          <SectionTitle title={editingGroup ? "แก้ไขงานคะแนน" : "เพิ่มงานคะแนน"} note={editingGroup ? `เลือกแล้ว ${draft.classroomIds.length} จาก ${editingGroup.assignments.length} ห้อง` : "งานที่เพิ่มก่อนจะแสดงก่อน"} />
-          <div className="form-grid">
-            <label className="field">ชื่องาน / แบบประเมิน<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="เช่น ใบงานที่ 1" /></label>
-            <label className="field">ประเภทงาน<select value={draft.assignmentType} onChange={(event) => setDraft({ ...draft, assignmentType: event.target.value })}>{assignmentTypes.map((type) => <option value={type} key={type}>{type}</option>)}</select></label>
-            <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => setDraft({ ...draft, rawMax: event.target.value })} placeholder="เช่น 10" /></label>
-            <label className="field">คิดเป็นคะแนนเก็บ<input type="number" min="1" value={draft.finalMax} onChange={(event) => setDraft({ ...draft, finalMax: event.target.value })} placeholder="เช่น 5" /></label>
-          </div>
-          <fieldset className={`assignment-schedule-fieldset ${draft.acceptingSubmissions ? "is-open" : "is-closed"}`}>
-            <legend><CalendarClock aria-hidden />กำหนดการส่งงาน</legend>
-            <label className="assignment-accept-toggle"><input type="checkbox" checked={draft.acceptingSubmissions} onChange={(event) => setDraft({ ...draft, acceptingSubmissions: event.target.checked })} /><span><strong>เปิดรับการส่งงาน</strong><small>{draft.acceptingSubmissions ? "นักเรียนส่งได้ตามช่วงเวลาที่กำหนด" : "ปิดรับทันทีทุกห้องที่เลือก"}</small></span></label>
-            <div className="assignment-schedule-grid">
-              <label className="field">เริ่มรับงาน<input type="datetime-local" value={draft.submissionOpenAt} disabled={!draft.acceptingSubmissions} onChange={(event) => setDraft({ ...draft, submissionOpenAt: event.target.value })} /></label>
-              <label className="field">ปิดรับงาน<input type="datetime-local" value={draft.submissionCloseAt} disabled={!draft.acceptingSubmissions} onChange={(event) => setDraft({ ...draft, submissionCloseAt: event.target.value })} /></label>
-            </div>
-          </fieldset>
-          <fieldset className="assignment-classroom-fieldset">
-            <legend>{editingGroup ? "เลือกห้องเรียนที่ต้องการแก้ไข" : "เลือกห้องเรียนที่ได้รับงาน"}</legend>
-            <div className="classroom-checkbox-grid">{(editingGroup ? classrooms.filter((classroom) => editingGroup.classroomIds.includes(classroom.id)) : classrooms).map((classroom) => <label className="classroom-checkbox" key={classroom.id}><input type="checkbox" checked={draft.classroomIds.includes(classroom.id)} onChange={() => toggleAssignmentClassroom(classroom.id)} /><span>{classroom.displayName}</span></label>)}</div>
-            {editingGroup && <small className="assignment-edit-help">{editingGroup.hasMixedValues && !draft.classroomIds.length ? "งานนี้มีค่าต่างกันตามห้อง เลือกห้องแรกเพื่อโหลดค่าเดิมก่อนแก้ไข" : "ค่าที่แก้ไขจะเปลี่ยนเฉพาะห้องที่ติ๊กเลือก คะแนนนักเรียนเดิมยังอยู่ครบ"}</small>}
-          </fieldset>
+          <SectionTitle title="เพิ่มงานคะแนน" note="งานที่เพิ่มก่อนจะแสดงก่อน" />
+          <AssignmentDraftFields draft={draft} classrooms={classrooms} classroomLegend="เลือกห้องเรียนที่ได้รับงาน" onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))} onToggleClassroom={toggleNewAssignmentClassroom} />
           <div className="form-actions">
-            <button className="primary-button" disabled={busy || Boolean(editingGroup && !draft.classroomIds.length)} onClick={submitAssignment}>{editingGroup ? <Save aria-hidden /> : <Plus aria-hidden />}{editingGroup ? "บันทึกการแก้ไข" : "เพิ่มงานคะแนน"}</button>
-            {editingGroup && <button className="template-button" type="button" disabled={busy} onClick={resetAssignmentForm}>ยกเลิก</button>}
+            <button className="primary-button" disabled={busy} onClick={submitNewAssignment}><Plus aria-hidden />เพิ่มงานคะแนน</button>
           </div>
           <div className="assignment-catalog">
             <div className="assignment-catalog-heading"><SectionTitle title="งานคะแนนที่สร้างแล้ว" note={`${assignmentGroups.length} งาน`} /><div className="created-score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${scoreRingPercent * 3.6}deg, var(--ring-track) ${scoreRingPercent * 3.6}deg 360deg)` }} aria-label={`สร้างคะแนนแล้ว ${formatScore(totalCreatedScore)} คะแนน`}><div><strong>{formatScore(totalCreatedScore)}</strong><span>คะแนน</span></div></div></div>
@@ -2339,8 +2353,55 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
           ) : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานคะแนนแรก แล้วระบบจะสร้างตารางให้กรอกตามรายชื่อนักเรียน" />}
         </section>}
       {teacherView === "overview" && <TeacherScoreOverview classrooms={classrooms} selectedClassroomId={selectedClassroomId} onClassroomChange={onClassroomChange} students={students} assignments={assignments} entries={entries} onEdit={() => setTeacherView("entry")} />}
+      {editingGroup && editDraft && <div className="modal-backdrop assignment-edit-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) closeAssignmentEditor(); }}>
+        <section className="assignment-edit-modal" role="dialog" aria-modal="true" aria-labelledby="assignment-edit-title">
+          <header className="assignment-edit-modal-header">
+            <div><span>แก้ไขงานคะแนน</span><h2 id="assignment-edit-title">{editingGroup.title}</h2><p>เลือกแล้ว {editDraft.classroomIds.length} จาก {editingGroup.assignments.length} ห้อง</p></div>
+            <button className="icon-button" type="button" disabled={busy} onClick={closeAssignmentEditor} aria-label="ปิดหน้าต่างแก้ไขงาน"><X aria-hidden /></button>
+          </header>
+          <div className="assignment-edit-modal-body">
+            <AssignmentDraftFields
+              draft={editDraft}
+              classrooms={classrooms.filter((classroom) => editingGroup.classroomIds.includes(classroom.id))}
+              classroomLegend="เลือกห้องเรียนที่ต้องการแก้ไข"
+              helpText={editingGroup.hasMixedValues && !editDraft.classroomIds.length ? "งานนี้มีค่าต่างกันตามห้อง เลือกห้องแรกเพื่อโหลดค่าเดิมก่อนแก้ไข" : "ค่าที่แก้ไขจะเปลี่ยนเฉพาะห้องที่ติ๊กเลือก คะแนนนักเรียนเดิมยังอยู่ครบ"}
+              autoFocusTitle
+              onChange={(patch) => setEditDraft((current) => current ? { ...current, ...patch } : current)}
+              onToggleClassroom={toggleEditAssignmentClassroom}
+            />
+          </div>
+          <footer className="assignment-edit-modal-actions">
+            <button className="template-button" type="button" disabled={busy} onClick={closeAssignmentEditor}>ยกเลิก</button>
+            <button className="primary-button" type="button" disabled={busy || !editDraft.classroomIds.length} onClick={() => void submitEditedAssignment()}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกการแก้ไข"}</button>
+          </footer>
+        </section>
+      </div>}
     </div>
   );
+}
+
+function AssignmentDraftFields({ draft, classrooms, classroomLegend, helpText, autoFocusTitle = false, onChange, onToggleClassroom }: { draft: AssignmentDraft; classrooms: Classroom[]; classroomLegend: string; helpText?: string; autoFocusTitle?: boolean; onChange: (patch: Partial<AssignmentDraft>) => void; onToggleClassroom: (classroomId: string) => void }) {
+  return <>
+    <div className="form-grid">
+      <label className="field">ชื่องาน / แบบประเมิน<input autoFocus={autoFocusTitle} value={draft.title} onChange={(event) => onChange({ title: event.target.value })} placeholder="เช่น ใบงานที่ 1" /></label>
+      <label className="field">ประเภทงาน<select value={draft.assignmentType} onChange={(event) => onChange({ assignmentType: event.target.value })}>{assignmentTypes.map((type) => <option value={type} key={type}>{type}</option>)}</select></label>
+      <label className="field">คะแนนเต็มดิบ<input type="number" min="1" value={draft.rawMax} onChange={(event) => onChange({ rawMax: event.target.value })} placeholder="เช่น 10" /></label>
+      <label className="field">คิดเป็นคะแนนเก็บ<input type="number" min="1" value={draft.finalMax} onChange={(event) => onChange({ finalMax: event.target.value })} placeholder="เช่น 5" /></label>
+    </div>
+    <fieldset className={`assignment-schedule-fieldset ${draft.acceptingSubmissions ? "is-open" : "is-closed"}`}>
+      <legend><CalendarClock aria-hidden />กำหนดการส่งงาน</legend>
+      <label className="assignment-accept-toggle"><input type="checkbox" checked={draft.acceptingSubmissions} onChange={(event) => onChange({ acceptingSubmissions: event.target.checked })} /><span><strong>เปิดรับการส่งงาน</strong><small>{draft.acceptingSubmissions ? "นักเรียนส่งได้ตามช่วงเวลาที่กำหนด" : "ปิดรับทันทีทุกห้องที่เลือก"}</small></span></label>
+      <div className="assignment-schedule-grid">
+        <label className="field">เริ่มรับงาน<input type="datetime-local" value={draft.submissionOpenAt} disabled={!draft.acceptingSubmissions} onChange={(event) => onChange({ submissionOpenAt: event.target.value })} /></label>
+        <label className="field">ปิดรับงาน<input type="datetime-local" value={draft.submissionCloseAt} disabled={!draft.acceptingSubmissions} onChange={(event) => onChange({ submissionCloseAt: event.target.value })} /></label>
+      </div>
+    </fieldset>
+    <fieldset className="assignment-classroom-fieldset">
+      <legend>{classroomLegend}</legend>
+      <div className="classroom-checkbox-grid">{classrooms.map((classroom) => <label className="classroom-checkbox" key={classroom.id}><input type="checkbox" checked={draft.classroomIds.includes(classroom.id)} onChange={() => onToggleClassroom(classroom.id)} /><span>{classroom.displayName}</span></label>)}</div>
+      {helpText && <small className="assignment-edit-help">{helpText}</small>}
+    </fieldset>
+  </>;
 }
 
 function BulkSameScorePanel({ assignments, selectedAssignmentId, scoreValue, busy, studentsCount, onAssignmentChange, onScoreChange, onApply }: BulkSameScorePanelProps) {
