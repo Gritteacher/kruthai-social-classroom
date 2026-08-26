@@ -973,6 +973,279 @@ textarea {
   border-radius: 12px;
 }
 
+.student-detail-trigger {
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+
+.student-detail-trigger:hover,
+.student-detail-trigger:focus-visible {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.student-detail-backdrop {
+  z-index: 70;
+  padding: 16px;
+}
+
+.student-detail-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(960px, 100%);
+  max-height: calc(100dvh - 32px);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 36px 110px rgba(15, 23, 42, 0.24);
+}
+
+.student-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.student-detail-header > div {
+  min-width: 0;
+}
+
+.student-detail-header span,
+.student-detail-header p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.student-detail-header h2,
+.student-detail-header p {
+  margin: 0;
+}
+
+.student-detail-header h2 {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  font-size: 24px;
+  line-height: 1.3;
+}
+
+.student-detail-header p {
+  margin-top: 4px;
+}
+
+.student-detail-header .icon-button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+}
+
+.student-detail-body {
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.student-detail-identity {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  padding: 18px 22px;
+  background: var(--surface-soft);
+}
+
+.student-detail-identity > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 14px;
+  border-right: 1px solid var(--line);
+}
+
+.student-detail-identity > div:first-child {
+  padding-left: 0;
+}
+
+.student-detail-identity > div:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.student-detail-identity span,
+.student-detail-identity small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.student-detail-identity strong {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.student-detail-identity .account-ready {
+  color: #187a32;
+}
+
+.student-detail-identity .account-pending {
+  color: #946200;
+}
+
+.student-detail-section {
+  display: grid;
+  gap: 12px;
+  padding: 20px 22px;
+  border-top: 1px solid var(--line);
+}
+
+.student-detail-section-heading,
+.student-detail-section-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.student-detail-section-heading {
+  justify-content: space-between;
+}
+
+.student-detail-section-heading svg {
+  width: 18px;
+  height: 18px;
+  color: var(--blue);
+}
+
+.student-detail-section-heading span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.student-detail-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.student-detail-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.student-detail-list > div:last-child {
+  border-bottom: 0;
+}
+
+.student-detail-list > div > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.student-detail-list b,
+.student-detail-list small {
+  overflow-wrap: anywhere;
+}
+
+.student-detail-list b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.student-detail-list small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.student-detail-list > div > strong {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.student-detail-list .status-text.pending {
+  color: #946200;
+}
+
+.student-detail-list .status-text.pass {
+  color: #187a32;
+}
+
+.student-detail-list .status-text.fail {
+  color: #b73514;
+}
+
+.student-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 22px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.student-detail-actions > div {
+  display: flex;
+  gap: 10px;
+}
+
+.student-detail-actions .primary-button,
+.student-detail-actions .template-button,
+.student-detail-actions .danger-button {
+  min-height: 44px;
+}
+
+:root[data-theme="dark"] .student-detail-modal,
+:root[data-theme="dark"] .student-detail-actions {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: #1c1c1e;
+}
+
+:root[data-theme="dark"] .student-detail-identity {
+  background: #242426;
+}
+
+:root[data-theme="dark"] .student-detail-identity > div,
+:root[data-theme="dark"] .student-detail-section,
+:root[data-theme="dark"] .student-detail-list,
+:root[data-theme="dark"] .student-detail-list > div {
+  border-color: rgba(255, 255, 255, 0.11);
+}
+
+:root[data-theme="dark"] .student-detail-identity .account-ready,
+:root[data-theme="dark"] .student-detail-list .status-text.pass {
+  color: #62db82;
+}
+
+:root[data-theme="dark"] .student-detail-identity .account-pending,
+:root[data-theme="dark"] .student-detail-list .status-text.pending {
+  color: #ffd36a;
+}
+
+:root[data-theme="dark"] .student-detail-list .status-text.fail {
+  color: #ff9f8a;
+}
+
 .bulk-account-row {
   align-items: stretch;
 }
@@ -3660,6 +3933,76 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  .student-detail-backdrop {
+    padding: 8px;
+  }
+
+  .student-detail-modal {
+    max-height: calc(100dvh - 16px);
+    border-radius: 16px;
+  }
+
+  .student-detail-header {
+    padding: 14px 14px 12px;
+  }
+
+  .student-detail-header h2 {
+    font-size: 20px;
+  }
+
+  .student-detail-identity {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px 14px;
+  }
+
+  .student-detail-identity > div,
+  .student-detail-identity > div:first-child,
+  .student-detail-identity > div:last-child {
+    padding: 9px 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .student-detail-identity > div:nth-child(odd) {
+    border-right: 1px solid var(--line);
+  }
+
+  .student-detail-identity > div:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .student-detail-section {
+    padding: 16px 14px;
+  }
+
+  .student-detail-section-heading {
+    align-items: flex-start;
+  }
+
+  .student-detail-list > div {
+    align-items: flex-start;
+    padding: 10px 11px;
+  }
+
+  .student-detail-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .student-detail-actions > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  }
+
+  .student-detail-actions button {
+    width: 100%;
+  }
+
+  :root[data-theme="dark"] .student-detail-identity > div {
+    border-color: rgba(255, 255, 255, 0.11);
+  }
+
   .hero-strip {
     min-height: 0;
     padding: 16px;
