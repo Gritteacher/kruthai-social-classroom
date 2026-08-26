@@ -3762,11 +3762,14 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .student-review-work .student-review-open {
+  .student-review-work-actions {
     display: grid;
     grid-column: 3;
     grid-row: 1;
     align-self: start;
+  }
+
+  .student-review-work-actions .student-review-open {
     border: 1px solid rgba(0, 113, 227, 0.2);
     background: var(--surface-selected);
     color: var(--blue);

@@ -1507,6 +1507,20 @@ textarea {
   min-width: 42px;
 }
 
+.student-review-work-actions {
+  display: grid;
+  align-self: center;
+  gap: 8px;
+}
+
+.student-review-work-actions .icon-button,
+.student-review-work-actions .icon-danger {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+}
+
 .student-review-score {
   gap: 4px;
   font-size: 12px;
@@ -1938,6 +1952,12 @@ textarea {
   .student-review-work {
     grid-template-columns: 28px minmax(0, 1fr) 42px;
     align-items: start;
+  }
+
+  .student-review-work-actions {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: start;
   }
 
   .student-review-score {
