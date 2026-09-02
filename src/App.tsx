@@ -1,5 +1,5 @@
 import { createClient, type User as SupabaseUser } from "@supabase/supabase-js";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -92,6 +92,8 @@ import type {
   ViewKey
 } from "./types";
 
+const WorksheetHub = lazy(() => import("./features/worksheets/WorksheetHub"));
+
 type MaterialUpload = { file: File | null; title: string; unit: string; level: string; type: MaterialType };
 type ClassroomDraft = { academicYear: string; level: string; room: string; subject: string };
 type StudentDraft = { no: string; studentId: string; name: string; gender: string };
@@ -112,6 +114,7 @@ type SubmissionStudentGroup = { studentId: string; studentName: string; items: S
 type WorkViewProps = {
   role: Role;
   classrooms: Classroom[];
+  students: StudentRecord[];
   selectedClassroomId: string;
   onClassroomChange: (id: string) => void;
   assignments: ScoreAssignment[];
@@ -127,6 +130,7 @@ type WorkViewProps = {
   deleteSubmission: (item: SubmissionRecord) => void;
   openSubmission: (item: SubmissionRecord) => void;
   getSubmissionPreviewUrl: (item: SubmissionRecord) => Promise<string>;
+  flash: (message: string) => void;
 };
 type ScoresViewProps = {
   role: Role;
@@ -1715,7 +1719,7 @@ function App() {
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} deleteAssignmentGroup={deleteAssignments} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} />}
-          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} />}
+          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} students={session.role === "teacher" ? students : classroomPeers} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} flash={flash} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} submissions={activeSubmissions} downloadLogs={activeDownloadLogs} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
@@ -2500,7 +2504,7 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
-function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission, getSubmissionPreviewUrl }: WorkViewProps) {
+function WorkView({ role, classrooms, students, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission, getSubmissionPreviewUrl, flash }: WorkViewProps) {
   const [file, setFile] = useState<File | null>(null);
   const [assignmentId, setAssignmentId] = useState("");
   const [submissionKind, setSubmissionKind] = useState<SubmissionKind>("individual");
@@ -2508,6 +2512,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
   const [linkUrl, setLinkUrl] = useState("");
   const [memberCodes, setMemberCodes] = useState<string[]>([]);
   const [teacherReviewMode, setTeacherReviewMode] = useState<"assignments" | "students">("assignments");
+  const [workFeature, setWorkFeature] = useState<"submissions" | "worksheets">("submissions");
   const [previewTarget, setPreviewTarget] = useState<SubmissionRecord | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState("");
@@ -2592,10 +2597,17 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
     setMemberCodes([]);
   }
 
+  const workFeatureSwitch = <div className="work-feature-switch" role="tablist" aria-label="รูปแบบงาน"><button className={workFeature === "submissions" ? "active" : ""} type="button" role="tab" aria-selected={workFeature === "submissions"} onClick={() => setWorkFeature("submissions")}><CloudUpload aria-hidden />{role === "teacher" ? "งานส่ง" : "ส่งไฟล์งาน"}</button><button className={workFeature === "worksheets" ? "active" : ""} type="button" role="tab" aria-selected={workFeature === "worksheets"} onClick={() => setWorkFeature("worksheets")}><BookOpen aria-hidden />สมุดงานออนไลน์</button></div>;
+
+  if (workFeature === "worksheets") {
+    return <div className="page-stack"><PageHeader title="สมุดงานออนไลน์" eyebrow={role === "teacher" ? "สร้างและติดตามสมุดงาน" : activeClassName} />{workFeatureSwitch}<Suspense fallback={<div className="worksheet-loading"><span>กำลังเปิดสมุดงานออนไลน์...</span></div>}><WorksheetHub role={role} classrooms={classrooms} students={students} currentStudent={currentStudent} flash={flash} /></Suspense></div>;
+  }
+
   if (role === "teacher") {
     return (
       <div className="page-stack">
         <PageHeader title="ตรวจงาน" eyebrow={activeClassName} />
+        {workFeatureSwitch}
         <section className="panel">
           <SectionTitle title="งานรอตรวจ" note={`${pendingReviewSubmissions.length} รายการ`} />
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
@@ -2609,6 +2621,7 @@ function WorkView({ role, classrooms, selectedClassroomId, onClassroomChange, as
   return (
     <div className="page-stack">
       <PageHeader title="ส่งงาน" eyebrow={activeClassName} />
+      {workFeatureSwitch}
       <section className="panel compact-form">
         {assignments.length ? (
           <>

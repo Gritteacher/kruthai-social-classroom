@@ -5,6 +5,7 @@ import "./styles.css";
 import "./feature.css";
 import "./student-bulk-accounts.css";
 import "./apple-white-theme.css";
+import "./features/worksheets/worksheet.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
