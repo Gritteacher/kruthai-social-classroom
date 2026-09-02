@@ -6,7 +6,8 @@ import {
   type PDFDocumentProxy,
 } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { Layer, Line, Stage, Text as KonvaText } from "react-konva";
+import { Layer, Shape, Stage, Text as KonvaText } from "react-konva";
+import { getStroke } from "perfect-freehand";
 import type { KonvaEventObject } from "konva/lib/Node";
 import {
   BookOpen,
@@ -17,8 +18,11 @@ import {
   Eraser,
   Eye,
   FileText,
+  Hand,
   Pencil,
   Redo2,
+  RotateCcw,
+  RotateCw,
   Save,
   Send,
   Trash2,
@@ -33,8 +37,10 @@ import {
   deleteWorksheet,
   fetchWorksheetAnswers,
   fetchWorksheets,
+  fetchTeacherWorksheetPages,
   getWorksheetUrl,
   saveWorksheetPage,
+  saveTeacherWorksheetPage,
   worksheetError,
 } from "./service";
 import type {
@@ -43,6 +49,7 @@ import type {
   WorksheetDraft,
   WorksheetPageAnswer,
   WorksheetStroke,
+  WorksheetTeacherPage,
   WorksheetTool,
 } from "./types";
 
@@ -75,6 +82,7 @@ export default function WorksheetHub({
 }: WorksheetHubProps) {
   const [worksheets, setWorksheets] = useState<Worksheet[]>([]);
   const [answers, setAnswers] = useState<WorksheetPageAnswer[]>([]);
+  const [teacherPages, setTeacherPages] = useState<WorksheetTeacherPage[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<WorksheetDraft>(emptyDraft);
@@ -83,16 +91,19 @@ export default function WorksheetHub({
   );
   const [previewAnswer, setPreviewAnswer] =
     useState<WorksheetPageAnswer | null>(null);
+  const [teacherWriting, setTeacherWriting] = useState(false);
 
   async function loadData() {
     setLoading(true);
     try {
-      const [nextWorksheets, nextAnswers] = await Promise.all([
+      const [nextWorksheets, nextAnswers, nextTeacherPages] = await Promise.all([
         fetchWorksheets(),
         fetchWorksheetAnswers(),
+        role === "teacher" ? fetchTeacherWorksheetPages() : Promise.resolve([]),
       ]);
       setWorksheets(nextWorksheets);
       setAnswers(nextAnswers);
+      setTeacherPages(nextTeacherPages);
     } catch (error) {
       flash(worksheetError(error, "โหลดสมุดงานไม่สำเร็จ"));
     } finally {
@@ -117,6 +128,14 @@ export default function WorksheetHub({
     setAnswers((current) =>
       current.some((answer) => answer.id === saved.id)
         ? current.map((answer) => (answer.id === saved.id ? saved : answer))
+        : [saved, ...current],
+    );
+  }
+
+  function updateTeacherPage(saved: WorksheetTeacherPage) {
+    setTeacherPages((current) =>
+      current.some((page) => page.id === saved.id)
+        ? current.map((page) => (page.id === saved.id ? saved : page))
         : [saved, ...current],
     );
   }
@@ -330,22 +349,38 @@ export default function WorksheetHub({
           students={students}
           busy={busy}
           onDelete={(worksheet) => void removeWorksheet(worksheet)}
+          onWrite={(worksheet) => {
+            setActiveWorksheet(worksheet);
+            setPreviewAnswer(null);
+            setTeacherWriting(true);
+          }}
           onPreview={(worksheet, answer) => {
             setActiveWorksheet(worksheet);
             setPreviewAnswer(answer);
+            setTeacherWriting(false);
           }}
         />
-        {activeWorksheet && previewAnswer && (
+        {activeWorksheet && (previewAnswer || teacherWriting) && (
           <WorksheetEditorModal
             worksheet={activeWorksheet}
-            answers={[previewAnswer]}
-            initialPage={previewAnswer.pageNumber}
-            readOnly
+            pages={
+              teacherWriting
+                ? teacherPages.filter(
+                    (page) => page.worksheetId === activeWorksheet.id,
+                  )
+                : previewAnswer
+                  ? [previewAnswer]
+                  : []
+            }
+            initialPage={previewAnswer?.pageNumber || 1}
+            mode={teacherWriting ? "teacher" : "preview"}
             onClose={() => {
               setActiveWorksheet(null);
               setPreviewAnswer(null);
+              setTeacherWriting(false);
             }}
-            onSaved={updateAnswer}
+            onStudentSaved={updateAnswer}
+            onTeacherSaved={updateTeacherPage}
             flash={flash}
           />
         )}
@@ -426,13 +461,14 @@ export default function WorksheetHub({
       {activeWorksheet && (
         <WorksheetEditorModal
           worksheet={activeWorksheet}
-          answers={answers.filter(
+          pages={answers.filter(
             (answer) => answer.worksheetId === activeWorksheet.id,
           )}
           initialPage={firstIncompletePage(activeWorksheet, answers)}
-          readOnly={false}
+          mode="student"
           onClose={() => setActiveWorksheet(null)}
-          onSaved={updateAnswer}
+          onStudentSaved={updateAnswer}
+          onTeacherSaved={updateTeacherPage}
           flash={flash}
         />
       )}
@@ -447,6 +483,7 @@ function TeacherWorksheetList({
   students,
   busy,
   onDelete,
+  onWrite,
   onPreview,
 }: {
   worksheets: Worksheet[];
@@ -455,6 +492,7 @@ function TeacherWorksheetList({
   students: StudentRecord[];
   busy: boolean;
   onDelete: (worksheet: Worksheet) => void;
+  onWrite: (worksheet: Worksheet) => void;
   onPreview: (worksheet: Worksheet, answer: WorksheetPageAnswer) => void;
 }) {
   return (
@@ -534,15 +572,26 @@ function TeacherWorksheetList({
                 )}
                 <div className="worksheet-admin-actions">
                   <span>{worksheetAvailability(worksheet).detail}</span>
-                  <button
-                    className="icon-danger"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onDelete(worksheet)}
-                    aria-label={`ลบสมุดงาน ${worksheet.title}`}
-                  >
-                    <Trash2 aria-hidden />
-                  </button>
+                  <div>
+                    <button
+                      className="template-button worksheet-write-button"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onWrite(worksheet)}
+                    >
+                      <Pencil aria-hidden />
+                      เขียนฉบับครู
+                    </button>
+                    <button
+                      className="icon-danger"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onDelete(worksheet)}
+                      aria-label={`ลบสมุดงาน ${worksheet.title}`}
+                    >
+                      <Trash2 aria-hidden />
+                    </button>
+                  </div>
                 </div>
               </article>
             );
@@ -559,21 +608,26 @@ function TeacherWorksheetList({
   );
 }
 
+type WorksheetEditorMode = "student" | "teacher" | "preview";
+type WorksheetEditorPage = WorksheetPageAnswer | WorksheetTeacherPage;
+
 function WorksheetEditorModal({
   worksheet,
-  answers,
+  pages,
   initialPage,
-  readOnly,
+  mode,
   onClose,
-  onSaved,
+  onStudentSaved,
+  onTeacherSaved,
   flash,
 }: {
   worksheet: Worksheet;
-  answers: WorksheetPageAnswer[];
+  pages: WorksheetEditorPage[];
   initialPage: number;
-  readOnly: boolean;
+  mode: WorksheetEditorMode;
   onClose: () => void;
-  onSaved: (answer: WorksheetPageAnswer) => void;
+  onStudentSaved: (answer: WorksheetPageAnswer) => void;
+  onTeacherSaved: (page: WorksheetTeacherPage) => void;
   flash: (message: string) => void;
 }) {
   return (
@@ -589,7 +643,13 @@ function WorksheetEditorModal({
       >
         <header>
           <div>
-            <span>{readOnly ? "ตัวอย่างงานนักเรียน" : "สมุดงานออนไลน์"}</span>
+            <span>
+              {mode === "preview"
+                ? "ตัวอย่างงานนักเรียน"
+                : mode === "teacher"
+                  ? "สมุดงานฉบับส่วนตัวของครู"
+                  : "สมุดงานออนไลน์"}
+            </span>
             <h2 id="worksheet-editor-title">{worksheet.title}</h2>
           </div>
           <button
@@ -603,10 +663,11 @@ function WorksheetEditorModal({
         </header>
         <WorksheetEditor
           worksheet={worksheet}
-          answers={answers}
+          pages={pages}
           initialPage={initialPage}
-          readOnly={readOnly}
-          onSaved={onSaved}
+          mode={mode}
+          onStudentSaved={onStudentSaved}
+          onTeacherSaved={onTeacherSaved}
           flash={flash}
         />
       </section>
@@ -616,25 +677,29 @@ function WorksheetEditorModal({
 
 function WorksheetEditor({
   worksheet,
-  answers,
+  pages,
   initialPage,
-  readOnly,
-  onSaved,
+  mode,
+  onStudentSaved,
+  onTeacherSaved,
   flash,
 }: {
   worksheet: Worksheet;
-  answers: WorksheetPageAnswer[];
+  pages: WorksheetEditorPage[];
   initialPage: number;
-  readOnly: boolean;
-  onSaved: (answer: WorksheetPageAnswer) => void;
+  mode: WorksheetEditorMode;
+  onStudentSaved: (answer: WorksheetPageAnswer) => void;
+  onTeacherSaved: (page: WorksheetTeacherPage) => void;
   flash: (message: string) => void;
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(initialPage);
   const [annotations, setAnnotations] = useState<WorksheetAnnotation[]>([]);
+  const [rotation, setRotation] = useState(0);
   const [tool, setTool] = useState<WorksheetTool>("pen");
   const [color, setColor] = useState("#1d1d1f");
   const [textDraft, setTextDraft] = useState("");
+  const [penOnly, setPenOnly] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 760, height: 980 });
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<
@@ -643,18 +708,28 @@ function WorksheetEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pageShellRef = useRef<HTMLDivElement>(null);
   const drawingRef = useRef(false);
+  const erasingRef = useRef(false);
+  const eraseChangedRef = useRef(false);
   const activeStrokeIdRef = useRef("");
-  const pastRef = useRef<WorksheetAnnotation[][]>([]);
-  const futureRef = useRef<WorksheetAnnotation[][]>([]);
+  const pastRef = useRef<EditorSnapshot[]>([]);
+  const futureRef = useRef<EditorSnapshot[]>([]);
   const annotationsRef = useRef<WorksheetAnnotation[]>([]);
-  const answer = answers.find((item) => item.pageNumber === pageNumber);
+  const rotationRef = useRef(0);
+  const readOnly = mode === "preview";
+  const pageRecord = pages.find((item) => item.pageNumber === pageNumber);
+  const answer = isStudentAnswer(pageRecord) ? pageRecord : undefined;
   const pageLocked =
-    readOnly || answer?.status === "submitted" || answer?.status === "reviewed";
+    readOnly ||
+    (mode === "student" &&
+      (answer?.status === "submitted" || answer?.status === "reviewed"));
   const locked = pageLocked || saveState === "saving";
 
   useEffect(() => {
     annotationsRef.current = annotations;
   }, [annotations]);
+  useEffect(() => {
+    rotationRef.current = rotation;
+  }, [rotation]);
   useEffect(() => {
     let cancelled = false;
     let loadingTask: PDFDocumentLoadingTask | null = null;
@@ -678,14 +753,17 @@ function WorksheetEditor({
   }, [worksheet.id]);
 
   useEffect(() => {
-    const next =
-      answers.find((item) => item.pageNumber === pageNumber)?.annotations ?? [];
+    const record = pages.find((item) => item.pageNumber === pageNumber);
+    const next = record?.annotations ?? [];
+    const nextRotation = record?.rotation ?? 0;
     setAnnotations(next);
     annotationsRef.current = next;
+    setRotation(nextRotation);
+    rotationRef.current = nextRotation;
     pastRef.current = [];
     futureRef.current = [];
     setSaveState("idle");
-  }, [answers, pageNumber]);
+  }, [pages, pageNumber]);
 
   useEffect(() => {
     if (!pdf || !canvasRef.current || !pageShellRef.current) return;
@@ -694,11 +772,12 @@ function WorksheetEditor({
     const viewportElement = pageShell.parentElement;
     const render = async () => {
       const page = await pdf.getPage(pageNumber);
-      const baseViewport = page.getViewport({ scale: 1 });
+      const pdfRotation = (page.rotate + rotation) % 360;
+      const baseViewport = page.getViewport({ scale: 1, rotation: pdfRotation });
       const viewportWidth = viewportElement?.clientWidth || window.innerWidth;
       const availableWidth = Math.min(900, Math.max(280, viewportWidth - 36));
       const scale = availableWidth / baseViewport.width;
-      const viewport = page.getViewport({ scale });
+      const viewport = page.getViewport({ scale, rotation: pdfRotation });
       const outputScale = Math.min(window.devicePixelRatio || 1, 2);
       const canvas = canvasRef.current;
       if (!canvas || cancelled) return;
@@ -728,20 +807,41 @@ function WorksheetEditor({
       cancelled = true;
       observer.disconnect();
     };
-  }, [pdf, pageNumber]);
+  }, [pdf, pageNumber, rotation]);
 
   useEffect(() => {
     if (readOnly || locked || saveState !== "dirty") return;
     const timer = window.setTimeout(() => void persistPage(false), 900);
     return () => window.clearTimeout(timer);
-  }, [annotations, locked, readOnly, saveState]);
+  }, [annotations, rotation, locked, readOnly, saveState]);
 
-  function recordChange(next: WorksheetAnnotation[]) {
-    pastRef.current.push(annotationsRef.current);
+  function currentSnapshot(): EditorSnapshot {
+    return {
+      annotations: annotationsRef.current,
+      rotation: rotationRef.current,
+    };
+  }
+
+  function pushHistory() {
+    pastRef.current.push(currentSnapshot());
     if (pastRef.current.length > 40) pastRef.current.shift();
     futureRef.current = [];
+  }
+
+  function applySnapshot(snapshot: EditorSnapshot) {
+    annotationsRef.current = snapshot.annotations;
+    rotationRef.current = snapshot.rotation;
+    setAnnotations(snapshot.annotations);
+    setRotation(snapshot.rotation);
+    setSaveState("dirty");
+  }
+
+  function recordChange(next: WorksheetAnnotation[], nextRotation = rotationRef.current) {
+    pushHistory();
     annotationsRef.current = next;
+    rotationRef.current = nextRotation;
     setAnnotations(next);
+    setRotation(nextRotation);
     setSaveState("dirty");
   }
 
@@ -751,11 +851,23 @@ function WorksheetEditor({
     return {
       x: position.x / canvasSize.width,
       y: position.y / canvasSize.height,
+      pressure:
+        event.evt.pressure > 0 && event.evt.pressure <= 1
+          ? event.evt.pressure
+          : 0.5,
     };
+  }
+
+  function pointerIsBlocked(event: KonvaEventObject<PointerEvent>) {
+    const pointerType = event.evt.pointerType;
+    if (pointerType === "pen" && !penOnly) setPenOnly(true);
+    return penOnly && pointerType === "touch";
   }
 
   function handlePointerDown(event: KonvaEventObject<PointerEvent>) {
     if (locked) return;
+    if (pointerIsBlocked(event)) return;
+    event.evt.preventDefault();
     const point = normalizedPoint(event);
     if (!point) return;
     if (tool === "text") {
@@ -775,20 +887,28 @@ function WorksheetEditor({
       setTextDraft("");
       return;
     }
+    if (tool === "eraser") {
+      drawingRef.current = true;
+      erasingRef.current = true;
+      eraseChangedRef.current = false;
+      pushHistory();
+      eraseAtPoint(point.x, point.y);
+      return;
+    }
     if (tool !== "pen") return;
     drawingRef.current = true;
     const id = crypto.randomUUID();
     activeStrokeIdRef.current = id;
-    pastRef.current.push(annotationsRef.current);
-    futureRef.current = [];
+    pushHistory();
     const next = [
       ...annotationsRef.current,
       {
         id,
         kind: "stroke",
         points: [point.x, point.y],
+        pressures: [point.pressure],
         color,
-        width: 3,
+        width: 4,
       } satisfies WorksheetStroke,
     ];
     annotationsRef.current = next;
@@ -797,13 +917,23 @@ function WorksheetEditor({
   }
 
   function handlePointerMove(event: KonvaEventObject<PointerEvent>) {
-    if (!drawingRef.current || locked || tool !== "pen") return;
+    if (!drawingRef.current || locked || pointerIsBlocked(event)) return;
+    event.evt.preventDefault();
     const point = normalizedPoint(event);
     if (!point) return;
+    if (erasingRef.current && tool === "eraser") {
+      eraseAtPoint(point.x, point.y);
+      return;
+    }
+    if (tool !== "pen") return;
     const next = annotationsRef.current.map((annotation) =>
       annotation.id === activeStrokeIdRef.current &&
       annotation.kind === "stroke"
-        ? { ...annotation, points: [...annotation.points, point.x, point.y] }
+        ? {
+            ...annotation,
+            points: [...annotation.points, point.x, point.y],
+            pressures: [...(annotation.pressures ?? []), point.pressure],
+          }
         : annotation,
     );
     annotationsRef.current = next;
@@ -812,37 +942,53 @@ function WorksheetEditor({
   }
 
   function stopDrawing() {
+    if (erasingRef.current && !eraseChangedRef.current) pastRef.current.pop();
     drawingRef.current = false;
+    erasingRef.current = false;
+    eraseChangedRef.current = false;
     activeStrokeIdRef.current = "";
   }
 
-  function eraseAnnotation(id: string) {
-    if (locked || tool !== "eraser") return;
-    recordChange(
-      annotationsRef.current.filter((annotation) => annotation.id !== id),
+  function eraseAtPoint(x: number, y: number) {
+    const next = annotationsRef.current.filter(
+      (annotation) =>
+        !annotationTouchesPoint(annotation, x, y, canvasSize, 18),
     );
-  }
-
-  function undo() {
-    const previous = pastRef.current.pop();
-    if (!previous || locked) return;
-    futureRef.current.push(annotationsRef.current);
-    annotationsRef.current = previous;
-    setAnnotations(previous);
-    setSaveState("dirty");
-  }
-
-  function redo() {
-    const next = futureRef.current.pop();
-    if (!next || locked) return;
-    pastRef.current.push(annotationsRef.current);
+    if (next.length === annotationsRef.current.length) return;
+    eraseChangedRef.current = true;
     annotationsRef.current = next;
     setAnnotations(next);
     setSaveState("dirty");
   }
 
+  function undo() {
+    const previous = pastRef.current.pop();
+    if (!previous || locked) return;
+    futureRef.current.push(currentSnapshot());
+    applySnapshot(previous);
+  }
+
+  function redo() {
+    const next = futureRef.current.pop();
+    if (!next || locked) return;
+    pastRef.current.push(currentSnapshot());
+    applySnapshot(next);
+  }
+
+  function rotatePage(delta: 90 | -90) {
+    if (locked) return;
+    const nextRotation = (rotationRef.current + delta + 360) % 360;
+    recordChange(rotateAnnotations(annotationsRef.current, delta), nextRotation);
+  }
+
+  function clearPage() {
+    if (locked || !annotationsRef.current.length) return;
+    if (!window.confirm(`ลบรอยเขียนทั้งหมดในหน้า ${pageNumber} หรือไม่`)) return;
+    recordChange([]);
+  }
+
   async function persistPage(submit: boolean) {
-    if (readOnly || locked) return answer;
+    if (readOnly || locked) return pageRecord;
     if (
       submit &&
       !window.confirm(
@@ -852,13 +998,23 @@ function WorksheetEditor({
       return;
     setSaveState("saving");
     try {
-      const saved = await saveWorksheetPage(
-        worksheet.id,
-        pageNumber,
-        annotationsRef.current,
-        submit,
-      );
-      onSaved(saved);
+      const saved =
+        mode === "teacher"
+          ? await saveTeacherWorksheetPage(
+              worksheet.id,
+              pageNumber,
+              annotationsRef.current,
+              rotationRef.current,
+            )
+          : await saveWorksheetPage(
+              worksheet.id,
+              pageNumber,
+              annotationsRef.current,
+              rotationRef.current,
+              submit,
+            );
+      if (mode === "teacher") onTeacherSaved(saved as WorksheetTeacherPage);
+      else onStudentSaved(saved as WorksheetPageAnswer);
       setSaveState("saved");
       if (submit) flash(`ส่งหน้า ${pageNumber} แล้ว`);
       return saved;
@@ -867,7 +1023,11 @@ function WorksheetEditor({
       flash(
         worksheetError(
           error,
-          submit ? "ส่งหน้านี้ไม่สำเร็จ" : "บันทึกฉบับร่างไม่สำเร็จ",
+          submit
+            ? "ส่งหน้านี้ไม่สำเร็จ"
+            : mode === "teacher"
+              ? "บันทึกสมุดงานฉบับครูไม่สำเร็จ"
+              : "บันทึกฉบับร่างไม่สำเร็จ",
         ),
       );
       return undefined;
@@ -885,9 +1045,12 @@ function WorksheetEditor({
     setPageNumber(nextPage);
   }
 
-  const statusLabel = readOnly
-    ? `งานของ ${answer?.studentName || "นักเรียน"}`
-    : answerStatusLabel(answer?.status, saveState);
+  const statusLabel =
+    mode === "preview"
+      ? `งานของ ${answer?.studentName || "นักเรียน"}`
+      : mode === "teacher"
+        ? teacherPageStatusLabel(pageRecord, saveState)
+        : answerStatusLabel(answer?.status, saveState);
   return (
     <div className="worksheet-editor">
       <div className="worksheet-editor-toolbar">
@@ -965,6 +1128,44 @@ function WorksheetEditor({
               >
                 <Redo2 aria-hidden />
               </button>
+              <button
+                type="button"
+                disabled={locked}
+                onClick={() => rotatePage(-90)}
+                title="หมุนซ้าย"
+                aria-label="หมุนหน้าซ้าย"
+              >
+                <RotateCcw aria-hidden />
+              </button>
+              <button
+                type="button"
+                disabled={locked}
+                onClick={() => rotatePage(90)}
+                title="หมุนขวา"
+                aria-label="หมุนหน้าขวา"
+              >
+                <RotateCw aria-hidden />
+              </button>
+              <button
+                className={penOnly ? "active" : ""}
+                type="button"
+                disabled={locked}
+                onClick={() => setPenOnly((current) => !current)}
+                title="กันฝ่ามือ: รับเฉพาะปากกาและเมาส์"
+                aria-pressed={penOnly}
+              >
+                <Hand aria-hidden />
+                <span>กันฝ่ามือ</span>
+              </button>
+              <button
+                type="button"
+                disabled={locked || !annotations.length}
+                onClick={clearPage}
+                title="ล้างทั้งหน้า"
+                aria-label="ลบรอยเขียนทั้งหมดในหน้านี้"
+              >
+                <Trash2 aria-hidden />
+              </button>
             </div>
             <div className="worksheet-color-tools">
               {["#1d1d1f", "#0071e3", "#ff453a", "#248a3d"].map((item) => (
@@ -1013,7 +1214,7 @@ function WorksheetEditor({
           <canvas ref={canvasRef} />
           {!loading && (
             <Stage
-              className={`worksheet-annotation-stage tool-${tool}`}
+              className={`worksheet-annotation-stage tool-${tool} ${penOnly ? "pen-only" : ""}`}
               width={canvasSize.width}
               height={canvasSize.height}
               onPointerDown={handlePointerDown}
@@ -1021,25 +1222,13 @@ function WorksheetEditor({
               onPointerUp={stopDrawing}
               onPointerLeave={stopDrawing}
             >
-              <Layer>
+              <Layer listening={false}>
                 {annotations.map((annotation) =>
                   annotation.kind === "stroke" ? (
-                    <Line
+                    <SmoothStroke
                       key={annotation.id}
-                      points={annotation.points.map(
-                        (value, index) =>
-                          value *
-                          (index % 2 === 0
-                            ? canvasSize.width
-                            : canvasSize.height),
-                      )}
-                      stroke={annotation.color}
-                      strokeWidth={annotation.width}
-                      lineCap="round"
-                      lineJoin="round"
-                      tension={0.2}
-                      listening={tool === "eraser" && !locked}
-                      onPointerDown={() => eraseAnnotation(annotation.id)}
+                      annotation={annotation}
+                      canvasSize={canvasSize}
                     />
                   ) : (
                     <KonvaText
@@ -1054,8 +1243,7 @@ function WorksheetEditor({
                         120,
                         canvasSize.width - annotation.x * canvasSize.width - 12,
                       )}
-                      listening={tool === "eraser" && !locked}
-                      onPointerDown={() => eraseAnnotation(annotation.id)}
+                      listening={false}
                     />
                   ),
                 )}
@@ -1076,21 +1264,168 @@ function WorksheetEditor({
             onClick={() => void persistPage(false)}
           >
             <Save aria-hidden />
-            บันทึกฉบับร่าง
+            {mode === "teacher" ? "บันทึกฉบับครู" : "บันทึกฉบับร่าง"}
           </button>
-          <button
-            className="primary-button"
-            type="button"
-            disabled={locked}
-            onClick={() => void persistPage(true)}
-          >
-            <Send aria-hidden />
-            ส่งหน้านี้
-          </button>
+          {mode === "student" && (
+            <button
+              className="primary-button"
+              type="button"
+              disabled={locked}
+              onClick={() => void persistPage(true)}
+            >
+              <Send aria-hidden />
+              ส่งหน้านี้
+            </button>
+          )}
         </footer>
       )}
     </div>
   );
+}
+
+type EditorSnapshot = {
+  annotations: WorksheetAnnotation[];
+  rotation: number;
+};
+
+function isStudentAnswer(
+  page: WorksheetEditorPage | undefined,
+): page is WorksheetPageAnswer {
+  return Boolean(page && "status" in page);
+}
+
+function SmoothStroke({
+  annotation,
+  canvasSize,
+}: {
+  annotation: WorksheetStroke;
+  canvasSize: { width: number; height: number };
+}) {
+  const outline = useMemo(() => {
+    const pressure = annotation.pressures ?? [];
+    const points: [number, number, number][] = [];
+    for (let index = 0; index < annotation.points.length; index += 2) {
+      points.push([
+        annotation.points[index] * canvasSize.width,
+        annotation.points[index + 1] * canvasSize.height,
+        pressure[index / 2] ?? 0.5,
+      ]);
+    }
+    return getStroke(points, {
+      size: annotation.width * 2,
+      thinning: 0.55,
+      smoothing: 0.65,
+      streamline: 0.55,
+      simulatePressure: !annotation.pressures?.length,
+      start: { taper: 0, cap: true },
+      end: { taper: 0, cap: true },
+    });
+  }, [annotation, canvasSize.height, canvasSize.width]);
+
+  return (
+    <Shape
+      fill={annotation.color}
+      listening={false}
+      sceneFunc={(context, shape) => {
+        if (!outline.length) return;
+        context.beginPath();
+        context.moveTo(outline[0][0], outline[0][1]);
+        for (let index = 1; index < outline.length; index += 1) {
+          context.lineTo(outline[index][0], outline[index][1]);
+        }
+        context.closePath();
+        context.fillStrokeShape(shape);
+      }}
+    />
+  );
+}
+
+function rotateAnnotations(
+  annotations: WorksheetAnnotation[],
+  delta: 90 | -90,
+) {
+  const rotatePoint = (x: number, y: number) =>
+    delta === 90 ? { x: 1 - y, y: x } : { x: y, y: 1 - x };
+  return annotations.map((annotation) => {
+    if (annotation.kind === "text") {
+      const point = rotatePoint(annotation.x, annotation.y);
+      return { ...annotation, x: point.x, y: point.y };
+    }
+    const points: number[] = [];
+    for (let index = 0; index < annotation.points.length; index += 2) {
+      const point = rotatePoint(
+        annotation.points[index],
+        annotation.points[index + 1],
+      );
+      points.push(point.x, point.y);
+    }
+    return { ...annotation, points };
+  });
+}
+
+function annotationTouchesPoint(
+  annotation: WorksheetAnnotation,
+  normalizedX: number,
+  normalizedY: number,
+  canvasSize: { width: number; height: number },
+  radius: number,
+) {
+  const x = normalizedX * canvasSize.width;
+  const y = normalizedY * canvasSize.height;
+  if (annotation.kind === "text") {
+    const left = annotation.x * canvasSize.width - radius;
+    const top = annotation.y * canvasSize.height - radius;
+    const width = Math.min(
+      canvasSize.width - left,
+      Math.max(80, annotation.text.length * annotation.fontSize * 0.55),
+    );
+    const height = annotation.fontSize * 1.5 + radius * 2;
+    return x >= left && x <= left + width && y >= top && y <= top + height;
+  }
+  for (let index = 0; index < annotation.points.length - 2; index += 2) {
+    const ax = annotation.points[index] * canvasSize.width;
+    const ay = annotation.points[index + 1] * canvasSize.height;
+    const bx = annotation.points[index + 2] * canvasSize.width;
+    const by = annotation.points[index + 3] * canvasSize.height;
+    if (distanceToSegment(x, y, ax, ay, bx, by) <= radius) return true;
+  }
+  if (annotation.points.length === 2) {
+    return (
+      Math.hypot(
+        x - annotation.points[0] * canvasSize.width,
+        y - annotation.points[1] * canvasSize.height,
+      ) <= radius
+    );
+  }
+  return false;
+}
+
+function distanceToSegment(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  if (dx === 0 && dy === 0) return Math.hypot(px - ax, py - ay);
+  const amount = Math.max(
+    0,
+    Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)),
+  );
+  return Math.hypot(px - (ax + amount * dx), py - (ay + amount * dy));
+}
+
+function teacherPageStatusLabel(
+  page: WorksheetEditorPage | undefined,
+  saveState: string,
+) {
+  if (saveState === "saving") return "กำลังบันทึกฉบับครู...";
+  if (saveState === "saved") return "บันทึกฉบับครูแล้ว";
+  if (saveState === "error") return "บันทึกไม่สำเร็จ";
+  return page ? "ฉบับครูบันทึกแล้ว" : "หน้าว่างในฉบับครู";
 }
 
 function worksheetAvailability(worksheet: Worksheet) {

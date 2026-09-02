@@ -9,6 +9,7 @@ export type WorksheetStroke = {
   id: string;
   kind: "stroke";
   points: number[];
+  pressures?: number[];
   color: string;
   width: number;
 };
@@ -48,9 +49,19 @@ export interface WorksheetPageAnswer {
   studentName: string;
   pageNumber: number;
   annotations: WorksheetAnnotation[];
+  rotation: number;
   status: WorksheetPageStatus;
   submittedAt?: string;
   reviewedAt?: string;
+  updatedAt: string;
+}
+
+export interface WorksheetTeacherPage {
+  id: string;
+  worksheetId: string;
+  pageNumber: number;
+  annotations: WorksheetAnnotation[];
+  rotation: number;
   updatedAt: string;
 }
 

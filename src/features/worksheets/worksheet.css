@@ -423,6 +423,23 @@
   border-top: 1px solid var(--line);
 }
 
+.worksheet-admin-actions > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.worksheet-write-button {
+  min-height: 40px;
+  padding: 0 13px;
+  white-space: nowrap;
+}
+
+.worksheet-write-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 .worksheet-editor-backdrop {
   z-index: 90;
   padding: 8px;
@@ -642,6 +659,9 @@
   position: absolute !important;
   inset: 0 auto auto 0;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .worksheet-annotation-stage.tool-pen {
@@ -653,7 +673,11 @@
 }
 
 .worksheet-annotation-stage.tool-eraser {
-  cursor: not-allowed;
+  cursor: cell;
+}
+
+.worksheet-annotation-stage.pen-only {
+  cursor: crosshair;
 }
 
 .worksheet-page-loading {
@@ -757,6 +781,21 @@
   .worksheet-tools button {
     width: 38px;
     padding: 0;
+  }
+
+  .worksheet-admin-actions {
+    align-items: flex-start;
+  }
+
+  .worksheet-admin-actions > div {
+    flex: 0 0 auto;
+  }
+
+  .worksheet-write-button {
+    width: 40px;
+    min-width: 40px;
+    padding: 0;
+    font-size: 0;
   }
 
   .worksheet-page-viewport {

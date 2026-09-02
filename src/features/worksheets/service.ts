@@ -8,6 +8,7 @@ import type {
   WorksheetDraft,
   WorksheetPageAnswer,
   WorksheetPageStatus,
+  WorksheetTeacherPage,
 } from "./types";
 
 const STORAGE_BUCKET = "classroom-files";
@@ -66,9 +67,27 @@ function mapAnswer(row: Row): WorksheetPageAnswer {
     studentName: text(row, "student_name", "นักเรียน"),
     pageNumber: Number(row.page_number) || 1,
     annotations: rawAnnotations as WorksheetAnnotation[],
+    rotation: normalizeRotation(row.rotation),
     status: isWorksheetStatus(row.status) ? row.status : "draft",
     submittedAt: optionalText(row, "submitted_at"),
     reviewedAt: optionalText(row, "reviewed_at"),
+    updatedAt: text(row, "updated_at", new Date().toISOString()),
+  };
+}
+
+function normalizeRotation(value: unknown) {
+  const rotation = Number(value) || 0;
+  return rotation === 90 || rotation === 180 || rotation === 270 ? rotation : 0;
+}
+
+function mapTeacherPage(row: Row): WorksheetTeacherPage {
+  const rawAnnotations = Array.isArray(row.annotations) ? row.annotations : [];
+  return {
+    id: text(row, "id"),
+    worksheetId: text(row, "worksheet_id"),
+    pageNumber: Number(row.page_number) || 1,
+    annotations: rawAnnotations as WorksheetAnnotation[],
+    rotation: normalizeRotation(row.rotation),
     updatedAt: text(row, "updated_at", new Date().toISOString()),
   };
 }
@@ -91,6 +110,16 @@ export async function fetchWorksheetAnswers() {
     .order("updated_at", { ascending: false });
   if (result.error) throw result.error;
   return (result.data ?? []).map((row) => mapAnswer(row as Row));
+}
+
+export async function fetchTeacherWorksheetPages() {
+  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  const result = await supabase
+    .from("worksheet_teacher_pages")
+    .select("*")
+    .order("updated_at", { ascending: false });
+  if (result.error) throw result.error;
+  return (result.data ?? []).map((row) => mapTeacherPage(row as Row));
 }
 
 export async function countPdfPages(file: File) {
@@ -205,6 +234,7 @@ export async function saveWorksheetPage(
   worksheetId: string,
   pageNumber: number,
   annotations: WorksheetAnnotation[],
+  rotation: number,
   submit = false,
 ) {
   if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
@@ -212,12 +242,32 @@ export async function saveWorksheetPage(
     p_worksheet_id: worksheetId,
     p_page_number: pageNumber,
     p_annotations: annotations,
+    p_rotation: rotation,
     p_submit: submit,
   });
   if (result.error) throw result.error;
   const row = Array.isArray(result.data) ? result.data[0] : result.data;
   if (!row) throw new Error("บันทึกหน้าสมุดงานไม่สำเร็จ");
   return mapAnswer(row as Row);
+}
+
+export async function saveTeacherWorksheetPage(
+  worksheetId: string,
+  pageNumber: number,
+  annotations: WorksheetAnnotation[],
+  rotation: number,
+) {
+  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  const result = await supabase.rpc("save_teacher_worksheet_page", {
+    p_worksheet_id: worksheetId,
+    p_page_number: pageNumber,
+    p_annotations: annotations,
+    p_rotation: rotation,
+  });
+  if (result.error) throw result.error;
+  const row = Array.isArray(result.data) ? result.data[0] : result.data;
+  if (!row) throw new Error("บันทึกสมุดงานฉบับครูไม่สำเร็จ");
+  return mapTeacherPage(row as Row);
 }
 
 export function worksheetError(error: unknown, fallback: string) {
