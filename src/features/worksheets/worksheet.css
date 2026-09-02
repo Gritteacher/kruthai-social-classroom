@@ -463,7 +463,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 13px 16px;
+  min-height: 42px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -472,14 +473,13 @@
 }
 
 .worksheet-editor-modal > header span {
-  color: var(--muted);
-  font-size: 11px;
+  display: none;
 }
 
 .worksheet-editor-modal > header h2 {
-  margin: 1px 0 0;
+  margin: 0;
   overflow: hidden;
-  font-size: 18px;
+  font-size: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -487,11 +487,15 @@
 .worksheet-editor-modal > header .icon-button {
   display: grid;
   flex: 0 0 auto;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
 }
 
 .worksheet-editor {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: var(--surface-soft);
@@ -502,7 +506,7 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 9px 14px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
   overflow-x: auto;
@@ -520,8 +524,8 @@
 .worksheet-page-nav button,
 .worksheet-tools button {
   display: inline-flex;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   align-items: center;
   justify-content: center;
   gap: 5px;
@@ -533,7 +537,7 @@
 }
 
 .worksheet-page-nav strong {
-  min-width: 92px;
+  min-width: 82px;
   text-align: center;
   font-size: 12px;
 }
@@ -604,14 +608,36 @@
   color: var(--ink);
 }
 
-.worksheet-editor-status {
+.worksheet-editor-toolbar-meta {
   display: flex;
+  min-width: 0;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 7px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-soft);
+  gap: 8px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.worksheet-editor-toolbar-meta small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.worksheet-editor-toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.worksheet-editor-toolbar-actions button {
+  min-height: 34px;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
+.worksheet-editor-toolbar-actions button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .worksheet-save-state {
@@ -633,11 +659,6 @@
 .worksheet-save-state svg {
   width: 14px;
   height: 14px;
-}
-
-.worksheet-editor-status small {
-  color: var(--muted);
-  font-size: 10px;
 }
 
 .worksheet-excalidraw-viewport {
@@ -669,15 +690,6 @@
   background: var(--paper);
 }
 
-.worksheet-editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 9px;
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--line);
-  background: var(--paper);
-}
-
 :root[data-theme="dark"] .worksheet-file-picker,
 :root[data-theme="dark"] .worksheet-classrooms,
 :root[data-theme="dark"] .worksheet-schedule,
@@ -702,16 +714,10 @@
 :root[data-theme="dark"] .worksheet-page-nav button,
 :root[data-theme="dark"] .worksheet-tools button,
 :root[data-theme="dark"] .worksheet-text-entry,
-:root[data-theme="dark"] .worksheet-text-entry input,
-:root[data-theme="dark"] .worksheet-editor-actions {
+:root[data-theme="dark"] .worksheet-text-entry input {
   background: #1c1c1e;
   border-color: rgba(255, 255, 255, 0.12);
   color: #f5f5f7;
-}
-
-:root[data-theme="dark"] .worksheet-editor-status {
-  background: #242426;
-  border-color: rgba(255, 255, 255, 0.12);
 }
 
 :root[data-theme="dark"] .worksheet-file-picker.has-file,
@@ -747,11 +753,20 @@
   }
 
   .worksheet-editor-modal > header {
-    padding: 10px 12px;
+    min-height: 40px;
+    padding: 5px 9px;
+  }
+
+  .worksheet-editor-modal > header .icon-button {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    min-height: 32px;
   }
 
   .worksheet-editor-toolbar {
-    padding: 7px 9px;
+    gap: 6px;
+    padding: 5px 7px;
   }
 
   .worksheet-tools button span {
@@ -759,7 +774,7 @@
   }
 
   .worksheet-tools button {
-    width: 38px;
+    width: 34px;
     padding: 0;
   }
 
@@ -793,10 +808,18 @@
     min-height: 56dvh;
   }
 
-  .worksheet-editor-actions .primary-button,
-  .worksheet-editor-actions .template-button {
-    flex: 1 1 0;
-    min-width: 0;
-    padding-inline: 8px;
+  .worksheet-editor-toolbar-meta small,
+  .worksheet-editor-toolbar-actions button span {
+    display: none;
+  }
+
+  .worksheet-editor-toolbar-actions button {
+    width: 34px;
+    min-width: 34px;
+    padding: 0;
+  }
+
+  .worksheet-save-state > span {
+    display: none;
   }
 }

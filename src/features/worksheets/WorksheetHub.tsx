@@ -1110,18 +1110,55 @@ function WorksheetEditor({
             </button>
           </div>
         )}
-      </div>
-      <div className="worksheet-editor-status">
-        <span className={`worksheet-save-state ${saveState}`}>
-          {pageLocked && !readOnly ? (
-            <CheckCircle2 aria-hidden />
-          ) : (
-            <Save aria-hidden />
+        <div className="worksheet-editor-toolbar-meta">
+          <span
+            className={`worksheet-save-state ${saveState}`}
+            title={statusLabel}
+          >
+            {pageLocked && !readOnly ? (
+              <CheckCircle2 aria-hidden />
+            ) : (
+              <Save aria-hidden />
+            )}
+            <span>{statusLabel}</span>
+          </span>
+          {answer?.submittedAt && (
+            <small>ส่งเมื่อ {formatWorksheetDate(answer.submittedAt)}</small>
           )}
-          {statusLabel}
-        </span>
-        {answer?.submittedAt && (
-          <small>ส่งเมื่อ {formatWorksheetDate(answer.submittedAt)}</small>
+        </div>
+        {!readOnly && (
+          <div className="worksheet-editor-toolbar-actions">
+            <button
+              className="template-button"
+              type="button"
+              disabled={locked}
+              onClick={() => void persistPage(false)}
+              aria-label={
+                mode === "teacher" ? "บันทึกฉบับครู" : "บันทึกฉบับร่าง"
+              }
+              title={
+                mode === "teacher" ? "บันทึกฉบับครู" : "บันทึกฉบับร่าง"
+              }
+            >
+              <Save aria-hidden />
+              <span>
+                {mode === "teacher" ? "บันทึกฉบับครู" : "บันทึกฉบับร่าง"}
+              </span>
+            </button>
+            {mode === "student" && (
+              <button
+                className="primary-button"
+                type="button"
+                disabled={locked}
+                onClick={() => void persistPage(true)}
+                aria-label="ส่งหน้านี้"
+                title="ส่งหน้านี้"
+              >
+                <Send aria-hidden />
+                <span>ส่งหน้านี้</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
       <div className="worksheet-excalidraw-viewport">
@@ -1144,30 +1181,6 @@ function WorksheetEditor({
           <div className="worksheet-page-loading">กำลังเตรียมหน้าสำหรับเขียน...</div>
         )}
       </div>
-      {!readOnly && (
-        <footer className="worksheet-editor-actions">
-          <button
-            className="template-button"
-            type="button"
-            disabled={locked}
-            onClick={() => void persistPage(false)}
-          >
-            <Save aria-hidden />
-            {mode === "teacher" ? "บันทึกฉบับครู" : "บันทึกฉบับร่าง"}
-          </button>
-          {mode === "student" && (
-            <button
-              className="primary-button"
-              type="button"
-              disabled={locked}
-              onClick={() => void persistPage(true)}
-            >
-              <Send aria-hidden />
-              ส่งหน้านี้
-            </button>
-          )}
-        </footer>
-      )}
     </div>
   );
 }
