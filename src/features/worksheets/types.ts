@@ -26,6 +26,18 @@ export type WorksheetText = {
 
 export type WorksheetAnnotation = WorksheetStroke | WorksheetText;
 
+export type WorksheetCrop = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type WorksheetPageView = {
+  rotation: number;
+  crop: WorksheetCrop;
+};
+
 export interface Worksheet {
   id: string;
   title: string;
@@ -33,6 +45,7 @@ export interface Worksheet {
   filePath: string;
   originalFileName: string;
   pageCount: number;
+  pageSettings: Record<string, WorksheetPageView>;
   acceptingSubmissions: boolean;
   opensAt?: string;
   closesAt?: string;

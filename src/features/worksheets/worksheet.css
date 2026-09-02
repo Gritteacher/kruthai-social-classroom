@@ -549,6 +549,12 @@
   color: var(--blue);
 }
 
+.worksheet-tools .worksheet-rotate-all {
+  border-color: color-mix(in srgb, var(--blue) 35%, var(--line));
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
 .worksheet-page-nav svg,
 .worksheet-tools svg {
   width: 17px;
@@ -781,6 +787,16 @@
   .worksheet-tools button {
     width: 38px;
     padding: 0;
+  }
+
+  .worksheet-tools .worksheet-rotate-all {
+    width: auto;
+    padding: 0 10px;
+  }
+
+  .worksheet-tools .worksheet-rotate-all span {
+    display: inline;
+    white-space: nowrap;
   }
 
   .worksheet-admin-actions {

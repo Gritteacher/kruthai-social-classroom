@@ -7,6 +7,7 @@ import type {
   WorksheetAnnotation,
   WorksheetDraft,
   WorksheetPageAnswer,
+  WorksheetPageView,
   WorksheetPageStatus,
   WorksheetTeacherPage,
 } from "./types";
@@ -37,6 +38,7 @@ function mapWorksheet(row: Row): Worksheet {
     filePath: text(row, "file_path"),
     originalFileName: text(row, "original_file_name", "worksheet.pdf"),
     pageCount: Number(row.page_count) || 1,
+    pageSettings: mapPageSettings(row.page_settings),
     acceptingSubmissions: row.accepting_submissions !== false,
     opensAt: optionalText(row, "opens_at"),
     closesAt: optionalText(row, "closes_at"),
@@ -45,6 +47,30 @@ function mapWorksheet(row: Row): Worksheet {
       .filter(Boolean),
     createdAt: text(row, "created_at", new Date().toISOString()),
   };
+}
+
+function mapPageSettings(value: unknown): Record<string, WorksheetPageView> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const settings: Record<string, WorksheetPageView> = {};
+  for (const [page, rawSetting] of Object.entries(value)) {
+    if (!rawSetting || typeof rawSetting !== "object" || Array.isArray(rawSetting))
+      continue;
+    const setting = rawSetting as Row;
+    const rawCrop =
+      setting.crop && typeof setting.crop === "object" && !Array.isArray(setting.crop)
+        ? (setting.crop as Row)
+        : {};
+    settings[page] = {
+      rotation: normalizeRotation(setting.rotation),
+      crop: {
+        x: Number(rawCrop.x) || 0,
+        y: Number(rawCrop.y) || 0,
+        width: Number(rawCrop.width) || 1,
+        height: Number(rawCrop.height) || 1,
+      },
+    };
+  }
+  return settings;
 }
 
 function isWorksheetStatus(value: unknown): value is WorksheetPageStatus {
@@ -270,6 +296,45 @@ export async function saveTeacherWorksheetPage(
   return mapTeacherPage(row as Row);
 }
 
+export async function updateWorksheetPageView(
+  worksheet: Worksheet,
+  pageNumber: number,
+  setting: WorksheetPageView,
+) {
+  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  const result = await supabase.rpc("update_worksheet_page_view", {
+    p_worksheet_id: worksheet.id,
+    p_page_number: pageNumber,
+    p_rotation: setting.rotation,
+    p_crop: setting.crop,
+  });
+  if (result.error) throw result.error;
+  const row = Array.isArray(result.data) ? result.data[0] : result.data;
+  if (!row) throw new Error("บันทึกการจัดแนว PDF ไม่สำเร็จ");
+  return {
+    ...mapWorksheet(row as Row),
+    classroomIds: worksheet.classroomIds,
+  };
+}
+
+export async function rotateAllWorksheetPages(
+  worksheet: Worksheet,
+  delta = 180,
+) {
+  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  const result = await supabase.rpc("rotate_all_worksheet_pages", {
+    p_worksheet_id: worksheet.id,
+    p_delta: delta,
+  });
+  if (result.error) throw result.error;
+  const row = Array.isArray(result.data) ? result.data[0] : result.data;
+  if (!row) throw new Error("หมุนหน้าสมุดงานไม่สำเร็จ");
+  return {
+    ...mapWorksheet(row as Row),
+    classroomIds: worksheet.classroomIds,
+  };
+}
+
 export function worksheetError(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (/WORKSHEET_NOT_OPEN/i.test(message)) return "สมุดงานนี้ยังไม่เปิดให้ทำ";
@@ -277,6 +342,8 @@ export function worksheetError(error: unknown, fallback: string) {
     return "สมุดงานนี้ปิดรับแล้ว";
   if (/WORKSHEET_PAGE_LOCKED/i.test(message))
     return "หน้านี้ส่งแล้วและถูกล็อก กรุณาติดต่อครูหากต้องการแก้ไข";
+  if (/WORKSHEET_PAGE_HAS_WRITING/i.test(message))
+    return "หน้านี้มีรอยเขียนแล้ว จึงไม่สามารถเปลี่ยนทิศทางต้นฉบับได้";
   if (/WORKSHEET_NOT_FOUND/i.test(message))
     return "ไม่พบสมุดงานในห้องเรียนของคุณ";
   return message && !/^\[object Object\]$/.test(message) ? message : fallback;

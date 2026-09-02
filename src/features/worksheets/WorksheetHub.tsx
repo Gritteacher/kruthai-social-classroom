@@ -4,9 +4,10 @@ import {
   GlobalWorkerOptions,
   type PDFDocumentLoadingTask,
   type PDFDocumentProxy,
+  type PDFPageProxy,
 } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { Layer, Shape, Stage, Text as KonvaText } from "react-konva";
+import { Layer, Line, Shape, Stage, Text as KonvaText } from "react-konva";
 import { getStroke } from "perfect-freehand";
 import type { KonvaEventObject } from "konva/lib/Node";
 import {
@@ -19,6 +20,7 @@ import {
   Eye,
   FileText,
   Hand,
+  Maximize2,
   Pencil,
   Redo2,
   RotateCcw,
@@ -39,15 +41,19 @@ import {
   fetchWorksheets,
   fetchTeacherWorksheetPages,
   getWorksheetUrl,
+  rotateAllWorksheetPages,
   saveWorksheetPage,
   saveTeacherWorksheetPage,
+  updateWorksheetPageView,
   worksheetError,
 } from "./service";
 import type {
   Worksheet,
   WorksheetAnnotation,
+  WorksheetCrop,
   WorksheetDraft,
   WorksheetPageAnswer,
+  WorksheetPageView,
   WorksheetStroke,
   WorksheetTeacherPage,
   WorksheetTool,
@@ -72,6 +78,13 @@ const emptyDraft = (): WorksheetDraft => ({
   opensAt: "",
   closesAt: "",
 });
+
+const FULL_PAGE_CROP: WorksheetCrop = {
+  x: 0,
+  y: 0,
+  width: 1,
+  height: 1,
+};
 
 export default function WorksheetHub({
   role,
@@ -137,6 +150,15 @@ export default function WorksheetHub({
       current.some((page) => page.id === saved.id)
         ? current.map((page) => (page.id === saved.id ? saved : page))
         : [saved, ...current],
+    );
+  }
+
+  function updateWorksheet(saved: Worksheet) {
+    setWorksheets((current) =>
+      current.map((worksheet) => (worksheet.id === saved.id ? saved : worksheet)),
+    );
+    setActiveWorksheet((current) =>
+      current?.id === saved.id ? saved : current,
     );
   }
 
@@ -381,6 +403,7 @@ export default function WorksheetHub({
             }}
             onStudentSaved={updateAnswer}
             onTeacherSaved={updateTeacherPage}
+            onWorksheetUpdated={updateWorksheet}
             flash={flash}
           />
         )}
@@ -469,6 +492,7 @@ export default function WorksheetHub({
           onClose={() => setActiveWorksheet(null)}
           onStudentSaved={updateAnswer}
           onTeacherSaved={updateTeacherPage}
+          onWorksheetUpdated={updateWorksheet}
           flash={flash}
         />
       )}
@@ -619,6 +643,7 @@ function WorksheetEditorModal({
   onClose,
   onStudentSaved,
   onTeacherSaved,
+  onWorksheetUpdated,
   flash,
 }: {
   worksheet: Worksheet;
@@ -628,6 +653,7 @@ function WorksheetEditorModal({
   onClose: () => void;
   onStudentSaved: (answer: WorksheetPageAnswer) => void;
   onTeacherSaved: (page: WorksheetTeacherPage) => void;
+  onWorksheetUpdated: (worksheet: Worksheet) => void;
   flash: (message: string) => void;
 }) {
   return (
@@ -668,6 +694,7 @@ function WorksheetEditorModal({
           mode={mode}
           onStudentSaved={onStudentSaved}
           onTeacherSaved={onTeacherSaved}
+          onWorksheetUpdated={onWorksheetUpdated}
           flash={flash}
         />
       </section>
@@ -682,6 +709,7 @@ function WorksheetEditor({
   mode,
   onStudentSaved,
   onTeacherSaved,
+  onWorksheetUpdated,
   flash,
 }: {
   worksheet: Worksheet;
@@ -690,12 +718,15 @@ function WorksheetEditor({
   mode: WorksheetEditorMode;
   onStudentSaved: (answer: WorksheetPageAnswer) => void;
   onTeacherSaved: (page: WorksheetTeacherPage) => void;
+  onWorksheetUpdated: (worksheet: Worksheet) => void;
   flash: (message: string) => void;
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(initialPage);
   const [annotations, setAnnotations] = useState<WorksheetAnnotation[]>([]);
   const [rotation, setRotation] = useState(0);
+  const [crop, setCrop] = useState<WorksheetCrop>(FULL_PAGE_CROP);
+  const [viewBusy, setViewBusy] = useState(false);
   const [tool, setTool] = useState<WorksheetTool>("pen");
   const [color, setColor] = useState("#1d1d1f");
   const [textDraft, setTextDraft] = useState("");
@@ -711,10 +742,13 @@ function WorksheetEditor({
   const erasingRef = useRef(false);
   const eraseChangedRef = useRef(false);
   const activeStrokeIdRef = useRef("");
+  const drawFrameRef = useRef<number | null>(null);
   const pastRef = useRef<EditorSnapshot[]>([]);
   const futureRef = useRef<EditorSnapshot[]>([]);
   const annotationsRef = useRef<WorksheetAnnotation[]>([]);
   const rotationRef = useRef(0);
+  const cropRef = useRef<WorksheetCrop>(FULL_PAGE_CROP);
+  const orientationCheckedRef = useRef(new Set<number>());
   const readOnly = mode === "preview";
   const pageRecord = pages.find((item) => item.pageNumber === pageNumber);
   const answer = isStudentAnswer(pageRecord) ? pageRecord : undefined;
@@ -731,6 +765,9 @@ function WorksheetEditor({
     rotationRef.current = rotation;
   }, [rotation]);
   useEffect(() => {
+    cropRef.current = crop;
+  }, [crop]);
+  useEffect(() => {
     let cancelled = false;
     let loadingTask: PDFDocumentLoadingTask | null = null;
     setLoading(true);
@@ -740,7 +777,10 @@ function WorksheetEditor({
         return loadingTask.promise;
       })
       .then((loaded) => {
-        if (!cancelled) setPdf(loaded);
+        if (!cancelled) {
+          orientationCheckedRef.current.clear();
+          setPdf(loaded);
+        }
       })
       .catch((error) => flash(worksheetError(error, "เปิด PDF ไม่สำเร็จ")))
       .finally(() => {
@@ -748,6 +788,8 @@ function WorksheetEditor({
       });
     return () => {
       cancelled = true;
+      if (drawFrameRef.current !== null)
+        window.cancelAnimationFrame(drawFrameRef.current);
       void loadingTask?.destroy();
     };
   }, [worksheet.id]);
@@ -755,15 +797,19 @@ function WorksheetEditor({
   useEffect(() => {
     const record = pages.find((item) => item.pageNumber === pageNumber);
     const next = record?.annotations ?? [];
-    const nextRotation = record?.rotation ?? 0;
+    const pageView = worksheet.pageSettings[String(pageNumber)];
+    const nextRotation = pageView?.rotation ?? record?.rotation ?? 0;
+    const nextCrop = normalizeCrop(pageView?.crop ?? FULL_PAGE_CROP);
     setAnnotations(next);
     annotationsRef.current = next;
     setRotation(nextRotation);
     rotationRef.current = nextRotation;
+    setCrop(nextCrop);
+    cropRef.current = nextCrop;
     pastRef.current = [];
     futureRef.current = [];
     setSaveState("idle");
-  }, [pages, pageNumber]);
+  }, [pages, pageNumber, worksheet.pageSettings]);
 
   useEffect(() => {
     if (!pdf || !canvasRef.current || !pageShellRef.current) return;
@@ -772,31 +818,71 @@ function WorksheetEditor({
     const viewportElement = pageShell.parentElement;
     const render = async () => {
       const page = await pdf.getPage(pageNumber);
+      if (!orientationCheckedRef.current.has(pageNumber)) {
+        orientationCheckedRef.current.add(pageNumber);
+        const detectedRotation = await detectTextRotation(page);
+        const hasConfiguredRotation = Boolean(
+          worksheet.pageSettings[String(pageNumber)],
+        );
+        if (
+          !hasConfiguredRotation &&
+          detectedRotation !== null &&
+          detectedRotation !== rotationRef.current
+        ) {
+          rotationRef.current = detectedRotation;
+          setRotation(detectedRotation);
+          return;
+        }
+      }
       const pdfRotation = (page.rotate + rotation) % 360;
+      const activeCrop = normalizeCrop(crop);
       const baseViewport = page.getViewport({ scale: 1, rotation: pdfRotation });
       const viewportWidth = viewportElement?.clientWidth || window.innerWidth;
       const availableWidth = Math.min(900, Math.max(280, viewportWidth - 36));
-      const scale = availableWidth / baseViewport.width;
+      const scale = availableWidth / (baseViewport.width * activeCrop.width);
       const viewport = page.getViewport({ scale, rotation: pdfRotation });
       const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+      const cropX = viewport.width * activeCrop.x;
+      const cropY = viewport.height * activeCrop.y;
+      const displayWidth = viewport.width * activeCrop.width;
+      const displayHeight = viewport.height * activeCrop.height;
       const canvas = canvasRef.current;
       if (!canvas || cancelled) return;
-      canvas.width = Math.floor(viewport.width * outputScale);
-      canvas.height = Math.floor(viewport.height * outputScale);
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-      setCanvasSize({ width: viewport.width, height: viewport.height });
+      canvas.width = Math.max(1, Math.floor(displayWidth * outputScale));
+      canvas.height = Math.max(1, Math.floor(displayHeight * outputScale));
+      canvas.style.width = `${displayWidth}px`;
+      canvas.style.height = `${displayHeight}px`;
+      setCanvasSize({ width: displayWidth, height: displayHeight });
       const context = canvas.getContext("2d");
       if (!context) return;
+      context.save();
+      context.fillStyle = "#fff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.restore();
       await page.render({
         canvasContext: context,
         canvas,
         viewport,
-        transform:
-          outputScale === 1
-            ? undefined
-            : [outputScale, 0, 0, outputScale, 0, 0],
+        transform: [
+          outputScale,
+          0,
+          0,
+          outputScale,
+          -cropX * outputScale,
+          -cropY * outputScale,
+        ],
       }).promise;
+      if (
+        !cancelled &&
+        isFullPageCrop(activeCrop) &&
+        !annotationsRef.current.length
+      ) {
+        const detectedCrop = detectCanvasContentCrop(canvas);
+        if (detectedCrop && !isFullPageCrop(detectedCrop)) {
+          cropRef.current = detectedCrop;
+          setCrop(detectedCrop);
+        }
+      }
     };
     void render().catch((error) =>
       flash(worksheetError(error, "แสดงหน้าสมุดงานไม่สำเร็จ")),
@@ -807,18 +893,17 @@ function WorksheetEditor({
       cancelled = true;
       observer.disconnect();
     };
-  }, [pdf, pageNumber, rotation]);
+  }, [pdf, pageNumber, rotation, crop, worksheet.pageSettings]);
 
   useEffect(() => {
     if (readOnly || locked || saveState !== "dirty") return;
     const timer = window.setTimeout(() => void persistPage(false), 900);
     return () => window.clearTimeout(timer);
-  }, [annotations, rotation, locked, readOnly, saveState]);
+  }, [annotations, locked, readOnly, saveState]);
 
   function currentSnapshot(): EditorSnapshot {
     return {
       annotations: annotationsRef.current,
-      rotation: rotationRef.current,
     };
   }
 
@@ -830,32 +915,51 @@ function WorksheetEditor({
 
   function applySnapshot(snapshot: EditorSnapshot) {
     annotationsRef.current = snapshot.annotations;
-    rotationRef.current = snapshot.rotation;
     setAnnotations(snapshot.annotations);
-    setRotation(snapshot.rotation);
     setSaveState("dirty");
   }
 
-  function recordChange(next: WorksheetAnnotation[], nextRotation = rotationRef.current) {
+  function recordChange(next: WorksheetAnnotation[]) {
     pushHistory();
     annotationsRef.current = next;
-    rotationRef.current = nextRotation;
     setAnnotations(next);
-    setRotation(nextRotation);
     setSaveState("dirty");
   }
 
-  function normalizedPoint(event: KonvaEventObject<PointerEvent>) {
-    const position = event.target.getStage()?.getPointerPosition();
-    if (!position) return null;
-    return {
-      x: position.x / canvasSize.width,
-      y: position.y / canvasSize.height,
-      pressure:
-        event.evt.pressure > 0 && event.evt.pressure <= 1
-          ? event.evt.pressure
-          : 0.5,
-    };
+  function pointerSamples(event: KonvaEventObject<PointerEvent>) {
+    const stage = event.target.getStage();
+    if (!stage) return [];
+    const rect = stage.container().getBoundingClientRect();
+    const nativeSamples = event.evt.getCoalescedEvents?.() ?? [event.evt];
+    const activeCrop = cropRef.current;
+    return nativeSamples
+      .map((sample) => {
+        const visibleX = (sample.clientX - rect.left) / canvasSize.width;
+        const visibleY = (sample.clientY - rect.top) / canvasSize.height;
+        return {
+          x: activeCrop.x + visibleX * activeCrop.width,
+          y: activeCrop.y + visibleY * activeCrop.height,
+          pressure:
+            sample.pressure > 0 && sample.pressure <= 1
+              ? sample.pressure
+              : 0.5,
+        };
+      })
+      .filter(
+        (point) =>
+          point.x >= activeCrop.x &&
+          point.x <= activeCrop.x + activeCrop.width &&
+          point.y >= activeCrop.y &&
+          point.y <= activeCrop.y + activeCrop.height,
+      );
+  }
+
+  function scheduleAnnotationRender() {
+    if (drawFrameRef.current !== null) return;
+    drawFrameRef.current = window.requestAnimationFrame(() => {
+      drawFrameRef.current = null;
+      setAnnotations([...annotationsRef.current]);
+    });
   }
 
   function pointerIsBlocked(event: KonvaEventObject<PointerEvent>) {
@@ -868,7 +972,11 @@ function WorksheetEditor({
     if (locked) return;
     if (pointerIsBlocked(event)) return;
     event.evt.preventDefault();
-    const point = normalizedPoint(event);
+    const pointerTarget = event.evt.currentTarget;
+    if (pointerTarget instanceof Element && "setPointerCapture" in pointerTarget)
+      pointerTarget.setPointerCapture(event.evt.pointerId);
+    const downSamples = pointerSamples(event);
+    const point = downSamples[downSamples.length - 1];
     if (!point) return;
     if (tool === "text") {
       if (!textDraft.trim() || event.target !== event.target.getStage()) return;
@@ -919,25 +1027,21 @@ function WorksheetEditor({
   function handlePointerMove(event: KonvaEventObject<PointerEvent>) {
     if (!drawingRef.current || locked || pointerIsBlocked(event)) return;
     event.evt.preventDefault();
-    const point = normalizedPoint(event);
-    if (!point) return;
+    const samples = pointerSamples(event);
+    if (!samples.length) return;
     if (erasingRef.current && tool === "eraser") {
-      eraseAtPoint(point.x, point.y);
+      samples.forEach((point) => eraseAtPoint(point.x, point.y));
       return;
     }
     if (tool !== "pen") return;
     const next = annotationsRef.current.map((annotation) =>
       annotation.id === activeStrokeIdRef.current &&
       annotation.kind === "stroke"
-        ? {
-            ...annotation,
-            points: [...annotation.points, point.x, point.y],
-            pressures: [...(annotation.pressures ?? []), point.pressure],
-          }
+        ? appendStrokeSamples(annotation, samples, canvasSize, cropRef.current)
         : annotation,
     );
     annotationsRef.current = next;
-    setAnnotations(next);
+    scheduleAnnotationRender();
     setSaveState("dirty");
   }
 
@@ -947,17 +1051,29 @@ function WorksheetEditor({
     erasingRef.current = false;
     eraseChangedRef.current = false;
     activeStrokeIdRef.current = "";
+    if (drawFrameRef.current !== null) {
+      window.cancelAnimationFrame(drawFrameRef.current);
+      drawFrameRef.current = null;
+    }
+    setAnnotations([...annotationsRef.current]);
   }
 
   function eraseAtPoint(x: number, y: number) {
     const next = annotationsRef.current.filter(
       (annotation) =>
-        !annotationTouchesPoint(annotation, x, y, canvasSize, 18),
+        !annotationTouchesPoint(
+          annotation,
+          x,
+          y,
+          canvasSize,
+          cropRef.current,
+          18,
+        ),
     );
     if (next.length === annotationsRef.current.length) return;
     eraseChangedRef.current = true;
     annotationsRef.current = next;
-    setAnnotations(next);
+    scheduleAnnotationRender();
     setSaveState("dirty");
   }
 
@@ -975,10 +1091,78 @@ function WorksheetEditor({
     applySnapshot(next);
   }
 
-  function rotatePage(delta: 90 | -90) {
-    if (locked) return;
+  async function savePageView(setting: WorksheetPageView, success: string) {
+    if (mode !== "teacher" || viewBusy) return;
+    setViewBusy(true);
+    try {
+      const saved = await updateWorksheetPageView(
+        worksheet,
+        pageNumber,
+        setting,
+      );
+      rotationRef.current = setting.rotation;
+      cropRef.current = setting.crop;
+      setRotation(setting.rotation);
+      setCrop(setting.crop);
+      onWorksheetUpdated(saved);
+      flash(success);
+    } catch (error) {
+      flash(worksheetError(error, "จัดแนวหน้าสมุดงานไม่สำเร็จ"));
+    } finally {
+      setViewBusy(false);
+    }
+  }
+
+  async function rotatePage(delta: 90 | -90) {
+    if (locked || mode !== "teacher") return;
     const nextRotation = (rotationRef.current + delta + 360) % 360;
-    recordChange(rotateAnnotations(annotationsRef.current, delta), nextRotation);
+    await savePageView(
+      { rotation: nextRotation, crop: FULL_PAGE_CROP },
+      `หมุนหน้า ${pageNumber} แล้ว`,
+    );
+  }
+
+  async function rotateEveryPage() {
+    if (locked || mode !== "teacher" || viewBusy) return;
+    if (
+      !window.confirm(
+        `กลับหัวสมุดงาน “${worksheet.title}” ทั้ง ${worksheet.pageCount} หน้า 180° หรือไม่`,
+      )
+    )
+      return;
+    setViewBusy(true);
+    try {
+      const saved = await rotateAllWorksheetPages(worksheet, 180);
+      onWorksheetUpdated(saved);
+      const nextView = saved.pageSettings[String(pageNumber)];
+      if (nextView) {
+        rotationRef.current = nextView.rotation;
+        cropRef.current = nextView.crop;
+        setRotation(nextView.rotation);
+        setCrop(nextView.crop);
+      }
+      orientationCheckedRef.current.clear();
+      flash(`กลับหัวสมุดงานทั้ง ${worksheet.pageCount} หน้าแล้ว`);
+    } catch (error) {
+      flash(worksheetError(error, "กลับหัวสมุดงานไม่สำเร็จ"));
+    } finally {
+      setViewBusy(false);
+    }
+  }
+
+  async function fitPageContent() {
+    if (mode !== "teacher" || viewBusy || !canvasRef.current) return;
+    const detected = isFullPageCrop(cropRef.current)
+      ? detectCanvasContentCrop(canvasRef.current)
+      : cropRef.current;
+    if (!detected || isFullPageCrop(detected)) {
+      flash("หน้านี้พอดีกับเนื้อหาอยู่แล้ว");
+      return;
+    }
+    await savePageView(
+      { rotation: rotationRef.current, crop: detected },
+      `จัดหน้า ${pageNumber} ให้พอดีกับเนื้อหาแล้ว`,
+    );
   }
 
   function clearPage() {
@@ -1128,24 +1312,47 @@ function WorksheetEditor({
               >
                 <Redo2 aria-hidden />
               </button>
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() => rotatePage(-90)}
-                title="หมุนซ้าย"
-                aria-label="หมุนหน้าซ้าย"
-              >
-                <RotateCcw aria-hidden />
-              </button>
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() => rotatePage(90)}
-                title="หมุนขวา"
-                aria-label="หมุนหน้าขวา"
-              >
-                <RotateCw aria-hidden />
-              </button>
+              {mode === "teacher" && (
+                <>
+                  <button
+                    type="button"
+                    disabled={locked || viewBusy}
+                    onClick={() => void rotatePage(-90)}
+                    title="หมุนซ้าย"
+                    aria-label="หมุนหน้าซ้าย"
+                  >
+                    <RotateCcw aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={locked || viewBusy}
+                    onClick={() => void rotatePage(90)}
+                    title="หมุนขวา"
+                    aria-label="หมุนหน้าขวา"
+                  >
+                    <RotateCw aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={locked || viewBusy}
+                    onClick={() => void fitPageContent()}
+                    title="จัดหน้าให้พอดีกับเนื้อหา"
+                  >
+                    <Maximize2 aria-hidden />
+                    <span>พอดีเนื้อหา</span>
+                  </button>
+                  <button
+                    className="worksheet-rotate-all"
+                    type="button"
+                    disabled={locked || viewBusy}
+                    onClick={() => void rotateEveryPage()}
+                    title="กลับหัวทุกหน้า 180 องศา"
+                  >
+                    <RotateCw aria-hidden />
+                    <span>กลับหัวทุกหน้า</span>
+                  </button>
+                </>
+              )}
               <button
                 className={penOnly ? "active" : ""}
                 type="button"
@@ -1225,23 +1432,36 @@ function WorksheetEditor({
               <Layer listening={false}>
                 {annotations.map((annotation) =>
                   annotation.kind === "stroke" ? (
-                    <SmoothStroke
-                      key={annotation.id}
-                      annotation={annotation}
-                      canvasSize={canvasSize}
-                    />
+                    annotation.id === activeStrokeIdRef.current &&
+                    drawingRef.current ? (
+                      <LiveStroke
+                        key={annotation.id}
+                        annotation={annotation}
+                        canvasSize={canvasSize}
+                        crop={crop}
+                      />
+                    ) : (
+                      <SmoothStroke
+                        key={annotation.id}
+                        annotation={annotation}
+                        canvasSize={canvasSize}
+                        crop={crop}
+                      />
+                    )
                   ) : (
                     <KonvaText
                       key={annotation.id}
-                      x={annotation.x * canvasSize.width}
-                      y={annotation.y * canvasSize.height}
+                      x={fullToVisibleX(annotation.x, crop, canvasSize.width)}
+                      y={fullToVisibleY(annotation.y, crop, canvasSize.height)}
                       text={annotation.text}
                       fill={annotation.color}
                       fontSize={annotation.fontSize}
                       fontFamily="Prompt"
                       width={Math.max(
                         120,
-                        canvasSize.width - annotation.x * canvasSize.width - 12,
+                        canvasSize.width -
+                          fullToVisibleX(annotation.x, crop, canvasSize.width) -
+                          12,
                       )}
                       listening={false}
                     />
@@ -1285,7 +1505,6 @@ function WorksheetEditor({
 
 type EditorSnapshot = {
   annotations: WorksheetAnnotation[];
-  rotation: number;
 };
 
 function isStudentAnswer(
@@ -1297,17 +1516,19 @@ function isStudentAnswer(
 function SmoothStroke({
   annotation,
   canvasSize,
+  crop,
 }: {
   annotation: WorksheetStroke;
   canvasSize: { width: number; height: number };
+  crop: WorksheetCrop;
 }) {
   const outline = useMemo(() => {
     const pressure = annotation.pressures ?? [];
     const points: [number, number, number][] = [];
     for (let index = 0; index < annotation.points.length; index += 2) {
       points.push([
-        annotation.points[index] * canvasSize.width,
-        annotation.points[index + 1] * canvasSize.height,
+        fullToVisibleX(annotation.points[index], crop, canvasSize.width),
+        fullToVisibleY(annotation.points[index + 1], crop, canvasSize.height),
         pressure[index / 2] ?? 0.5,
       ]);
     }
@@ -1320,7 +1541,7 @@ function SmoothStroke({
       start: { taper: 0, cap: true },
       end: { taper: 0, cap: true },
     });
-  }, [annotation, canvasSize.height, canvasSize.width]);
+  }, [annotation, canvasSize.height, canvasSize.width, crop]);
 
   return (
     <Shape
@@ -1340,27 +1561,33 @@ function SmoothStroke({
   );
 }
 
-function rotateAnnotations(
-  annotations: WorksheetAnnotation[],
-  delta: 90 | -90,
-) {
-  const rotatePoint = (x: number, y: number) =>
-    delta === 90 ? { x: 1 - y, y: x } : { x: y, y: 1 - x };
-  return annotations.map((annotation) => {
-    if (annotation.kind === "text") {
-      const point = rotatePoint(annotation.x, annotation.y);
-      return { ...annotation, x: point.x, y: point.y };
-    }
-    const points: number[] = [];
-    for (let index = 0; index < annotation.points.length; index += 2) {
-      const point = rotatePoint(
-        annotation.points[index],
-        annotation.points[index + 1],
-      );
-      points.push(point.x, point.y);
-    }
-    return { ...annotation, points };
-  });
+function LiveStroke({
+  annotation,
+  canvasSize,
+  crop,
+}: {
+  annotation: WorksheetStroke;
+  canvasSize: { width: number; height: number };
+  crop: WorksheetCrop;
+}) {
+  const points: number[] = [];
+  for (let index = 0; index < annotation.points.length; index += 2) {
+    points.push(
+      fullToVisibleX(annotation.points[index], crop, canvasSize.width),
+      fullToVisibleY(annotation.points[index + 1], crop, canvasSize.height),
+    );
+  }
+  return (
+    <Line
+      points={points}
+      stroke={annotation.color}
+      strokeWidth={annotation.width}
+      lineCap="round"
+      lineJoin="round"
+      tension={0.35}
+      listening={false}
+    />
+  );
 }
 
 function annotationTouchesPoint(
@@ -1368,13 +1595,14 @@ function annotationTouchesPoint(
   normalizedX: number,
   normalizedY: number,
   canvasSize: { width: number; height: number },
+  crop: WorksheetCrop,
   radius: number,
 ) {
-  const x = normalizedX * canvasSize.width;
-  const y = normalizedY * canvasSize.height;
+  const x = fullToVisibleX(normalizedX, crop, canvasSize.width);
+  const y = fullToVisibleY(normalizedY, crop, canvasSize.height);
   if (annotation.kind === "text") {
-    const left = annotation.x * canvasSize.width - radius;
-    const top = annotation.y * canvasSize.height - radius;
+    const left = fullToVisibleX(annotation.x, crop, canvasSize.width) - radius;
+    const top = fullToVisibleY(annotation.y, crop, canvasSize.height) - radius;
     const width = Math.min(
       canvasSize.width - left,
       Math.max(80, annotation.text.length * annotation.fontSize * 0.55),
@@ -1383,21 +1611,131 @@ function annotationTouchesPoint(
     return x >= left && x <= left + width && y >= top && y <= top + height;
   }
   for (let index = 0; index < annotation.points.length - 2; index += 2) {
-    const ax = annotation.points[index] * canvasSize.width;
-    const ay = annotation.points[index + 1] * canvasSize.height;
-    const bx = annotation.points[index + 2] * canvasSize.width;
-    const by = annotation.points[index + 3] * canvasSize.height;
+    const ax = fullToVisibleX(annotation.points[index], crop, canvasSize.width);
+    const ay = fullToVisibleY(annotation.points[index + 1], crop, canvasSize.height);
+    const bx = fullToVisibleX(annotation.points[index + 2], crop, canvasSize.width);
+    const by = fullToVisibleY(annotation.points[index + 3], crop, canvasSize.height);
     if (distanceToSegment(x, y, ax, ay, bx, by) <= radius) return true;
   }
   if (annotation.points.length === 2) {
     return (
       Math.hypot(
-        x - annotation.points[0] * canvasSize.width,
-        y - annotation.points[1] * canvasSize.height,
+        x - fullToVisibleX(annotation.points[0], crop, canvasSize.width),
+        y - fullToVisibleY(annotation.points[1], crop, canvasSize.height),
       ) <= radius
     );
   }
   return false;
+}
+
+type PointerSample = { x: number; y: number; pressure: number };
+
+function appendStrokeSamples(
+  annotation: WorksheetStroke,
+  samples: PointerSample[],
+  canvasSize: { width: number; height: number },
+  crop: WorksheetCrop,
+) {
+  const points = [...annotation.points];
+  const pressures = [...(annotation.pressures ?? [])];
+  let lastX = points.length >= 2 ? points[points.length - 2] : samples[0].x;
+  let lastY = points.length >= 2 ? points[points.length - 1] : samples[0].y;
+  for (const sample of samples) {
+    const distance = Math.hypot(
+      ((sample.x - lastX) / crop.width) * canvasSize.width,
+      ((sample.y - lastY) / crop.height) * canvasSize.height,
+    );
+    if (distance < 0.7) continue;
+    points.push(sample.x, sample.y);
+    pressures.push(sample.pressure);
+    lastX = sample.x;
+    lastY = sample.y;
+  }
+  return { ...annotation, points, pressures };
+}
+
+function normalizeCrop(crop: WorksheetCrop): WorksheetCrop {
+  const x = Math.max(0, Math.min(0.99, Number(crop.x) || 0));
+  const y = Math.max(0, Math.min(0.99, Number(crop.y) || 0));
+  const width = Math.max(0.01, Math.min(1 - x, Number(crop.width) || 1));
+  const height = Math.max(0.01, Math.min(1 - y, Number(crop.height) || 1));
+  return { x, y, width, height };
+}
+
+function isFullPageCrop(crop: WorksheetCrop) {
+  return (
+    crop.x < 0.005 &&
+    crop.y < 0.005 &&
+    crop.width > 0.995 &&
+    crop.height > 0.995
+  );
+}
+
+function fullToVisibleX(value: number, crop: WorksheetCrop, width: number) {
+  return ((value - crop.x) / crop.width) * width;
+}
+
+function fullToVisibleY(value: number, crop: WorksheetCrop, height: number) {
+  return ((value - crop.y) / crop.height) * height;
+}
+
+async function detectTextRotation(page: PDFPageProxy) {
+  try {
+    const textContent = await page.getTextContent();
+    const weights = [0, 0, 0, 0];
+    for (const item of textContent.items) {
+      if (!("transform" in item) || !("str" in item) || !item.str.trim()) continue;
+      const angle = Math.atan2(item.transform[1], item.transform[0]);
+      const quarterTurns = Math.round(angle / (Math.PI / 2));
+      const index = ((quarterTurns % 4) + 4) % 4;
+      weights[index] += Math.max(1, item.str.trim().length);
+    }
+    const total = weights.reduce((sum, value) => sum + value, 0);
+    if (total < 8) return null;
+    const dominant = weights.indexOf(Math.max(...weights));
+    if (weights[dominant] / total < 0.62) return null;
+    const contentRotation = dominant * 90;
+    return (360 - ((contentRotation + page.rotate) % 360)) % 360;
+  } catch {
+    return null;
+  }
+}
+
+function detectCanvasContentCrop(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context || canvas.width < 40 || canvas.height < 40) return null;
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const step = Math.max(2, Math.floor(Math.max(canvas.width, canvas.height) / 1200));
+  let minX = canvas.width;
+  let minY = canvas.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < canvas.height; y += step) {
+    for (let x = 0; x < canvas.width; x += step) {
+      const index = (y * canvas.width + x) * 4;
+      const red = pixels[index];
+      const green = pixels[index + 1];
+      const blue = pixels[index + 2];
+      const alpha = pixels[index + 3];
+      const darkest = Math.min(red, green, blue);
+      const lightest = Math.max(red, green, blue);
+      if (alpha < 20 || (darkest > 247 && lightest - darkest < 7)) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+  const paddingX = canvas.width * 0.025;
+  const paddingY = canvas.height * 0.025;
+  const x = Math.max(0, minX - paddingX) / canvas.width;
+  const y = Math.max(0, minY - paddingY) / canvas.height;
+  const right = Math.min(canvas.width, maxX + paddingX) / canvas.width;
+  const bottom = Math.min(canvas.height, maxY + paddingY) / canvas.height;
+  const crop = normalizeCrop({ x, y, width: right - x, height: bottom - y });
+  const removedArea = 1 - crop.width * crop.height;
+  return removedArea >= 0.12 ? crop : FULL_PAGE_CROP;
 }
 
 function distanceToSegment(
