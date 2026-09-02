@@ -3,11 +3,10 @@ export type WorksheetPageStatus =
   | "submitted"
   | "returned"
   | "reviewed";
-export type WorksheetTool = "pen" | "text" | "eraser";
-
 export type WorksheetStroke = {
   id: string;
   kind: "stroke";
+  type?: never;
   points: number[];
   pressures?: number[];
   color: string;
@@ -17,6 +16,7 @@ export type WorksheetStroke = {
 export type WorksheetText = {
   id: string;
   kind: "text";
+  type?: never;
   x: number;
   y: number;
   text: string;
@@ -24,7 +24,17 @@ export type WorksheetText = {
   fontSize: number;
 };
 
-export type WorksheetAnnotation = WorksheetStroke | WorksheetText;
+export type WorksheetSceneElement = {
+  id: string;
+  type: string;
+  kind?: never;
+  [key: string]: unknown;
+};
+
+export type WorksheetAnnotation =
+  | WorksheetStroke
+  | WorksheetText
+  | WorksheetSceneElement;
 
 export type WorksheetCrop = {
   x: number;
