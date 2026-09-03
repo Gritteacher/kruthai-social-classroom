@@ -10,6 +10,8 @@ For an existing production database, `assignment-groups-transaction.sql` is the 
 
 `group-submissions.sql` adds secure individual/group submissions, file-or-link delivery, and classroom-scoped peer selection.
 
+`worksheet-score-links.sql` links worksheet pages to score-assignment groups, stores page-level grades, and atomically updates each student's score entry when the teacher finishes reviewing selected pages.
+
 ## Access model
 
 - Teachers are identified only by `profiles.role = 'teacher'`.

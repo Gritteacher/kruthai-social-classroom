@@ -104,6 +104,8 @@ export interface ScoreEntry {
   rawMax: number;
   finalScore: number;
   finalMax: number;
+  sourceType?: "manual" | "submission" | "worksheet";
+  sourceId?: string;
 }
 
 export interface SubmissionRecord {

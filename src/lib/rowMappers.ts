@@ -184,7 +184,9 @@ export function mapScoreEntryRow(row: DatabaseRow): ScoreEntry {
     rawScore,
     rawMax: number(row, ["raw_max", "rawMax"], 10),
     finalScore: roundedScore(row, ["final_score", "finalScore"], 0),
-    finalMax: number(row, ["final_max", "finalMax"], 10)
+    finalMax: number(row, ["final_max", "finalMax"], 10),
+    sourceType: optionalText(row, ["source_type", "sourceType"]) as ScoreEntry["sourceType"],
+    sourceId: optionalText(row, ["source_id", "sourceId"])
   };
 }
 

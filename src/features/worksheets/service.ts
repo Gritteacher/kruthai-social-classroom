@@ -6,9 +6,13 @@ import type {
   Worksheet,
   WorksheetAnnotation,
   WorksheetDraft,
+  WorksheetGradeInput,
   WorksheetPageAnswer,
+  WorksheetPageGrade,
   WorksheetPageView,
   WorksheetPageStatus,
+  WorksheetScoreLink,
+  WorksheetScoreLinkInput,
   WorksheetTeacherPage,
 } from "./types";
 
@@ -118,6 +122,28 @@ function mapTeacherPage(row: Row): WorksheetTeacherPage {
   };
 }
 
+function mapScoreLink(row: Row): WorksheetScoreLink {
+  return {
+    id: text(row, "id"),
+    worksheetId: text(row, "worksheet_id"),
+    pageNumber: Number(row.page_number) || 1,
+    assignmentGroupId: text(row, "assignment_group_id"),
+    pageMaxScore: Number(row.page_max_score) || 0,
+    sortOrder: Number(row.sort_order) || 0,
+  };
+}
+
+function mapPageGrade(row: Row): WorksheetPageGrade {
+  return {
+    id: text(row, "id"),
+    answerId: text(row, "answer_id"),
+    scoreLinkId: text(row, "score_link_id"),
+    score: Number(row.score) || 0,
+    feedback: text(row, "feedback"),
+    gradedAt: text(row, "graded_at", new Date().toISOString()),
+  };
+}
+
 export async function fetchWorksheets() {
   if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
   const result = await supabase
@@ -146,6 +172,85 @@ export async function fetchTeacherWorksheetPages() {
     .order("updated_at", { ascending: false });
   if (result.error) throw result.error;
   return (result.data ?? []).map((row) => mapTeacherPage(row as Row));
+}
+
+export async function fetchWorksheetScoreLinks() {
+  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  const result = await supabase
+    .from("worksheet_score_links")
+    .select("*")
+    .order("page_number", { ascending: true })
+    .order("sort_order", { ascending: true });
+  if (result.error) {
+    if (isWorksheetScoreSchemaMissing(result.error)) return [];
+    throw result.error;
+  }
+  return (result.data ?? []).map((row) => mapScoreLink(row as Row));
+}
+
+export async function fetchWorksheetPageGrades() {
+  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  const result = await supabase
+    .from("worksheet_page_grades")
+    .select("*")
+    .order("graded_at", { ascending: false });
+  if (result.error) {
+    if (isWorksheetScoreSchemaMissing(result.error)) return [];
+    throw result.error;
+  }
+  return (result.data ?? []).map((row) => mapPageGrade(row as Row));
+}
+
+export async function replaceWorksheetPageScoreLinks(
+  worksheetId: string,
+  pageNumber: number,
+  links: WorksheetScoreLinkInput[],
+) {
+  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  const result = await supabase.rpc("replace_worksheet_page_score_links", {
+    p_worksheet_id: worksheetId,
+    p_page_number: pageNumber,
+    p_links: links.map((link) => ({
+      assignment_group_id: link.assignmentGroupId,
+      page_max_score: link.pageMaxScore,
+      sort_order: link.sortOrder,
+    })),
+  });
+  if (result.error) throw result.error;
+  return (Array.isArray(result.data) ? result.data : []).map((row) =>
+    mapScoreLink(row as Row),
+  );
+}
+
+export async function gradeWorksheetPages(
+  answerIds: string[],
+  grades: WorksheetGradeInput[],
+) {
+  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  const result = await supabase.rpc("grade_worksheet_pages_and_sync_scores", {
+    p_answer_ids: answerIds,
+    p_grades: grades.map((grade) => ({
+      answer_id: grade.answerId,
+      score_link_id: grade.scoreLinkId,
+      score: grade.score,
+      feedback: grade.feedback?.trim() || "",
+    })),
+  });
+  if (result.error) throw result.error;
+  return (Array.isArray(result.data) ? result.data : []).map((row) =>
+    mapAnswer(row as Row),
+  );
+}
+
+export async function returnWorksheetPages(answerIds: string[]) {
+  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+  const result = await supabase.rpc("return_worksheet_pages", {
+    p_answer_ids: answerIds,
+  });
+  if (result.error) throw result.error;
+  return (Array.isArray(result.data) ? result.data : []).map((row) =>
+    mapAnswer(row as Row),
+  );
 }
 
 export async function countPdfPages(file: File) {
@@ -346,5 +451,34 @@ export function worksheetError(error: unknown, fallback: string) {
     return "หน้านี้มีรอยเขียนแล้ว จึงไม่สามารถเปลี่ยนทิศทางต้นฉบับได้";
   if (/WORKSHEET_NOT_FOUND/i.test(message))
     return "ไม่พบสมุดงานในห้องเรียนของคุณ";
+  if (/ASSIGNMENT_GROUP_MISSING_CLASSROOM/i.test(message))
+    return "งานคะแนนนี้ยังไม่มีครบทุกห้องที่ได้รับใบงาน";
+  if (/WORKSHEET_LINK_TOTAL_EXCEEDS_ASSIGNMENT_MAX/i.test(message)) {
+    const max = message.split(":").pop()?.trim();
+    return `คะแนนรวมของหน้าที่เชื่อมต้องไม่เกิน ${max || "คะแนนเต็มของงาน"}`;
+  }
+  if (/WORKSHEET_LINK_HAS_GRADES/i.test(message))
+    return "ยกเลิกการเชื่อมนี้ไม่ได้ เพราะมีคะแนนนักเรียนบันทึกไว้แล้ว";
+  if (/WORKSHEET_GRADE_REQUIRED/i.test(message))
+    return "กรอกคะแนนของทุกช่องที่เชื่อมไว้ก่อนบันทึก";
+  if (/WORKSHEET_SCORE_OUT_OF_RANGE/i.test(message))
+    return "คะแนนต้องอยู่ระหว่าง 0 และคะแนนเต็มของหน้านั้น";
+  if (/WORKSHEET_ANSWER_NOT_REVIEWABLE/i.test(message))
+    return "บางหน้าถูกตรวจหรือเปลี่ยนสถานะไปแล้ว กรุณาโหลดข้อมูลใหม่";
+  if (isWorksheetScoreSchemaMissing(error))
+    return "ระบบเชื่อมใบงานกับคะแนนยังไม่พร้อม กรุณารัน worksheet-score-links.sql ใน Supabase";
   return message && !/^\[object Object\]$/.test(message) ? message : fallback;
+}
+
+function isWorksheetScoreSchemaMissing(error: unknown) {
+  const message =
+    error && typeof error === "object"
+      ? JSON.stringify(error)
+      : String(error ?? "");
+  return (
+    /worksheet_score_links|worksheet_page_grades|grade_worksheet_pages_and_sync_scores|replace_worksheet_page_score_links|return_worksheet_pages/i.test(
+      message,
+    ) &&
+    /does not exist|schema cache|PGRST202|PGRST205|42P01|42883/i.test(message)
+  );
 }

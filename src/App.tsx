@@ -118,6 +118,7 @@ type WorkViewProps = {
   selectedClassroomId: string;
   onClassroomChange: (id: string) => void;
   assignments: ScoreAssignment[];
+  allAssignments: ScoreAssignment[];
   submissions: SubmissionRecord[];
   classmates: StudentRecord[];
   currentStudent?: StudentRecord;
@@ -130,6 +131,7 @@ type WorkViewProps = {
   deleteSubmission: (item: SubmissionRecord) => void;
   openSubmission: (item: SubmissionRecord) => void;
   getSubmissionPreviewUrl: (item: SubmissionRecord) => Promise<string>;
+  onScoresChanged: () => Promise<void>;
   flash: (message: string) => void;
 };
 type ScoresViewProps = {
@@ -1294,7 +1296,9 @@ function App() {
         raw_score: rawScore,
         raw_max: assignment.rawMax,
         final_score: status === "scored" ? scaledScore(rawScore, assignment.rawMax, assignment.finalMax) : 0,
-        final_max: assignment.finalMax
+        final_max: assignment.finalMax,
+        source_type: "manual",
+        source_id: null
       }, { onConflict: "assignment_id,student_id" }).select("*").single();
       if (result.error) throw result.error;
       if (scoreAutoSaveVersions.current.get(key) !== version) return;
@@ -1366,7 +1370,9 @@ function App() {
         raw_score: rawScore,
         raw_max: assignment.rawMax,
         final_score: entry?.status === "scored" ? scaledScore(rawScore, assignment.rawMax, assignment.finalMax) : 0,
-        final_max: assignment.finalMax
+        final_max: assignment.finalMax,
+        source_type: "manual",
+        source_id: null
       };
     });
     setBusy(true);
@@ -1400,7 +1406,9 @@ function App() {
       raw_score: rawScore,
       raw_max: assignment.rawMax,
       final_score: scaledScore(rawScore, assignment.rawMax, assignment.finalMax),
-      final_max: assignment.finalMax
+      final_max: assignment.finalMax,
+      source_type: "manual",
+      source_id: null
     }));
     setBusy(true);
     try {
@@ -1431,7 +1439,9 @@ function App() {
         raw_score: rawScore,
         raw_max: assignment.rawMax,
         final_score: entry?.status === "scored" ? scaledScore(rawScore, assignment.rawMax, assignment.finalMax) : 0,
-        final_max: assignment.finalMax
+        final_max: assignment.finalMax,
+        source_type: "manual",
+        source_id: null
       };
     }));
     setBusy(true);
@@ -1719,7 +1729,7 @@ function App() {
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} deleteAssignmentGroup={deleteAssignments} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} />}
-          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} students={session.role === "teacher" ? students : classroomPeers} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} flash={flash} />}
+          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} students={session.role === "teacher" ? students : classroomPeers} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} onScoresChanged={async () => { await loadClassroomData(); }} flash={flash} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} submissions={activeSubmissions} downloadLogs={activeDownloadLogs} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
@@ -2433,12 +2443,13 @@ function ScoreEntryControls({ assignment, student, entry, onScore, onStatus }: {
     <select aria-label={`สถานะ ${assignment.title} ของ ${student.name}`} value={status} onChange={(event) => onStatus(assignment, student, event.target.value as ScoreEntryStatus)}>{scoreEntryStatusOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
     <label className="score-entry-number"><input aria-label={`${assignment.title} ของ ${student.name}`} type="number" min="0" max={assignment.rawMax} value={inputValue} disabled={!acceptsScore} onChange={(event) => onScore(assignment, student, event.target.value)} placeholder={acceptsScore ? "0" : "–"} /><span>/ {formatScore(assignment.rawMax)}</span></label>
     <small>{scoreEntryStatusSummary(entry, assignment)}</small>
+    {entry?.sourceType === "worksheet" && <span className="score-source-badge">จากใบงาน</span>}
   </div>;
 }
 
 function ScoreEntryResult({ entry, assignment }: { entry?: ScoreEntry; assignment: ScoreAssignment }) {
   const status = entry?.status ?? "ungraded";
-  if (status === "scored") return <div className="score-result score-status-scored"><strong>{formatScore(entry?.finalScore ?? 0)}</strong><span>/ {formatScore(assignment.finalMax)}</span></div>;
+  if (status === "scored") return <div className="score-result score-status-scored"><strong>{formatScore(entry?.finalScore ?? 0)}</strong><span>/ {formatScore(assignment.finalMax)}</span>{entry?.sourceType === "worksheet" && <small className="score-source-badge">จากใบงาน</small>}</div>;
   if (status === "leave") return <div className="score-result score-status-leave"><strong>ลา</strong><span>ยังให้คะแนนได้</span></div>;
   if (status === "expired") return <div className="score-result score-status-expired"><strong>0</strong><span>หมดเวลาส่ง</span></div>;
   if (status === "no_score") return <div className="score-result score-status-no_score"><strong>0</strong><span>ไม่มีคะแนน</span></div>;
@@ -2504,7 +2515,7 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
-function WorkView({ role, classrooms, students, selectedClassroomId, onClassroomChange, assignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission, getSubmissionPreviewUrl, flash }: WorkViewProps) {
+function WorkView({ role, classrooms, students, selectedClassroomId, onClassroomChange, assignments, allAssignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission, getSubmissionPreviewUrl, onScoresChanged, flash }: WorkViewProps) {
   const [file, setFile] = useState<File | null>(null);
   const [assignmentId, setAssignmentId] = useState("");
   const [submissionKind, setSubmissionKind] = useState<SubmissionKind>("individual");
@@ -2600,7 +2611,7 @@ function WorkView({ role, classrooms, students, selectedClassroomId, onClassroom
   const workFeatureSwitch = <div className="work-feature-switch" role="tablist" aria-label="รูปแบบงาน"><button className={workFeature === "submissions" ? "active" : ""} type="button" role="tab" aria-selected={workFeature === "submissions"} onClick={() => setWorkFeature("submissions")}><CloudUpload aria-hidden />{role === "teacher" ? "งานส่ง" : "ส่งไฟล์งาน"}</button><button className={workFeature === "worksheets" ? "active" : ""} type="button" role="tab" aria-selected={workFeature === "worksheets"} onClick={() => setWorkFeature("worksheets")}><BookOpen aria-hidden />สมุดงานออนไลน์</button></div>;
 
   if (workFeature === "worksheets") {
-    return <div className="page-stack"><PageHeader title="สมุดงานออนไลน์" eyebrow={role === "teacher" ? "สร้างและติดตามสมุดงาน" : activeClassName} />{workFeatureSwitch}<Suspense fallback={<div className="worksheet-loading"><span>กำลังเปิดสมุดงานออนไลน์...</span></div>}><WorksheetHub role={role} classrooms={classrooms} students={students} currentStudent={currentStudent} flash={flash} /></Suspense></div>;
+    return <div className="page-stack"><PageHeader title="สมุดงานออนไลน์" eyebrow={role === "teacher" ? "สร้างและติดตามสมุดงาน" : activeClassName} />{workFeatureSwitch}<Suspense fallback={<div className="worksheet-loading"><span>กำลังเปิดสมุดงานออนไลน์...</span></div>}><WorksheetHub role={role} classrooms={classrooms} students={students} assignments={role === "teacher" ? allAssignments : assignments} currentStudent={currentStudent} onScoresChanged={onScoresChanged} flash={flash} /></Suspense></div>;
   }
 
   if (role === "teacher") {
@@ -3255,7 +3266,8 @@ function buildScoreEntry(assignment: ScoreAssignment, student: StudentRecord, ra
     rawScore,
     rawMax: assignment.rawMax,
     finalScore: status === "scored" ? scaledScore(rawScore, assignment.rawMax, assignment.finalMax) : 0,
-    finalMax: assignment.finalMax
+    finalMax: assignment.finalMax,
+    sourceType: "manual"
   };
 }
 

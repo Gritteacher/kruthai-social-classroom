@@ -15,6 +15,7 @@ import {
   Clock3,
   Eye,
   FileText,
+  Link2,
   Maximize2,
   Pencil,
   RotateCcw,
@@ -25,15 +26,20 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import type { Classroom, Role, StudentRecord } from "../../types";
+import type { Classroom, Role, ScoreAssignment, StudentRecord } from "../../types";
 import {
   createWorksheet,
   deleteWorksheet,
   fetchWorksheetAnswers,
+  fetchWorksheetPageGrades,
+  fetchWorksheetScoreLinks,
   fetchWorksheets,
   fetchTeacherWorksheetPages,
+  gradeWorksheetPages,
   getWorksheetUrl,
+  replaceWorksheetPageScoreLinks,
   rotateAllWorksheetPages,
+  returnWorksheetPages,
   saveWorksheetPage,
   saveTeacherWorksheetPage,
   updateWorksheetPageView,
@@ -44,11 +50,19 @@ import type {
   WorksheetAnnotation,
   WorksheetCrop,
   WorksheetDraft,
+  WorksheetGradeInput,
   WorksheetPageAnswer,
+  WorksheetPageGrade,
   WorksheetPageView,
+  WorksheetScoreLink,
+  WorksheetScoreLinkInput,
   WorksheetTeacherPage,
 } from "./types";
 import { ExcalidrawWorksheetCanvas } from "./ExcalidrawWorksheetCanvas";
+import {
+  WorksheetReviewPanel,
+  WorksheetScoreLinkModal,
+} from "./WorksheetTeacherTools";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -56,7 +70,9 @@ type WorksheetHubProps = {
   role: Role;
   classrooms: Classroom[];
   students: StudentRecord[];
+  assignments: ScoreAssignment[];
   currentStudent?: StudentRecord;
+  onScoresChanged: () => Promise<void>;
   flash: (message: string) => void;
 };
 
@@ -81,12 +97,16 @@ export default function WorksheetHub({
   role,
   classrooms,
   students,
+  assignments,
   currentStudent,
+  onScoresChanged,
   flash,
 }: WorksheetHubProps) {
   const [worksheets, setWorksheets] = useState<Worksheet[]>([]);
   const [answers, setAnswers] = useState<WorksheetPageAnswer[]>([]);
   const [teacherPages, setTeacherPages] = useState<WorksheetTeacherPage[]>([]);
+  const [scoreLinks, setScoreLinks] = useState<WorksheetScoreLink[]>([]);
+  const [pageGrades, setPageGrades] = useState<WorksheetPageGrade[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<WorksheetDraft>(emptyDraft);
@@ -96,18 +116,29 @@ export default function WorksheetHub({
   const [previewAnswer, setPreviewAnswer] =
     useState<WorksheetPageAnswer | null>(null);
   const [teacherWriting, setTeacherWriting] = useState(false);
+  const [linkWorksheet, setLinkWorksheet] = useState<Worksheet | null>(null);
 
   async function loadData() {
     setLoading(true);
     try {
-      const [nextWorksheets, nextAnswers, nextTeacherPages] = await Promise.all([
+      const [
+        nextWorksheets,
+        nextAnswers,
+        nextTeacherPages,
+        nextScoreLinks,
+        nextPageGrades,
+      ] = await Promise.all([
         fetchWorksheets(),
         fetchWorksheetAnswers(),
         role === "teacher" ? fetchTeacherWorksheetPages() : Promise.resolve([]),
+        role === "teacher" ? fetchWorksheetScoreLinks() : Promise.resolve([]),
+        role === "teacher" ? fetchWorksheetPageGrades() : Promise.resolve([]),
       ]);
       setWorksheets(nextWorksheets);
       setAnswers(nextAnswers);
       setTeacherPages(nextTeacherPages);
+      setScoreLinks(nextScoreLinks);
+      setPageGrades(nextPageGrades);
     } catch (error) {
       flash(worksheetError(error, "โหลดสมุดงานไม่สำเร็จ"));
     } finally {
@@ -191,6 +222,79 @@ export default function WorksheetHub({
       flash(`ลบสมุดงาน “${worksheet.title}” แล้ว`);
     } catch (error) {
       flash(worksheetError(error, "ลบสมุดงานไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveScoreLinks(
+    worksheet: Worksheet,
+    pageNumber: number,
+    values: WorksheetScoreLinkInput[],
+  ) {
+    setBusy(true);
+    try {
+      const saved = await replaceWorksheetPageScoreLinks(
+        worksheet.id,
+        pageNumber,
+        values,
+      );
+      setScoreLinks((current) => [
+        ...current.filter((link) => link.worksheetId !== worksheet.id),
+        ...saved,
+      ]);
+      flash(
+        values.length
+          ? `เชื่อมหน้า ${pageNumber} กับ ${values.length} ช่องคะแนนแล้ว`
+          : `ยกเลิกการเชื่อมคะแนนของหน้า ${pageNumber} แล้ว`,
+      );
+      return true;
+    } catch (error) {
+      flash(worksheetError(error, "บันทึกการเชื่อมคะแนนไม่สำเร็จ"));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function gradeSelectedPages(
+    answerIds: string[],
+    values: WorksheetGradeInput[],
+  ) {
+    setBusy(true);
+    try {
+      const savedAnswers = await gradeWorksheetPages(answerIds, values);
+      const savedById = new Map(savedAnswers.map((answer) => [answer.id, answer]));
+      setAnswers((current) =>
+        current.map((answer) => savedById.get(answer.id) || answer),
+      );
+      setPageGrades(await fetchWorksheetPageGrades());
+      await onScoresChanged();
+      flash(
+        `ตรวจแล้ว ${savedAnswers.length} หน้า คะแนนอัปเดตในตารางคะแนนเรียบร้อย`,
+      );
+      return true;
+    } catch (error) {
+      flash(worksheetError(error, "บันทึกคะแนนใบงานไม่สำเร็จ"));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function returnSelectedPages(answerIds: string[]) {
+    setBusy(true);
+    try {
+      const savedAnswers = await returnWorksheetPages(answerIds);
+      const savedById = new Map(savedAnswers.map((answer) => [answer.id, answer]));
+      setAnswers((current) =>
+        current.map((answer) => savedById.get(answer.id) || answer),
+      );
+      flash(`ส่งกลับให้นักเรียนแก้ไข ${savedAnswers.length} หน้าแล้ว`);
+      return true;
+    } catch (error) {
+      flash(worksheetError(error, "ส่งใบงานกลับแก้ไขไม่สำเร็จ"));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -355,11 +459,29 @@ export default function WorksheetHub({
             {busy ? "กำลังสร้างสมุดงาน" : "สร้างสมุดงาน"}
           </button>
         </section>
+        <WorksheetReviewPanel
+          classrooms={classrooms}
+          worksheets={worksheets}
+          students={students}
+          assignments={assignments}
+          answers={answers}
+          links={scoreLinks}
+          grades={pageGrades}
+          busy={busy}
+          onPreview={(worksheet, answer) => {
+            setActiveWorksheet(worksheet);
+            setPreviewAnswer(answer);
+            setTeacherWriting(false);
+          }}
+          onGrade={gradeSelectedPages}
+          onReturn={returnSelectedPages}
+        />
         <TeacherWorksheetList
           worksheets={worksheets}
           answers={answers}
           classrooms={classrooms}
           students={students}
+          scoreLinks={scoreLinks}
           busy={busy}
           onDelete={(worksheet) => void removeWorksheet(worksheet)}
           onWrite={(worksheet) => {
@@ -367,12 +489,24 @@ export default function WorksheetHub({
             setPreviewAnswer(null);
             setTeacherWriting(true);
           }}
+          onLink={setLinkWorksheet}
           onPreview={(worksheet, answer) => {
             setActiveWorksheet(worksheet);
             setPreviewAnswer(answer);
             setTeacherWriting(false);
           }}
         />
+        {linkWorksheet && (
+          <WorksheetScoreLinkModal
+            worksheet={linkWorksheet}
+            assignments={assignments}
+            links={scoreLinks}
+            grades={pageGrades}
+            busy={busy}
+            onClose={() => setLinkWorksheet(null)}
+            onSave={saveScoreLinks}
+          />
+        )}
         {activeWorksheet && (previewAnswer || teacherWriting) && (
           <WorksheetEditorModal
             worksheet={activeWorksheet}
@@ -496,18 +630,22 @@ function TeacherWorksheetList({
   answers,
   classrooms,
   students,
+  scoreLinks,
   busy,
   onDelete,
   onWrite,
+  onLink,
   onPreview,
 }: {
   worksheets: Worksheet[];
   answers: WorksheetPageAnswer[];
   classrooms: Classroom[];
   students: StudentRecord[];
+  scoreLinks: WorksheetScoreLink[];
   busy: boolean;
   onDelete: (worksheet: Worksheet) => void;
   onWrite: (worksheet: Worksheet) => void;
+  onLink: (worksheet: Worksheet) => void;
   onPreview: (worksheet: Worksheet, answer: WorksheetPageAnswer) => void;
 }) {
   return (
@@ -544,6 +682,11 @@ function TeacherWorksheetList({
               )
               .filter(Boolean)
               .join(" · ");
+            const linkedPages = new Set(
+              scoreLinks
+                .filter((link) => link.worksheetId === worksheet.id)
+                .map((link) => link.pageNumber),
+            ).size;
             return (
               <article className="worksheet-admin-item" key={worksheet.id}>
                 <div className="worksheet-admin-summary">
@@ -586,8 +729,19 @@ function TeacherWorksheetList({
                   <div className="worksheet-no-answers">ยังไม่มีหน้าที่ส่ง</div>
                 )}
                 <div className="worksheet-admin-actions">
-                  <span>{worksheetAvailability(worksheet).detail}</span>
+                  <span>
+                    {worksheetAvailability(worksheet).detail} · เชื่อมคะแนนแล้ว {linkedPages}/{worksheet.pageCount} หน้า
+                  </span>
                   <div>
+                    <button
+                      className="template-button worksheet-link-button"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onLink(worksheet)}
+                    >
+                      <Link2 aria-hidden />
+                      เชื่อมคะแนน
+                    </button>
                     <button
                       className="template-button worksheet-write-button"
                       type="button"

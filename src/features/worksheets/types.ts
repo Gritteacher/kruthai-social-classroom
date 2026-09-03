@@ -88,6 +88,37 @@ export interface WorksheetTeacherPage {
   updatedAt: string;
 }
 
+export interface WorksheetScoreLink {
+  id: string;
+  worksheetId: string;
+  pageNumber: number;
+  assignmentGroupId: string;
+  pageMaxScore: number;
+  sortOrder: number;
+}
+
+export interface WorksheetPageGrade {
+  id: string;
+  answerId: string;
+  scoreLinkId: string;
+  score: number;
+  feedback: string;
+  gradedAt: string;
+}
+
+export interface WorksheetGradeInput {
+  answerId: string;
+  scoreLinkId: string;
+  score: number;
+  feedback?: string;
+}
+
+export interface WorksheetScoreLinkInput {
+  assignmentGroupId: string;
+  pageMaxScore: number;
+  sortOrder: number;
+}
+
 export interface WorksheetDraft {
   title: string;
   description: string;

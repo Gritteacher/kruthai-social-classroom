@@ -864,6 +864,18 @@ textarea {
   gap: 7px;
 }
 
+.score-source-badge {
+  display: inline-flex !important;
+  width: max-content;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  color: var(--blue) !important;
+  font-size: 10px !important;
+  line-height: 1.5;
+}
+
 .score-entry-controls select {
   width: 100%;
   height: 32px;
