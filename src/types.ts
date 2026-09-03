@@ -132,6 +132,22 @@ export interface SubmissionRecord {
   rawMax: number;
   finalScore: number;
   finalMax: number;
+  aiReview?: SubmissionAiReview;
+}
+
+export type SubmissionAiReviewStatus = "queued" | "processing" | "completed" | "failed";
+
+export interface SubmissionAiReview {
+  id: string;
+  submissionId: string;
+  status: SubmissionAiReviewStatus;
+  suggestedRawScore: number;
+  confidence: number;
+  feedback: string;
+  model: string;
+  errorMessage: string;
+  requestedAt?: string;
+  completedAt?: string;
 }
 
 export interface ChatMessage {

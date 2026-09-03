@@ -14,6 +14,8 @@ For an existing production database, `assignment-groups-transaction.sql` is the 
 
 `worksheet-ai-grading.sql` adds teacher-only AI rubrics and server-generated score drafts for submitted worksheet pages. Apply `worksheet-score-links.sql` first.
 
+`submission-ai-grading.sql` adds automatic AI grading for regular file/link submissions and securely synchronizes the result to every student in a group. Apply `worksheet-score-links.sql` first so score-source columns are available.
+
 ## Access model
 
 - Teachers are identified only by `profiles.role = 'teacher'`.

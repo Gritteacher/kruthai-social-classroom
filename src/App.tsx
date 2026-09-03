@@ -33,6 +33,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
   User,
@@ -69,6 +70,7 @@ import {
   mapScoreEntryRow,
   mapStudentRow,
   mapStudentHomeCardRow,
+  mapSubmissionAiReviewRow,
   mapSubmissionRow
 } from "./lib/rowMappers";
 import type {
@@ -131,6 +133,7 @@ type WorkViewProps = {
   deleteSubmission: (item: SubmissionRecord) => void;
   openSubmission: (item: SubmissionRecord) => void;
   getSubmissionPreviewUrl: (item: SubmissionRecord) => Promise<string>;
+  requestSubmissionAiGrade: (item: SubmissionRecord, silent?: boolean) => Promise<boolean>;
   onScoresChanged: () => Promise<void>;
   flash: (message: string) => void;
 };
@@ -335,7 +338,7 @@ function App() {
     }
     try {
       const client = supabase!;
-      const [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult, chatResult] = await Promise.all([
+      const [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult, submissionAiResult, chatResult] = await Promise.all([
         client.from("classrooms").select("*").order("created_at", { ascending: false }),
         client.from("materials").select("*").order("published_at", { ascending: false }),
         client.from("announcements").select("*").order("published_at", { ascending: false }),
@@ -345,10 +348,11 @@ function App() {
         client.from("score_assignments").select("*").order("created_at", { ascending: true }),
         fetchAllScoreEntryRows(),
         client.from("submissions").select("*").order("submitted_at", { ascending: false }),
+        client.from("submission_ai_reviews").select("*"),
         client.from("chat_messages").select("*").order("created_at", { ascending: true })
       ]);
 
-      const errors = [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult, chatResult].filter((result) => result.error);
+      const errors = [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult, submissionAiResult, chatResult].filter((result) => result.error);
       if (errors.length) flash("บางตารางใน Supabase ยังไม่พร้อม กรุณาตรวจ schema แล้วลองโหลดใหม่");
 
       const nextClassrooms = (classroomsResult.data ?? []).map(mapClassroomRow).sort(sortClassrooms);
@@ -379,7 +383,20 @@ function App() {
       }
       setAssignments((assignmentsResult.data ?? []).map(mapAssignmentRow));
       setScoreEntries((entriesResult.data ?? []).map(mapScoreEntryRow));
-      setSubmissionItems((submissionsResult.data ?? []).map(mapSubmissionRow).filter((item) => !isLegacyDemoSubmission(item)));
+      const aiReviewsBySubmission = new Map((submissionAiResult.data ?? []).map(mapSubmissionAiReviewRow).map((review) => [review.submissionId, review]));
+      setSubmissionItems((current) => {
+        const localReviews = new Map(current.flatMap((item) => {
+          if (!item.aiReview?.id.startsWith("queued-")) return [];
+          const requestedAt = Date.parse(item.aiReview.requestedAt || "");
+          return Number.isFinite(requestedAt) && Date.now() - requestedAt < 3 * 60_000
+            ? [[item.id, item.aiReview] as const]
+            : [];
+        }));
+        return (submissionsResult.data ?? [])
+          .map(mapSubmissionRow)
+          .map((item) => ({ ...item, aiReview: aiReviewsBySubmission.get(item.id) ?? localReviews.get(item.id) }))
+          .filter((item) => !isLegacyDemoSubmission(item));
+      });
       setChatMessages((chatResult.data ?? []).map(mapChatMessageRow));
       if (showToast && errors.length === 0) flash("โหลดข้อมูลล่าสุดจาก Supabase แล้ว");
     } catch (error) {
@@ -393,6 +410,12 @@ function App() {
     if (!session) return;
     void loadClassroomData();
   }, [session?.role]);
+
+  useEffect(() => {
+    if (!session || !submissionItems.some((item) => item.aiReview?.status === "queued" || item.aiReview?.status === "processing")) return;
+    const timer = window.setInterval(() => void loadClassroomData(), 8000);
+    return () => window.clearInterval(timer);
+  }, [session?.role, submissionItems.some((item) => item.aiReview?.status === "queued" || item.aiReview?.status === "processing")]);
 
   useEffect(() => {
     if (!session || !isSupabaseConfigured || !workingClassroom?.id) return;
@@ -1552,6 +1575,65 @@ function App() {
     }
   }
 
+  async function requestSubmissionAiGrade(item: SubmissionRecord, silent = false) {
+    if (!isSupabaseConfigured) {
+      if (!silent) flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+      return false;
+    }
+    try {
+      const authResult = await supabase!.auth.getSession();
+      const accessToken = authResult.data.session?.access_token;
+      if (!accessToken) throw new Error("เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
+      const requestedAt = new Date().toISOString();
+      setSubmissionItems((current) => current.map((submission) => submission.id === item.id ? {
+        ...submission,
+        aiReview: {
+          id: submission.aiReview?.id || `queued-${submission.id}`,
+          submissionId: submission.id,
+          status: "queued",
+          suggestedRawScore: 0,
+          confidence: 0,
+          feedback: "",
+          model: "",
+          errorMessage: "",
+          requestedAt
+        }
+      } : submission));
+      const response = await fetch("/.netlify/functions/grade-submission-ai-background", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ submissionId: item.id })
+      });
+      if (!response.ok && response.status !== 202) {
+        const payload = await response.json().catch(() => null) as { message?: string } | null;
+        throw new Error(payload?.message || "ส่งงานให้ AI ตรวจไม่สำเร็จ");
+      }
+      if (!silent) flash(`ส่งงานของ ${item.studentName} ให้ AI ตรวจแล้ว`);
+      return true;
+    } catch (error) {
+      const message = userFacingError(error, "ส่งงานให้ AI ตรวจไม่สำเร็จ");
+      setSubmissionItems((current) => current.map((submission) => submission.id === item.id ? {
+        ...submission,
+        aiReview: {
+          id: submission.aiReview?.id || `failed-${submission.id}`,
+          submissionId: submission.id,
+          status: "failed",
+          suggestedRawScore: 0,
+          confidence: 0,
+          feedback: "",
+          model: submission.aiReview?.model || "",
+          errorMessage: message,
+          requestedAt: submission.aiReview?.requestedAt
+        }
+      } : submission));
+      flash(message);
+      return false;
+    }
+  }
+
   async function submitWork(draft: SubmissionDraft) {
     const assignment = activeAssignments.find((item) => item.id === draft.assignmentId);
     if (!assignment) return flash("เลือกงานที่คุณต้องการส่งก่อน");
@@ -1605,8 +1687,10 @@ function App() {
       }
       const savedRow = Array.isArray(result.data) ? result.data[0] : result.data;
       if (!savedRow) throw new Error("ระบบไม่ได้คืนข้อมูลรายการส่งงาน");
-      setSubmissionItems((current) => [mapSubmissionRow(savedRow), ...current]);
-      flash(`ส่ง${draft.submissionKind === "group" ? "งานกลุ่ม" : "งาน"}เรียบร้อย`);
+      const savedSubmission = mapSubmissionRow(savedRow);
+      setSubmissionItems((current) => [savedSubmission, ...current]);
+      flash(`ส่ง${draft.submissionKind === "group" ? "งานกลุ่ม" : "งาน"}เรียบร้อย AI กำลังเตรียมตรวจ`);
+      await requestSubmissionAiGrade(savedSubmission, true);
     } catch (error) {
       flash(userFacingError(error, "ส่งงานไม่สำเร็จ"));
       return false;
@@ -1729,7 +1813,7 @@ function App() {
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
           {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} deleteAssignmentGroup={deleteAssignments} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} />}
-          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} students={session.role === "teacher" ? students : classroomPeers} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} onScoresChanged={async () => { await loadClassroomData(); }} flash={flash} />}
+          {view === "work" && <WorkView role={session.role} classrooms={classroomItems} students={session.role === "teacher" ? students : classroomPeers} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} requestSubmissionAiGrade={requestSubmissionAiGrade} onScoresChanged={async () => { await loadClassroomData(); }} flash={flash} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} submissions={activeSubmissions} downloadLogs={activeDownloadLogs} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
@@ -2515,7 +2599,7 @@ function StudentScoresView({ assignments, entries, students }: { assignments: Sc
   })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
 }
 
-function WorkView({ role, classrooms, students, selectedClassroomId, onClassroomChange, assignments, allAssignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission, getSubmissionPreviewUrl, onScoresChanged, flash }: WorkViewProps) {
+function WorkView({ role, classrooms, students, selectedClassroomId, onClassroomChange, assignments, allAssignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission, getSubmissionPreviewUrl, requestSubmissionAiGrade, onScoresChanged, flash }: WorkViewProps) {
   const [file, setFile] = useState<File | null>(null);
   const [assignmentId, setAssignmentId] = useState("");
   const [submissionKind, setSubmissionKind] = useState<SubmissionKind>("individual");
@@ -2623,7 +2707,7 @@ function WorkView({ role, classrooms, students, selectedClassroomId, onClassroom
           <SectionTitle title="งานรอตรวจ" note={`${pendingReviewSubmissions.length} รายการ`} />
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
           <div className="review-mode-switch" role="tablist" aria-label="รูปแบบการตรวจงาน"><button className={teacherReviewMode === "assignments" ? "active" : ""} type="button" role="tab" aria-selected={teacherReviewMode === "assignments"} onClick={() => setTeacherReviewMode("assignments")}><ClipboardCheck aria-hidden />ตามงาน</button><button className={teacherReviewMode === "students" ? "active" : ""} type="button" role="tab" aria-selected={teacherReviewMode === "students"} onClick={() => setTeacherReviewMode("students")}><Users aria-hidden />ตามนักเรียน</button></div>
-          {pendingReviewSubmissions.length ? teacherReviewMode === "assignments" ? <div className="submission-status-sections">{submissionReviewSections.map((statusSection) => <section className={`submission-status-section ${statusTone(statusSection.status)}`} key={statusSection.status}><div className="submission-status-heading"><div><strong>{statusSection.status}</strong><span>{activeClassName}</span></div><small>{statusSection.total} รายการ</small></div><div className="assignment-type-sections compact">{statusSection.typeSections.map((section) => <section className="assignment-type-section" key={`${statusSection.status}-${section.type}`}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.items.length} รายการ</small></div><div className="submission-list">{section.items.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={showSubmissionPreview} />)}</div></section>)}</div></section>)}</div> : <StudentSubmissionReview submissions={pendingReviewSubmissions} busy={busy} updateSubmission={updateSubmission} saveSubmissions={saveSubmissions} deleteSubmission={deleteSubmission} openSubmission={showSubmissionPreview} /> : <EmptyState title="ไม่มีงานรอตรวจ" body="งานที่ตรวจแล้วจะไม่แสดงในหน้านี้ เมื่อมีงานใหม่ส่งเข้ามารายการจะปรากฏอีกครั้ง" />}
+          {pendingReviewSubmissions.length ? teacherReviewMode === "assignments" ? <div className="submission-status-sections">{submissionReviewSections.map((statusSection) => <section className={`submission-status-section ${statusTone(statusSection.status)}`} key={statusSection.status}><div className="submission-status-heading"><div><strong>{statusSection.status}</strong><span>{activeClassName}</span></div><small>{statusSection.total} รายการ</small></div><div className="assignment-type-sections compact">{statusSection.typeSections.map((section) => <section className="assignment-type-section" key={`${statusSection.status}-${section.type}`}><div className="assignment-type-heading"><span className="assignment-type-badge">{section.type}</span><small>{section.items.length} รายการ</small></div><div className="submission-list">{section.items.map((item) => <ReviewCard key={item.id} item={item} busy={busy} updateSubmission={updateSubmission} saveSubmission={saveSubmission} deleteSubmission={deleteSubmission} openSubmission={showSubmissionPreview} requestAiGrade={requestSubmissionAiGrade} />)}</div></section>)}</div></section>)}</div> : <StudentSubmissionReview submissions={pendingReviewSubmissions} busy={busy} updateSubmission={updateSubmission} saveSubmissions={saveSubmissions} deleteSubmission={deleteSubmission} openSubmission={showSubmissionPreview} requestAiGrade={requestSubmissionAiGrade} /> : <EmptyState title="ไม่มีงานรอตรวจ" body="งานที่ตรวจแล้วจะไม่แสดงในหน้านี้ เมื่อมีงานใหม่ส่งเข้ามารายการจะปรากฏอีกครั้ง" />}
         </section>
         {previewTarget && <SubmissionPreviewModal item={previewTarget} url={previewUrl} loading={previewBusy} error={previewError} onClose={closeSubmissionPreview} />}
       </div>
@@ -2722,7 +2806,7 @@ function SubmissionPreviewModal({ item, url, loading, error, onClose }: { item: 
   );
 }
 
-function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubmissions, deleteSubmission, openSubmission }: { submissions: SubmissionRecord[]; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmissions: (items: SubmissionRecord[]) => Promise<boolean>; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
+function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubmissions, deleteSubmission, openSubmission, requestAiGrade }: { submissions: SubmissionRecord[]; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmissions: (items: SubmissionRecord[]) => Promise<boolean>; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void; requestAiGrade: (item: SubmissionRecord) => Promise<boolean> }) {
   const studentGroups = useMemo(() => groupSubmissionsByStudent(submissions).filter((group) => group.pendingCount > 0), [submissions]);
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<string[]>([]);
@@ -2783,7 +2867,7 @@ function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubm
         <div className="student-review-work-list">{selectedStudent.items.map((item) => {
           const checked = selectedSubmissionIds.includes(item.id);
           const retentionNote = submissionFileRetentionNote(item);
-          return <article className={`student-review-work ${checked ? "selected" : ""}`} key={item.id}><label className="student-review-work-check"><input type="checkbox" checked={checked} disabled={busy} onChange={() => toggleSubmission(item.id)} /><span className="sr-only">เลือก {item.assignmentTitle}</span></label><div className="student-review-work-info"><div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div><span>{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"} · {item.submittedAt}</span><SubmissionMemberList item={item} />{retentionNote && <span className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</span>}</div><div className="student-review-work-actions"><button className="icon-button student-review-open" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl} title={item.fileDeletedAtRaw ? "ไฟล์ถูกลบอัตโนมัติแล้ว" : "ดูตัวอย่างงาน"} aria-label={`ดูตัวอย่างงาน ${item.assignmentTitle}`}><Eye aria-hidden /></button><button className="icon-danger student-review-delete" type="button" disabled={busy} onClick={() => deleteSubmission(item)} title={`ลบงาน ${item.assignmentTitle}`} aria-label={`ลบงาน ${item.assignmentTitle} ของ ${item.studentName}`}><Trash2 aria-hidden /></button></div><label className="field student-review-score">คะแนนดิบ<input type="number" min="0" max={item.rawMax} value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="คะแนน" /><small>เต็ม {formatScore(item.rawMax)} · เก็บ {formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}/{formatScore(item.finalMax)}</small></label></article>;
+          return <article className={`student-review-work ${checked ? "selected" : ""}`} key={item.id}><label className="student-review-work-check"><input type="checkbox" checked={checked} disabled={busy} onChange={() => toggleSubmission(item.id)} /><span className="sr-only">เลือก {item.assignmentTitle}</span></label><div className="student-review-work-info"><div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div><span>{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"} · {item.submittedAt}</span><SubmissionAiStatus item={item} /><SubmissionMemberList item={item} />{retentionNote && <span className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</span>}</div><div className="student-review-work-actions"><button className="icon-button student-review-open" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl} title={item.fileDeletedAtRaw ? "ไฟล์ถูกลบอัตโนมัติแล้ว" : "ดูตัวอย่างงาน"} aria-label={`ดูตัวอย่างงาน ${item.assignmentTitle}`}><Eye aria-hidden /></button><button className="icon-button student-review-ai" type="button" disabled={busy || item.aiReview?.status === "queued" || item.aiReview?.status === "processing"} onClick={() => void requestAiGrade(item)} title="ให้ AI ตรวจงาน" aria-label={`ให้ AI ตรวจ ${item.assignmentTitle}`}><Sparkles aria-hidden /></button><button className="icon-danger student-review-delete" type="button" disabled={busy} onClick={() => deleteSubmission(item)} title={`ลบงาน ${item.assignmentTitle}`} aria-label={`ลบงาน ${item.assignmentTitle} ของ ${item.studentName}`}><Trash2 aria-hidden /></button></div><label className="field student-review-score">คะแนนดิบ<input type="number" min="0" max={item.rawMax} value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="คะแนน" /><small>เต็ม {formatScore(item.rawMax)} · เก็บ {formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}/{formatScore(item.finalMax)}</small></label></article>;
         })}</div>
         <div className="student-review-savebar"><div><strong>{selectedItems.length ? `พร้อมบันทึก ${selectedItems.length} งาน` : "เลือกงานที่ต้องการให้คะแนน"}</strong><span>แต่ละงานใช้คะแนนเต็มตามที่กำหนดไว้</span></div><button className="primary-button" type="button" disabled={busy || !selectedItems.length} onClick={() => void saveSelectedItems()}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกงานที่เลือก"}</button></div>
       </section>
@@ -2791,7 +2875,7 @@ function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubm
   );
 }
 
-function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmission, openSubmission }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
+function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmission, openSubmission, requestAiGrade }: { item: SubmissionRecord; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmission: (item: SubmissionRecord) => void; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void; requestAiGrade: (item: SubmissionRecord) => Promise<boolean> }) {
   const isLink = Boolean(item.linkUrl);
   const retentionNote = submissionFileRetentionNote(item);
   const attachmentName = item.filePath ? fileNameFromPath(item.filePath) : item.originalFileName || "ยังไม่มีสิ่งที่แนบ";
@@ -2800,6 +2884,7 @@ function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmis
       <div>
         <div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className="submission-kind-badge">{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"}</span></div>
         <div className="student-submission-identity"><span>ผู้ส่ง {item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>
+        <SubmissionAiStatus item={item} />
         <SubmissionMemberList item={item} />
         <small>{item.submittedAt}</small>
         <div className="review-file-box">{isLink ? <ExternalLink aria-hidden /> : <FileText aria-hidden />}<div><span>{isLink ? "ลิงก์งาน" : item.fileDeletedAtRaw ? "ไฟล์ถูกลบแล้ว" : "ไฟล์งาน"}</span><strong>{isLink ? item.linkUrl : attachmentName}</strong>{retentionNote && <small className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</small>}</div><button className="template-button submission-preview-trigger" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl}><Eye aria-hidden />{item.fileDeletedAtRaw ? "ลบแล้ว" : "ดูตัวอย่าง"}</button></div>
@@ -2811,10 +2896,23 @@ function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmis
         <label className="field">คะแนนเก็บเต็ม<input type="number" min="1" value={item.finalMax} onChange={(event) => updateSubmission(item.id, { finalMax: positiveNumber(event.target.value, item.finalMax) })} /></label>
         <div className="score-result"><strong>{formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}</strong><span>/ {formatScore(item.finalMax)}</span></div>
         <button className="small-primary" disabled={busy} onClick={() => saveSubmission(item)}><Save aria-hidden />บันทึก</button>
+        <button className="template-button review-ai-button" disabled={busy || item.aiReview?.status === "queued" || item.aiReview?.status === "processing"} onClick={() => void requestAiGrade(item)}><Sparkles aria-hidden />{item.aiReview?.status === "failed" ? "ลอง AI อีกครั้ง" : "ให้ AI ตรวจ"}</button>
         <button className="danger-button review-delete-button" disabled={busy} onClick={() => deleteSubmission(item)}><Trash2 aria-hidden />ลบรายการ</button>
       </div>
     </article>
   );
+}
+
+function SubmissionAiStatus({ item }: { item: SubmissionRecord }) {
+  const review = item.aiReview;
+  if (!review) return <div className="submission-ai-status idle"><Sparkles aria-hidden /><span>ยังไม่ได้ส่งให้ AI ตรวจ</span></div>;
+  if (review.status === "queued" || review.status === "processing") {
+    return <div className="submission-ai-status processing"><Sparkles aria-hidden /><span>AI กำลังตรวจงาน</span></div>;
+  }
+  if (review.status === "completed") {
+    return <div className="submission-ai-status completed"><Sparkles aria-hidden /><span>AI ให้ {formatScore(review.suggestedRawScore)}/{formatScore(item.rawMax)} · มั่นใจ {Math.round(review.confidence * 100)}%</span>{review.feedback && <small>{review.feedback}</small>}</div>;
+  }
+  return <div className="submission-ai-status failed"><Sparkles aria-hidden /><span>AI ตรวจไม่ได้</span>{review.errorMessage && <small>{review.errorMessage}</small>}</div>;
 }
 
 function SubmissionMemberList({ item }: { item: SubmissionRecord }) {
@@ -3050,7 +3148,7 @@ function SubmissionList({ items, onOpen, compact = false }: { items: SubmissionR
         : item.originalFileName
           ? `ไฟล์เดิม: ${item.originalFileName}`
           : "ยังไม่มีสิ่งที่แนบ";
-    return <article className="submission-card compact-submission-card" key={item.id}><div><div className="submission-title-line"><strong>{item.assignmentTitle}</strong>{item.submissionKind === "group" && <span className="submission-kind-badge">งานกลุ่ม {item.groupMemberCodes.length} คน</span>}</div><div className="student-submission-identity"><span>ผู้ส่ง {item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>{!compact && <SubmissionMemberList item={item} />}{!compact && <small className="submission-file-name">{attachmentLabel}</small>}{!compact && retentionNote && <small className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</small>}</div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath && !item.linkUrl}><Eye aria-hidden />{item.linkUrl ? "เปิดลิงก์" : item.fileDeletedAtRaw ? "ลบแล้ว" : "เปิดไฟล์"}</button>}</div></article>;
+    return <article className="submission-card compact-submission-card" key={item.id}><div><div className="submission-title-line"><strong>{item.assignmentTitle}</strong>{item.submissionKind === "group" && <span className="submission-kind-badge">งานกลุ่ม {item.groupMemberCodes.length} คน</span>}</div><div className="student-submission-identity"><span>ผู้ส่ง {item.studentName}</span><small>รหัสนักเรียน {item.studentId}</small></div>{!compact && <SubmissionAiStatus item={item} />}{!compact && <SubmissionMemberList item={item} />}{!compact && <small className="submission-file-name">{attachmentLabel}</small>}{!compact && retentionNote && <small className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</small>}</div><div className="submission-state"><small>{item.submittedAt}</small><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span>{onOpen && <button className="small-primary" type="button" onClick={() => onOpen(item)} disabled={!item.filePath && !item.linkUrl}><Eye aria-hidden />{item.linkUrl ? "เปิดลิงก์" : item.fileDeletedAtRaw ? "ลบแล้ว" : "เปิดไฟล์"}</button>}</div></article>;
   })}</div>;
 }
 
