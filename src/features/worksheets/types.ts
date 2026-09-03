@@ -106,6 +106,50 @@ export interface WorksheetPageGrade {
   gradedAt: string;
 }
 
+export type WorksheetAiReviewStatus =
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "confirmed"
+  | "rejected";
+
+export interface WorksheetAiSetting {
+  id: string;
+  worksheetId: string;
+  pageNumber: number;
+  enabled: boolean;
+  rubric: string;
+  minConfidence: number;
+  updatedAt: string;
+}
+
+export interface WorksheetAiSuggestion {
+  scoreLinkId: string;
+  score: number;
+  confidence: number;
+  feedback: string;
+}
+
+export interface WorksheetAiReview {
+  id: string;
+  answerId: string;
+  status: WorksheetAiReviewStatus;
+  suggestions: WorksheetAiSuggestion[];
+  overallConfidence: number;
+  feedback: string;
+  model: string;
+  errorMessage: string;
+  requestedAt: string;
+  completedAt?: string;
+}
+
+export interface WorksheetAiSettingInput {
+  enabled: boolean;
+  rubric: string;
+  minConfidence: number;
+}
+
 export interface WorksheetGradeInput {
   answerId: string;
   scoreLinkId: string;

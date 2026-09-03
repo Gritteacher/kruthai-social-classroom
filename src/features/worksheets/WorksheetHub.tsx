@@ -31,15 +31,19 @@ import {
   createWorksheet,
   deleteWorksheet,
   fetchWorksheetAnswers,
+  fetchWorksheetAiReviews,
+  fetchWorksheetAiSettings,
   fetchWorksheetPageGrades,
   fetchWorksheetScoreLinks,
   fetchWorksheets,
   fetchTeacherWorksheetPages,
   gradeWorksheetPages,
   getWorksheetUrl,
+  queueWorksheetAiReview,
   replaceWorksheetPageScoreLinks,
   rotateAllWorksheetPages,
   returnWorksheetPages,
+  saveWorksheetAiSetting,
   saveWorksheetPage,
   saveTeacherWorksheetPage,
   updateWorksheetPageView,
@@ -47,6 +51,9 @@ import {
 } from "./service";
 import type {
   Worksheet,
+  WorksheetAiReview,
+  WorksheetAiSetting,
+  WorksheetAiSettingInput,
   WorksheetAnnotation,
   WorksheetCrop,
   WorksheetDraft,
@@ -58,7 +65,10 @@ import type {
   WorksheetScoreLinkInput,
   WorksheetTeacherPage,
 } from "./types";
-import { ExcalidrawWorksheetCanvas } from "./ExcalidrawWorksheetCanvas";
+import {
+  ExcalidrawWorksheetCanvas,
+  renderWorksheetPageForAi,
+} from "./ExcalidrawWorksheetCanvas";
 import {
   WorksheetReviewPanel,
   WorksheetScoreLinkModal,
@@ -107,6 +117,8 @@ export default function WorksheetHub({
   const [teacherPages, setTeacherPages] = useState<WorksheetTeacherPage[]>([]);
   const [scoreLinks, setScoreLinks] = useState<WorksheetScoreLink[]>([]);
   const [pageGrades, setPageGrades] = useState<WorksheetPageGrade[]>([]);
+  const [aiSettings, setAiSettings] = useState<WorksheetAiSetting[]>([]);
+  const [aiReviews, setAiReviews] = useState<WorksheetAiReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<WorksheetDraft>(emptyDraft);
@@ -127,18 +139,24 @@ export default function WorksheetHub({
         nextTeacherPages,
         nextScoreLinks,
         nextPageGrades,
+        nextAiSettings,
+        nextAiReviews,
       ] = await Promise.all([
         fetchWorksheets(),
         fetchWorksheetAnswers(),
         role === "teacher" ? fetchTeacherWorksheetPages() : Promise.resolve([]),
         role === "teacher" ? fetchWorksheetScoreLinks() : Promise.resolve([]),
         role === "teacher" ? fetchWorksheetPageGrades() : Promise.resolve([]),
+        role === "teacher" ? fetchWorksheetAiSettings() : Promise.resolve([]),
+        role === "teacher" ? fetchWorksheetAiReviews() : Promise.resolve([]),
       ]);
       setWorksheets(nextWorksheets);
       setAnswers(nextAnswers);
       setTeacherPages(nextTeacherPages);
       setScoreLinks(nextScoreLinks);
       setPageGrades(nextPageGrades);
+      setAiSettings(nextAiSettings);
+      setAiReviews(nextAiReviews);
     } catch (error) {
       flash(worksheetError(error, "โหลดสมุดงานไม่สำเร็จ"));
     } finally {
@@ -149,6 +167,14 @@ export default function WorksheetHub({
   useEffect(() => {
     void loadData();
   }, [role, currentStudent?.studentId]);
+
+  useEffect(() => {
+    if (role !== "teacher") return;
+    const timer = window.setInterval(() => {
+      void fetchWorksheetAiReviews().then(setAiReviews).catch(() => undefined);
+    }, 20_000);
+    return () => window.clearInterval(timer);
+  }, [role]);
 
   useEffect(() => {
     if (!activeWorksheet && !previewAnswer) return;
@@ -257,6 +283,31 @@ export default function WorksheetHub({
     }
   }
 
+  async function saveAiSetting(
+    worksheet: Worksheet,
+    pageNumber: number,
+    value: WorksheetAiSettingInput,
+  ) {
+    setBusy(true);
+    try {
+      const saved = await saveWorksheetAiSetting(worksheet.id, pageNumber, value);
+      setAiSettings((current) => [
+        ...current.filter(
+          (item) =>
+            item.worksheetId !== worksheet.id || item.pageNumber !== pageNumber,
+        ),
+        saved,
+      ]);
+      flash(saved.enabled ? `เปิด AI ตรวจร่างหน้า ${pageNumber} แล้ว` : `ปิด AI ตรวจร่างหน้า ${pageNumber} แล้ว`);
+      return true;
+    } catch (error) {
+      flash(worksheetError(error, "บันทึกการตั้งค่า AI ไม่สำเร็จ"));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function gradeSelectedPages(
     answerIds: string[],
     values: WorksheetGradeInput[],
@@ -269,6 +320,7 @@ export default function WorksheetHub({
         current.map((answer) => savedById.get(answer.id) || answer),
       );
       setPageGrades(await fetchWorksheetPageGrades());
+      setAiReviews(await fetchWorksheetAiReviews());
       await onScoresChanged();
       flash(
         `ตรวจแล้ว ${savedAnswers.length} หน้า คะแนนอัปเดตในตารางคะแนนเรียบร้อย`,
@@ -467,6 +519,7 @@ export default function WorksheetHub({
           answers={answers}
           links={scoreLinks}
           grades={pageGrades}
+          aiReviews={aiReviews}
           busy={busy}
           onPreview={(worksheet, answer) => {
             setActiveWorksheet(worksheet);
@@ -502,9 +555,11 @@ export default function WorksheetHub({
             assignments={assignments}
             links={scoreLinks}
             grades={pageGrades}
+            aiSettings={aiSettings}
             busy={busy}
             onClose={() => setLinkWorksheet(null)}
             onSave={saveScoreLinks}
+            onSaveAi={saveAiSetting}
           />
         )}
         {activeWorksheet && (previewAnswer || teacherWriting) && (
@@ -529,6 +584,7 @@ export default function WorksheetHub({
             onStudentSaved={updateAnswer}
             onTeacherSaved={updateTeacherPage}
             onWorksheetUpdated={updateWorksheet}
+            onAiQueued={(message) => flash(message)}
             flash={flash}
           />
         )}
@@ -618,6 +674,7 @@ export default function WorksheetHub({
           onStudentSaved={updateAnswer}
           onTeacherSaved={updateTeacherPage}
           onWorksheetUpdated={updateWorksheet}
+          onAiQueued={(message) => flash(message)}
           flash={flash}
         />
       )}
@@ -789,6 +846,7 @@ function WorksheetEditorModal({
   onStudentSaved,
   onTeacherSaved,
   onWorksheetUpdated,
+  onAiQueued,
   flash,
 }: {
   worksheet: Worksheet;
@@ -799,6 +857,7 @@ function WorksheetEditorModal({
   onStudentSaved: (answer: WorksheetPageAnswer) => void;
   onTeacherSaved: (page: WorksheetTeacherPage) => void;
   onWorksheetUpdated: (worksheet: Worksheet) => void;
+  onAiQueued: (message: string) => void;
   flash: (message: string) => void;
 }) {
   return (
@@ -840,6 +899,7 @@ function WorksheetEditorModal({
           onStudentSaved={onStudentSaved}
           onTeacherSaved={onTeacherSaved}
           onWorksheetUpdated={onWorksheetUpdated}
+          onAiQueued={onAiQueued}
           flash={flash}
         />
       </section>
@@ -855,6 +915,7 @@ function WorksheetEditor({
   onStudentSaved,
   onTeacherSaved,
   onWorksheetUpdated,
+  onAiQueued,
   flash,
 }: {
   worksheet: Worksheet;
@@ -864,6 +925,7 @@ function WorksheetEditor({
   onStudentSaved: (answer: WorksheetPageAnswer) => void;
   onTeacherSaved: (page: WorksheetTeacherPage) => void;
   onWorksheetUpdated: (worksheet: Worksheet) => void;
+  onAiQueued: (message: string) => void;
   flash: (message: string) => void;
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
@@ -1148,7 +1210,22 @@ function WorksheetEditor({
       setSaveState(
         annotationsRef.current === savingAnnotations ? "saved" : "dirty",
       );
-      if (submit) flash(`ส่งหน้า ${pageNumber} แล้ว`);
+      if (submit) {
+        flash(`ส่งหน้า ${pageNumber} แล้ว`);
+        if (pageImage && mode === "student") {
+          void renderWorksheetPageForAi(
+            pageImage,
+            savingAnnotations,
+            cropRef.current,
+            `${worksheet.id}-${pageNumber}`,
+          )
+            .then((image) => queueWorksheetAiReview((saved as WorksheetPageAnswer).id, image))
+            .catch((error) => {
+              const message = error instanceof Error ? error.message : "ส่งให้ AI ตรวจไม่สำเร็จ";
+              onAiQueued(`ส่งงานสำเร็จ แต่ ${message}`);
+            });
+        }
+      }
       return saved;
     } catch (error) {
       setSaveState("error");

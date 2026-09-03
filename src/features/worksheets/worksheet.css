@@ -839,6 +839,88 @@
   color: #b73514 !important;
 }
 
+.worksheet-ai-setting {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--blue-soft) 55%, var(--paper));
+}
+
+.worksheet-ai-toggle,
+.worksheet-ai-toggle span,
+.worksheet-ai-toggle strong,
+.worksheet-ai-toggle small {
+  display: flex;
+  min-width: 0;
+}
+
+.worksheet-ai-toggle {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.worksheet-ai-toggle input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--blue);
+}
+
+.worksheet-ai-toggle span {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.worksheet-ai-toggle strong {
+  align-items: center;
+  gap: 7px;
+}
+
+.worksheet-ai-toggle strong svg {
+  width: 17px;
+  height: 17px;
+  color: var(--blue);
+}
+
+.worksheet-ai-toggle small,
+.worksheet-ai-fields small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.worksheet-ai-fields,
+.worksheet-ai-fields label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.worksheet-ai-fields label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.worksheet-ai-fields textarea {
+  width: 100%;
+  min-height: 116px;
+  resize: vertical;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.55;
+}
+
+.worksheet-ai-fields input[type="range"] {
+  width: 100%;
+  accent-color: var(--blue);
+}
+
 .worksheet-link-modal > footer {
   justify-content: flex-end;
   border-top: 1px solid var(--line);
@@ -1063,6 +1145,55 @@
   text-align: center;
 }
 
+.worksheet-ai-review {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--blue) 24%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--blue-soft) 52%, var(--paper));
+}
+
+.worksheet-ai-review > div,
+.worksheet-ai-review span,
+.worksheet-ai-review strong,
+.worksheet-ai-review small {
+  display: flex;
+  min-width: 0;
+}
+
+.worksheet-ai-review > div {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.worksheet-ai-review > div > svg,
+.worksheet-ai-review button svg {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  color: var(--blue);
+}
+
+.worksheet-ai-review span {
+  flex-direction: column;
+  gap: 1px;
+}
+
+.worksheet-ai-review small {
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.worksheet-ai-review.failed {
+  border-color: color-mix(in srgb, #ff453a 32%, var(--line));
+  background: color-mix(in srgb, var(--coral-soft) 55%, var(--paper));
+}
+
 .worksheet-review-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1102,6 +1233,18 @@
 :root[data-theme="dark"] .worksheet-review-score-fields label {
   background: #242426;
   border-color: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-theme="dark"] .worksheet-ai-setting,
+:root[data-theme="dark"] .worksheet-ai-review {
+  background: #242426;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-theme="dark"] .worksheet-ai-fields textarea {
+  background: #1c1c1e;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #f5f5f7;
 }
 
 :root[data-theme="dark"] .work-feature-switch,
@@ -1148,6 +1291,15 @@
 
   .worksheet-classrooms > div {
     grid-template-columns: 1fr;
+  }
+
+  .worksheet-ai-review {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .worksheet-ai-review .template-button {
+    width: 100%;
   }
 
   .worksheet-card-grid {

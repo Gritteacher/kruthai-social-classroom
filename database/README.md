@@ -12,6 +12,8 @@ For an existing production database, `assignment-groups-transaction.sql` is the 
 
 `worksheet-score-links.sql` links worksheet pages to score-assignment groups, stores page-level grades, and atomically updates each student's score entry when the teacher finishes reviewing selected pages.
 
+`worksheet-ai-grading.sql` adds teacher-only AI rubrics and server-generated score drafts for submitted worksheet pages. Apply `worksheet-score-links.sql` first.
+
 ## Access model
 
 - Teachers are identified only by `profiles.role = 'teacher'`.
