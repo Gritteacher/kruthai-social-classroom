@@ -1850,7 +1850,7 @@ function App() {
             </div>
           </>}
         </header>
-        <section className={`content-area ${view === "scores" ? "score-content-area" : ""}`}>
+        <section className={`content-area ${view === "scores" ? "score-content-area" : ""} ${view === "assistant" ? "assistant-content-area" : ""}`}>
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
@@ -1859,7 +1859,7 @@ function App() {
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} submissions={activeSubmissions} downloadLogs={activeDownloadLogs} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
-          <div hidden={view !== "assistant"}><AiAssistant role={session.role} classrooms={classroomItems} students={students} materials={activeMaterials} /></div>
+          <div hidden={view !== "assistant"}><AiAssistant active={view === "assistant"} role={session.role} classrooms={classroomItems} students={students} materials={activeMaterials} /></div>
         </section>
       </main>
       <nav className="bottom-nav">{bottomNav.map((item) => <NavButton key={item.key} item={item} active={view === item.key} onClick={() => setView(item.key)} />)}</nav>
