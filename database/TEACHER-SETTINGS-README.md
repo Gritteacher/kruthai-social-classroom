@@ -11,7 +11,13 @@ Custom guidance cannot grant database access or change scores.
 
 Feature updates are plain text, targeted to students, teachers, or everyone.
 Drafts are disabled. Every saved edit increments a server-generated revision.
-Users acknowledge each revision once, persisted by account across devices.
+By default users acknowledge each revision once, persisted by account across devices.
+Apply `feature-update-frequency.sql` to existing installations to add frequency
+selection. Every-visit updates ignore earlier receipts but stay dismissed during
+the current app mount. Reloading, opening a new tab, or logging in again shows
+them again. Menu changes, focus and polling do not repeat a dismissed popup.
+Changing the frequency or disabling the update uses the existing teacher-only
+update policy and revision trigger. Existing notices retain once-per-update behavior.
 Enabled updates are checked on login, window focus, and every 60 seconds while
 visible. Preview does not acknowledge or publish. Delete requires confirmation.
 

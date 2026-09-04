@@ -5,7 +5,7 @@ import type {Role} from '../../types';
 import {settingsChanged,type FeatureUpdate} from './settingsService';
 import './settings.css';
 
-const empty={title:'',body:'',audience:'student' as FeatureUpdate['audience'],enabled:false};
+const empty={title:'',body:'',audience:'student' as FeatureUpdate['audience'],enabled:false,display_frequency:'once' as FeatureUpdate['display_frequency']};
 function UpdateDialog({item,onClose,busy=false,error='',preview=false}:{item:Pick<FeatureUpdate,'title'|'body'>;onClose:()=>void;busy?:boolean;error?:string;preview?:boolean}) {
   const ref=useRef<HTMLDialogElement>(null);
   useEffect(()=>{const dialog=ref.current;dialog?.showModal();return()=>dialog?.close();},[]);
@@ -51,10 +51,11 @@ export function FeatureUpdateManager() {
     <label>ข้อความ<textarea required maxLength={4000} rows={4} value={draft.body} onChange={e=>setDraft({...draft,body:e.target.value})}/></label>
     <label>ผู้รับ<select value={draft.audience} onChange={e=>setDraft({...draft,audience:e.target.value as FeatureUpdate['audience']})}><option value="student">นักเรียน</option><option value="teacher">ครู</option><option value="all">ทุกคน</option></select></label>
     <label className="settings-check"><input type="checkbox" checked={draft.enabled} onChange={e=>setDraft({...draft,enabled:e.target.checked})}/>เปิดแสดงป๊อปอัป</label>
+    <label>ความถี่ในการแสดง<select aria-label="ความถี่ในการแสดง" value={draft.display_frequency} onChange={e=>setDraft({...draft,display_frequency:e.target.value as FeatureUpdate['display_frequency']})}><option value="once">แสดงครั้งเดียวต่อการอัปเดต</option><option value="every_visit">แสดงทุกครั้งที่เปิดเว็บ</option></select></label>
     <div className="settings-actions"><button className="primary-button" disabled={!draft.title.trim()||!draft.body.trim()}><Save aria-hidden/>{busy?'กำลังบันทึก':editing?'บันทึกการแก้ไข':'เพิ่มป๊อปอัป'}</button><button type="button" className="icon-button" aria-label="ดูตัวอย่างป๊อปอัป" title="ดูตัวอย่างป๊อปอัป" disabled={!draft.title.trim()||!draft.body.trim()} onClick={()=>setPreview(draft)}><Eye aria-hidden/></button>{editing&&<button type="button" onClick={reset}>ยกเลิกแก้ไข</button>}</div>
   </fieldset></form>{message&&<p role="status">{message}</p>}
   <div className="settings-actions"><h3>รายการป๊อปอัป</h3><button type="button" className="icon-button" title="โหลดใหม่" aria-label="โหลดรายการป๊อปอัปใหม่" disabled={busy||loading} onClick={()=>void load()}><RefreshCw aria-hidden/></button><button type="button" className="icon-button" title="รายการใหม่" aria-label="รายการใหม่" disabled={busy} onClick={reset}><Plus aria-hidden/></button></div>
-  {loading?<p role="status">กำลังโหลด…</p>:!items.length?<p>ยังไม่มีรายการ</p>:items.map(item=><div className="settings-update" key={item.id}><div><strong>{item.title}</strong><small>{item.enabled?'เปิดแสดง':'ฉบับร่าง / ปิดแสดง'} · {item.audience==='all'?'ทุกคน':item.audience==='teacher'?'ครู':'นักเรียน'}</small></div><div className="settings-actions"><button className="icon-button" title="ดูตัวอย่าง" aria-label={`ดูตัวอย่าง ${item.title}`} onClick={()=>setPreview(item)}><Eye aria-hidden/></button><button className="icon-button" title="แก้ไข" aria-label={`แก้ไข ${item.title}`} disabled={busy} onClick={()=>{setEditing(item);setDraft({title:item.title,body:item.body,audience:item.audience,enabled:item.enabled});}}><Pencil aria-hidden/></button><button className="icon-button" title="ลบ" aria-label={`ลบ ${item.title}`} disabled={busy} onClick={()=>void remove(item)}><Trash2 aria-hidden/></button></div></div>)}
+  {loading?<p role="status">กำลังโหลด…</p>:!items.length?<p>ยังไม่มีรายการ</p>:items.map(item=><div className="settings-update" key={item.id}><div><strong>{item.title}</strong><small>{item.enabled?'เปิดแสดง':'ฉบับร่าง / ปิดแสดง'} · {item.audience==='all'?'ทุกคน':item.audience==='teacher'?'ครู':'นักเรียน'} · {item.display_frequency==='every_visit'?'ทุกครั้งที่เปิดเว็บ':'ครั้งเดียวต่อการอัปเดต'}</small></div><div className="settings-actions"><button className="icon-button" title="ดูตัวอย่าง" aria-label={`ดูตัวอย่าง ${item.title}`} onClick={()=>setPreview(item)}><Eye aria-hidden/></button><button className="icon-button" title="แก้ไข" aria-label={`แก้ไข ${item.title}`} disabled={busy} onClick={()=>{setEditing(item);setDraft({title:item.title,body:item.body,audience:item.audience,enabled:item.enabled,display_frequency:item.display_frequency||'once'});}}><Pencil aria-hidden/></button><button className="icon-button" title="ลบ" aria-label={`ลบ ${item.title}`} disabled={busy} onClick={()=>void remove(item)}><Trash2 aria-hidden/></button></div></div>)}
   {preview&&<UpdateDialog item={preview} preview onClose={()=>setPreview(null)}/>}</section>;
 }
 
@@ -63,6 +64,8 @@ export function FeatureUpdatePopup({role}:{role:Role}) {
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const userId=useRef('');
+  // A visit lasts for this app mount, not each menu change or polling refresh.
+  const dismissedThisVisit=useRef(new Set<string>());
   const mounted=useRef(false);
   const generation=useRef(0);
   const load=useCallback(async()=>{
@@ -73,9 +76,10 @@ export function FeatureUpdatePopup({role}:{role:Role}) {
       const receipts=await supabase!.from('feature_update_receipts').select('update_id,revision').eq('user_id',id);
       if(updates.error||receipts.error)throw new Error('load');
       if(!mounted.current||version!==generation.current)return;
+      if(userId.current!==id)dismissedThisVisit.current.clear();
       userId.current=id;
       const seen=new Set((receipts.data||[]).map(r=>`${r.update_id}:${r.revision}`));
-      setPending((updates.data as FeatureUpdate[]).filter(u=>!seen.has(`${u.id}:${u.revision}`)));
+      setPending((updates.data as FeatureUpdate[]).filter(u=>!dismissedThisVisit.current.has(`${u.id}:${u.revision}`)&&(u.display_frequency==='every_visit'||!seen.has(`${u.id}:${u.revision}`))));
     } catch { /* Optional notices must not block classroom access on a network failure. */ }
   },[role]);
   useEffect(()=>{mounted.current=true;void load();const refresh=()=>{if(document.visibilityState==='visible')void load();};const timer=window.setInterval(refresh,60000);window.addEventListener('classroom-settings-changed',refresh);window.addEventListener('focus',refresh);return()=>{mounted.current=false;generation.current++;clearInterval(timer);window.removeEventListener('classroom-settings-changed',refresh);window.removeEventListener('focus',refresh);};},[load]);
@@ -84,6 +88,7 @@ export function FeatureUpdatePopup({role}:{role:Role}) {
     try {
       const result=await supabase!.from('feature_update_receipts').insert({user_id:userId.current,update_id:item.id,revision:item.revision});
       if(result.error&&result.error.code!=='23505')throw result.error;
+      dismissedThisVisit.current.add(`${item.id}:${item.revision}`);
       if(mounted.current)setPending(current=>current.filter(i=>!(i.id===item.id&&i.revision===item.revision)));
     } catch {setError('บันทึกการรับทราบไม่สำเร็จ กรุณาลองใหม่');void load();}
     finally {setBusy(false);}

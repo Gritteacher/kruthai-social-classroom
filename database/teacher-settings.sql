@@ -27,6 +27,8 @@ create table if not exists public.feature_updates (
   revision integer not null default 1 check(revision>0),
   updated_at timestamptz not null default now()
 );
+alter table public.feature_updates add column if not exists display_frequency text not null
+  default 'once' check(display_frequency in ('once','every_visit'));
 create or replace function public.bump_feature_update_revision() returns trigger
 language plpgsql set search_path=public as $$
 begin
