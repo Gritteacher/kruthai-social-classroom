@@ -1,23 +1,13 @@
 import { supabase } from "../lib/supabase";
-
-const SCORE_ENTRY_PAGE_SIZE = 1000;
+import { fetchAllRows } from "./pagination";
 
 export async function fetchAllScoreEntryRows() {
   if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
 
-  const rows: Record<string, unknown>[] = [];
-  for (let from = 0; ; from += SCORE_ENTRY_PAGE_SIZE) {
-    const result = await supabase
+  const client = supabase;
+  return fetchAllRows((from, to) => client
       .from("score_entries")
-      .select("*")
-      .order("updated_at", { ascending: false })
+      .select("*", { count: "exact" })
       .order("id", { ascending: true })
-      .range(from, from + SCORE_ENTRY_PAGE_SIZE - 1);
-
-    if (result.error) return { data: rows, error: result.error };
-
-    const page = (result.data ?? []) as Record<string, unknown>[];
-    rows.push(...page);
-    if (page.length < SCORE_ENTRY_PAGE_SIZE) return { data: rows, error: null };
-  }
+      .range(from, to));
 }

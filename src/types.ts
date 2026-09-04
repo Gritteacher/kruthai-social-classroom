@@ -122,6 +122,7 @@ export interface SubmissionRecord {
   groupMemberNames: string[];
   previewUrl?: string;
   status: SubmissionStatus;
+  reviewStatus?: SubmissionStatus;
   submittedAt: string;
   reviewedAt?: string;
   reviewedAtRaw?: string;

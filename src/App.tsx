@@ -59,6 +59,7 @@ import {
 } from "./lib/validation";
 import { createOrResetStudentAccount } from "./services/studentService";
 import { fetchAllScoreEntryRows } from "./services/scoreService";
+import { fetchAllRows } from "./services/pagination";
 import AiAssistant from "./features/assistant/AiAssistant";
 import { FeatureUpdateManager, FeatureUpdatePopup } from "./features/settings/FeatureUpdates";
 import { exportClassroomScoreExcel, exportClassroomScorePdf } from "./services/pdfExportService";
@@ -281,10 +282,15 @@ function App() {
   const [scoreEntries, setScoreEntries] = useState<ScoreEntry[]>([]);
   const [scoreAutoSaveStates, setScoreAutoSaveStates] = useState<Record<string, ScoreAutoSaveStatus>>({});
   const [submissionItems, setSubmissionItems] = useState<SubmissionRecord[]>([]);
+  const submissionReviewDrafts = useRef(new Map<string, Partial<SubmissionRecord>>());
+  const classroomLoadVersion = useRef(0);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatTypingByStudent, setChatTypingByStudent] = useState<Record<string, ChatTypingStatus>>({});
   const scoreAutoSaveTimers = useRef(new Map<string, number>());
   const scoreAutoSaveVersions = useRef(new Map<string, number>());
+  const scoreAutoSaveInFlight = useRef(new Map<string, Promise<void>>());
+  const scoreDraftEntries = useRef(new Map<string, ScoreEntry>());
+  const scoreWriteRevision = useRef(0);
   const chatTypingChannel = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(null);
   const chatTypingClearTimers = useRef(new Map<string, number>());
   const nav = session?.role === "student" ? studentNav : teacherNav;
@@ -352,6 +358,8 @@ function App() {
   }, []);
 
   async function loadClassroomData(showToast = false) {
+    const loadVersion = ++classroomLoadVersion.current;
+    const scoreRevision = scoreWriteRevision.current;
     setLoadingData(true);
     if (!isSupabaseConfigured) {
       setLoadingData(false);
@@ -366,13 +374,17 @@ function App() {
         client.from("announcements").select("*").order("published_at", { ascending: false }),
         client.from("student_home_cards").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
         client.from("material_download_logs").select("*").order("downloaded_at", { ascending: false }),
-        client.from("students").select("*").order("student_no", { ascending: true }),
-        client.from("score_assignments").select("*").order("created_at", { ascending: true }),
+        fetchAllRows((from, to) => client.from("students").select("*", { count: "exact" }).order("student_no", { ascending: true }).order("id").range(from, to)),
+        fetchAllRows((from, to) => client.from("score_assignments").select("*", { count: "exact" }).order("created_at", { ascending: true }).order("id").range(from, to)),
         fetchAllScoreEntryRows(),
-        client.from("submissions").select("*").order("submitted_at", { ascending: false }),
-        client.from("submission_ai_reviews").select("*"),
+        fetchAllRows((from, to) => client.from("submissions").select("*", { count: "exact" }).order("submitted_at", { ascending: false }).order("id").range(from, to)),
+        fetchAllRows((from, to) => client.from("submission_ai_reviews").select("*", { count: "exact" }).order("id").range(from, to)),
         client.from("chat_messages").select("*").order("created_at", { ascending: true })
       ]);
+
+      if (loadVersion !== classroomLoadVersion.current) return false;
+      const criticalError = [classroomsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult].find((result) => result.error)?.error;
+      if (criticalError) throw new Error(userFacingError(criticalError, "โหลดงานหรือคะแนนไม่ครบ ระบบยังคงแสดงข้อมูลชุดก่อนหน้า กรุณาลองโหลดใหม่"));
 
       const errors = [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult, submissionAiResult, chatResult].filter((result) => result.error);
       if (errors.length) flash("บางตารางใน Supabase ยังไม่พร้อม กรุณาตรวจ schema แล้วลองโหลดใหม่");
@@ -387,13 +399,14 @@ function App() {
         }
         return nextClassrooms[0]?.id || "";
       });
-      setMaterialItems((materialsResult.data ?? []).filter((row) => row.file_path).map(mapMaterialRow));
-      setAnnouncementItems((announcementsResult.data ?? []).map(mapAnnouncementRow));
-      setStudentHomeCards((homeCardsResult.data ?? []).map(mapStudentHomeCardRow));
-      setMaterialDownloadLogs((downloadLogsResult.data ?? []).map(mapMaterialDownloadLogRow));
+      if (!materialsResult.error) setMaterialItems((materialsResult.data ?? []).filter((row) => row.file_path).map(mapMaterialRow));
+      if (!announcementsResult.error) setAnnouncementItems((announcementsResult.data ?? []).map(mapAnnouncementRow));
+      if (!homeCardsResult.error) setStudentHomeCards((homeCardsResult.data ?? []).map(mapStudentHomeCardRow));
+      if (!downloadLogsResult.error) setMaterialDownloadLogs((downloadLogsResult.data ?? []).map(mapMaterialDownloadLogRow));
       setStudents((studentsResult.data ?? []).map(mapStudentRow));
       if (session?.role === "student") {
         const peersResult = await client.rpc("get_classroom_peers");
+        if (loadVersion !== classroomLoadVersion.current) return false;
         if (peersResult.error) {
           setClassroomPeers([]);
           flash("ยังโหลดรายชื่อเพื่อนในห้องไม่ได้ กรุณาตรวจ schema ล่าสุด");
@@ -404,7 +417,9 @@ function App() {
         setClassroomPeers([]);
       }
       setAssignments((assignmentsResult.data ?? []).map(mapAssignmentRow));
-      setScoreEntries((entriesResult.data ?? []).map(mapScoreEntryRow));
+      const nextEntries = new Map((entriesResult.data ?? []).map(mapScoreEntryRow).map((entry) => [scoreEntryKey(entry.assignmentId, entry.studentRecordId), entry]));
+      scoreDraftEntries.current.forEach((entry, key) => nextEntries.set(key, entry));
+      if (scoreRevision === scoreWriteRevision.current) setScoreEntries([...nextEntries.values()]);
       const aiReviewsBySubmission = new Map((submissionAiResult.data ?? []).map(mapSubmissionAiReviewRow).map((review) => [review.submissionId, review]));
       setSubmissionItems((current) => {
         const localReviews = new Map(current.flatMap((item) => {
@@ -416,15 +431,22 @@ function App() {
         }));
         return (submissionsResult.data ?? [])
           .map(mapSubmissionRow)
-          .map((item) => ({ ...item, aiReview: aiReviewsBySubmission.get(item.id) ?? localReviews.get(item.id) }))
+          .map((item) => {
+            if (item.status === "ตรวจแล้ว") submissionReviewDrafts.current.delete(item.id);
+            const draft = submissionReviewDrafts.current.get(item.id);
+            const merged = { ...item, ...draft };
+            return { ...merged, finalScore: draft ? scaledScore(merged.rawScore, merged.rawMax, merged.finalMax) : item.finalScore, aiReview: aiReviewsBySubmission.get(item.id) ?? localReviews.get(item.id) ?? (submissionAiResult.error ? current.find((old) => old.id === item.id)?.aiReview : undefined) };
+          })
           .filter((item) => !isLegacyDemoSubmission(item));
       });
-      setChatMessages((chatResult.data ?? []).map(mapChatMessageRow));
+      if (!chatResult.error) setChatMessages((chatResult.data ?? []).map(mapChatMessageRow));
       if (showToast && errors.length === 0) flash("โหลดข้อมูลล่าสุดจาก Supabase แล้ว");
+      return true;
     } catch (error) {
-      flash(userFacingError(error, "โหลดข้อมูลจาก Supabase ไม่สำเร็จ"));
+      if (loadVersion === classroomLoadVersion.current) flash(userFacingError(error, "โหลดข้อมูลจาก Supabase ไม่สำเร็จ"));
+      return false;
     } finally {
-      setLoadingData(false);
+      if (loadVersion === classroomLoadVersion.current) setLoadingData(false);
     }
   }
 
@@ -564,6 +586,22 @@ function App() {
 
   async function logout() {
     if (isSupabaseConfigured) await supabase!.auth.signOut();
+    classroomLoadVersion.current++;
+    submissionReviewDrafts.current.clear();
+    cancelScoreAutoSaves(new Set(scoreAutoSaveVersions.current.keys()));
+    setClassroomItems([]);
+    setSelectedClassroomId("");
+    setStudents([]);
+    setClassroomPeers([]);
+    setAssignments([]);
+    setScoreEntries([]);
+    setSubmissionItems([]);
+    setMaterialItems([]);
+    setAnnouncementItems([]);
+    setStudentHomeCards([]);
+    setMaterialDownloadLogs([]);
+    setChatMessages([]);
+    setLoadingData(false);
     setSession(null);
     setView("home");
   }
@@ -1320,6 +1358,7 @@ function App() {
       if (timer) window.clearTimeout(timer);
       scoreAutoSaveTimers.current.delete(key);
       scoreAutoSaveVersions.current.set(key, (scoreAutoSaveVersions.current.get(key) ?? 0) + 1);
+      scoreDraftEntries.current.delete(key);
     });
     setScoreAutoSaveStates((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !keys.has(key))));
   }
@@ -1348,6 +1387,8 @@ function App() {
       if (result.error) throw result.error;
       if (scoreAutoSaveVersions.current.get(key) !== version) return;
       const savedEntry = mapScoreEntryRow(result.data);
+      scoreWriteRevision.current++;
+      scoreDraftEntries.current.delete(key);
       setScoreEntries((current) => {
         const exists = current.some((entry) => entry.assignmentId === assignment.id && entry.studentRecordId === student.id);
         return exists ? current.map((entry) => entry.assignmentId === assignment.id && entry.studentRecordId === student.id ? savedEntry : entry) : [...current, savedEntry];
@@ -1367,6 +1408,7 @@ function App() {
 
   function setScoreEntryDraft(assignment: ScoreAssignment, student: StudentRecord, rawScore: number, status: ScoreEntryStatus) {
     const nextEntry = buildScoreEntry(assignment, student, rawScore, status);
+    scoreDraftEntries.current.set(scoreEntryKey(assignment.id, student.id), nextEntry);
     setScoreEntries((current) => {
       const exists = current.some((entry) => entry.assignmentId === assignment.id && entry.studentRecordId === student.id);
       const next = exists
@@ -1383,7 +1425,19 @@ function App() {
     const currentTimer = scoreAutoSaveTimers.current.get(key);
     if (currentTimer) window.clearTimeout(currentTimer);
     setScoreAutoSaveState(key, "pending");
-    const timer = window.setTimeout(() => void autoSaveScoreEntry(assignment, student, rawScore, status, key, version), 900);
+    const timer = window.setTimeout(() => {
+      // Serialize writes to the same cell so a slower old request cannot win.
+      const previous = scoreAutoSaveInFlight.current.get(key) ?? Promise.resolve();
+      const saving = previous.then(async () => {
+        if (scoreAutoSaveVersions.current.get(key) === version) {
+          await autoSaveScoreEntry(assignment, student, rawScore, status, key, version);
+        }
+      });
+      scoreAutoSaveInFlight.current.set(key, saving);
+      void saving.finally(() => {
+        if (scoreAutoSaveInFlight.current.get(key) === saving) scoreAutoSaveInFlight.current.delete(key);
+      });
+    }, 900);
     scoreAutoSaveTimers.current.set(key, timer);
   }
 
@@ -1503,17 +1557,19 @@ function App() {
   }
 
   function updateSubmissionDraft(id: string, patch: Partial<SubmissionRecord>) {
+    // A draft status must not remove the work from the queue before the RPC commits.
+    const { status, ...values } = patch;
+    const draft = { ...submissionReviewDrafts.current.get(id), ...values, ...(status ? { reviewStatus: status } : {}) };
+    submissionReviewDrafts.current.set(id, draft);
     setSubmissionItems((current) => current.map((item) => {
       if (item.id !== id) return item;
-      const merged = { ...item, ...patch };
+      const merged = { ...item, ...draft };
       return { ...merged, finalScore: scaledScore(merged.rawScore, merged.rawMax, merged.finalMax) };
     }));
   }
 
   async function reviewSubmissionAndSyncScores(item: SubmissionRecord) {
     const rawScore = Math.max(0, Math.min(item.rawMax, item.rawScore));
-    const finalScore = Math.max(0, Math.min(item.finalMax, scaledScore(rawScore, item.rawMax, item.finalMax)));
-    const reviewedItem: SubmissionRecord = { ...item, status: "ตรวจแล้ว", rawScore, finalScore };
     const result = await supabase!.rpc("review_submission_and_sync_scores", {
       p_submission_id: item.id,
       p_status: "ตรวจแล้ว",
@@ -1523,19 +1579,31 @@ function App() {
     });
     if (result.error) throw result.error;
     const savedRow = Array.isArray(result.data) ? result.data[0] : result.data;
-    return savedRow ? { ...mapSubmissionRow(savedRow), status: "ตรวจแล้ว" as SubmissionStatus } : reviewedItem;
+    if (!savedRow || savedRow.id !== item.id || savedRow.status !== "ตรวจแล้ว") {
+      throw new Error("ยังไม่ได้รับการยืนยันว่าบันทึกผลตรวจสำเร็จ กรุณาโหลดข้อมูลใหม่เพื่อตรวจสอบก่อนลองอีกครั้ง");
+    }
+    submissionReviewDrafts.current.delete(item.id);
+    return mapSubmissionRow(savedRow);
+  }
+
+  async function finishPriorScoreSaves(items: SubmissionRecord[]) {
+    const keys = new Set(items.flatMap((item) => students
+      .filter((student) => student.classroomId === item.classroomId && (item.groupMemberCodes.length ? item.groupMemberCodes : [item.studentId]).includes(student.studentId))
+      .flatMap((student) => item.assignmentId ? [scoreEntryKey(item.assignmentId, student.id)] : [])));
+    cancelScoreAutoSaves(keys);
+    await Promise.all([...keys].map((key) => scoreAutoSaveInFlight.current.get(key)));
   }
 
   async function saveSubmissionReview(item: SubmissionRecord) {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
+      await finishPriorScoreSaves([item]);
       const savedItem = await reviewSubmissionAndSyncScores(item);
-      cancelScoreAutoSaves(new Set(Array.from(scoreAutoSaveTimers.current.keys())));
       setSubmissionItems((current) => current.map((entry) => entry.id === item.id ? savedItem : entry));
-      await loadClassroomData();
+      const refreshed = await loadClassroomData();
       const groupSuffix = item.submissionKind === "group" ? ` และสมาชิกกลุ่มรวม ${item.groupMemberCodes.length} คน` : "";
-      flash(`ตรวจงานของ ${item.studentName}${groupSuffix} แล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย`);
+      flash(refreshed ? `ตรวจงานของ ${item.studentName}${groupSuffix} แล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย` : "บันทึกผลตรวจแล้ว แต่โหลดตารางคะแนนล่าสุดไม่สำเร็จ กรุณาโหลดข้อมูลใหม่");
     } catch (error) {
       flash(userFacingError(error, "บันทึกผลตรวจงานไม่สำเร็จ"));
     } finally {
@@ -1555,18 +1623,18 @@ function App() {
     }
     setBusy(true);
     try {
+      await finishPriorScoreSaves(uniqueItems);
       const results = await Promise.allSettled(uniqueItems.map(reviewSubmissionAndSyncScores));
       const savedItems = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
       const savedById = new Map(savedItems.map((item) => [item.id, item]));
-      cancelScoreAutoSaves(new Set(Array.from(scoreAutoSaveTimers.current.keys())));
       setSubmissionItems((current) => current.map((item) => savedById.get(item.id) ?? item));
-      await loadClassroomData();
+      const refreshed = await loadClassroomData();
       const failedCount = results.length - savedItems.length;
       if (failedCount) {
         flash(`บันทึกสำเร็จ ${savedItems.length} งาน และไม่สำเร็จ ${failedCount} งาน กรุณาตรวจคะแนนแล้วลองอีกครั้ง`);
         return false;
       }
-      flash(`บันทึกคะแนน ${savedItems.length} งานแล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย`);
+      flash(refreshed ? `บันทึกคะแนน ${savedItems.length} งานแล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย` : "บันทึกผลตรวจแล้ว แต่โหลดตารางคะแนนล่าสุดไม่สำเร็จ กรุณาโหลดข้อมูลใหม่");
       return true;
     } catch (error) {
       flash(userFacingError(error, "บันทึกคะแนนหลายงานไม่สำเร็จ"));
@@ -2934,7 +3002,7 @@ function ReviewCard({ item, busy, updateSubmission, saveSubmission, deleteSubmis
         <div className="review-file-box">{isLink ? <ExternalLink aria-hidden /> : <FileText aria-hidden />}<div><span>{isLink ? "ลิงก์งาน" : item.fileDeletedAtRaw ? "ไฟล์ถูกลบแล้ว" : "ไฟล์งาน"}</span><strong>{isLink ? item.linkUrl : attachmentName}</strong>{retentionNote && <small className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</small>}</div><button className="template-button submission-preview-trigger" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl}><Eye aria-hidden />{item.fileDeletedAtRaw ? "ลบแล้ว" : "ดูตัวอย่าง"}</button></div>
       </div>
       <div className="review-grid">
-        <label className="field">สถานะ<select value={item.status} onChange={(event) => updateSubmission(item.id, { status: event.target.value as SubmissionStatus })}>{submissionStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
+        <label className="field">สถานะ<select value={item.reviewStatus ?? item.status} onChange={(event) => updateSubmission(item.id, { status: event.target.value as SubmissionStatus })}>{submissionStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
         <label className="field">คะแนนดิบ<input type="number" min="0" value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="0" /></label>
         <label className="field">เต็มดิบ<input type="number" min="1" value={item.rawMax} onChange={(event) => updateSubmission(item.id, { rawMax: positiveNumber(event.target.value, item.rawMax) })} /></label>
         <label className="field">คะแนนเก็บเต็ม<input type="number" min="1" value={item.finalMax} onChange={(event) => updateSubmission(item.id, { finalMax: positiveNumber(event.target.value, item.finalMax) })} /></label>
