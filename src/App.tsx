@@ -58,6 +58,7 @@ import {
 } from "./lib/validation";
 import { createOrResetStudentAccount } from "./services/studentService";
 import { fetchAllScoreEntryRows } from "./services/scoreService";
+import AiAssistant from "./features/assistant/AiAssistant";
 import { exportClassroomScoreExcel, exportClassroomScorePdf } from "./services/pdfExportService";
 import {
   isLegacyDemoSubmission,
@@ -201,6 +202,7 @@ const teacherNav: NavItem[] = [
   { key: "work", label: "ตรวจงาน", icon: ClipboardCheck },
   { key: "students", label: "รายชื่อ", icon: Users },
   { key: "chat", label: "แชท", icon: MessageCircle },
+  { key: "assistant", label: "ผู้ช่วย AI", icon: Sparkles },
   { key: "profile", label: "โปรไฟล์", icon: User }
 ];
 
@@ -210,6 +212,7 @@ const studentNav: NavItem[] = [
   { key: "work", label: "ส่งงาน", icon: CloudUpload },
   { key: "scores", label: "คะแนน", icon: BarChart3 },
   { key: "chat", label: "แชท", icon: MessageCircle },
+  { key: "assistant", label: "ผู้ช่วย AI", icon: Sparkles },
   { key: "profile", label: "โปรไฟล์", icon: User }
 ];
 
@@ -1800,6 +1803,7 @@ function App() {
             <h2>{session.role === "teacher" ? (view === "home" ? "ภาพรวมทุกห้อง" : activeClassName) : session.room}</h2>
           </div>
           <div className="top-actions">
+            <button className="mobile-ai-button" type="button" onClick={() => setView("assistant")} title="ผู้ช่วย AI" aria-label="ผู้ช่วย AI"><Sparkles aria-hidden /></button>
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
             <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
             <button className={`mobile-chat-button ${view === "chat" ? "active" : ""}`} type="button" onClick={() => setView("chat")} title="แชท"><MessageCircle aria-hidden /><span>แชท</span></button>
@@ -1817,6 +1821,7 @@ function App() {
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} submissions={activeSubmissions} downloadLogs={activeDownloadLogs} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
           {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
+          <div hidden={view !== "assistant"}><AiAssistant role={session.role} classrooms={classroomItems} students={students} materials={activeMaterials} /></div>
         </section>
       </main>
       <nav className="bottom-nav">{bottomNav.map((item) => <NavButton key={item.key} item={item} active={view === item.key} onClick={() => setView(item.key)} />)}</nav>

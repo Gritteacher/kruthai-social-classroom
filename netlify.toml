@@ -18,6 +18,10 @@
   # Include the Lambda binary when a production deploy is built on macOS.
   included_files = ["node_modules/@napi-rs/canvas-linux-x64-gnu/**"]
 
+[functions."ai-assistant"]
+  external_node_modules = ["pdfjs-dist"]
+  included_files = ["node_modules/@napi-rs/canvas-linux-x64-gnu/**"]
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

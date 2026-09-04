@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 
 export type Role = "teacher" | "student";
-export type ViewKey = "home" | "materials" | "scores" | "work" | "students" | "chat" | "profile";
+export type ViewKey = "home" | "materials" | "scores" | "work" | "students" | "chat" | "profile" | "assistant";
 export type MaterialType = "PDF" | "VIDEO" | "IMG";
 export type SubmissionStatus = "ยังไม่ส่ง" | "ส่งแล้ว" | "รอตรวจ" | "ตรวจแล้ว" | "ให้แก้ไข" | "ส่งช้า";
 export type SubmissionKind = "individual" | "group";
