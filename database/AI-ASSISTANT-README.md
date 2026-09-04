@@ -19,8 +19,8 @@ history is ignored. Conversation IDs are always scoped to the authenticated user
 Questions, answers, timestamps, author identity, score snapshots and failures
 are stored in `ai_assistant_exchanges`. RLS allows students to read only their
 own exchanges; teachers can read all exchanges in the explicit history tab.
-Only the server can insert/update logs. A notice about teacher visibility is
-shown before sending. New conversations do not delete existing history.
+Only the server can insert/update logs. The chat displays a recording notice
+before sending. New conversations do not delete existing history.
 No pre-existing browser-only conversations can be recovered retroactively.
 The chat view resumes the latest 100 exchanges; the history browser has paging
 for older exchanges. Teachers can filter by name and role. Chat remains usable

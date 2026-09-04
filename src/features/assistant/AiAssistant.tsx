@@ -75,7 +75,7 @@ export default function AiAssistant({ role, classrooms, students, materials }: {
   return <div className="ai-page">
     <header className="ai-heading"><h1><Sparkles aria-hidden />ผู้ช่วย AI</h1><button className="icon-button" type="button" title="เริ่มบทสนทนาใหม่" aria-label="เริ่มบทสนทนาใหม่" disabled={busy || loadingHistory} onClick={reset}><Plus aria-hidden /></button></header>
     <div className="ai-mode" role="tablist" aria-label="ผู้ช่วย AI"><button role="tab" aria-selected={panel==='chat'} disabled={busy || loadingHistory} onClick={()=>setPanel('chat')}>แชท</button><button role="tab" aria-selected={panel==='history'} disabled={busy || loadingHistory} onClick={()=>setPanel('history')}>{role==='teacher' ? 'ประวัติการสนทนา' : 'ประวัติของฉัน'}</button></div>
-    <div className="ai-disclaimer">คำถามและคำตอบถูกบันทึก ครูสามารถอ่านประวัติได้ · ไม่ควรส่งรหัสผ่านหรือข้อมูลลับ · AI อาจตอบผิดได้</div>
+    <div className="ai-disclaimer">คำถามและคำตอบถูกบันทึก · ไม่ควรส่งรหัสผ่านหรือข้อมูลลับ · AI อาจตอบผิดได้</div>
     {panel==='history' ? <AiHistory role={role} onResume={resume} disabled={loadingHistory} /> : <>
     <details className="ai-context"><summary>ข้อมูลประกอบ</summary>
     <div className="ai-filters">
