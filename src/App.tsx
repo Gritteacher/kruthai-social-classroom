@@ -59,6 +59,7 @@ import {
 import { createOrResetStudentAccount } from "./services/studentService";
 import { fetchAllScoreEntryRows } from "./services/scoreService";
 import AiAssistant from "./features/assistant/AiAssistant";
+import { FeatureUpdateManager, FeatureUpdatePopup } from "./features/settings/FeatureUpdates";
 import { exportClassroomScoreExcel, exportClassroomScorePdf } from "./services/pdfExportService";
 import {
   isLegacyDemoSubmission,
@@ -1826,6 +1827,7 @@ function App() {
       </main>
       <nav className="bottom-nav">{bottomNav.map((item) => <NavButton key={item.key} item={item} active={view === item.key} onClick={() => setView(item.key)} />)}</nav>
       {toast && <div className="toast">{toast}</div>}
+      <FeatureUpdatePopup role={session.role} />
     </div>
   );
 }
@@ -3095,6 +3097,7 @@ function ProfileView({ session, busy, changePassword }: { session: AppSession; b
   return (
     <div className="page-stack">
       <PageHeader title="โปรไฟล์" eyebrow={session.room} />
+      {session.role === "teacher" && <FeatureUpdateManager />}
       <section className="profile-panel">
         <div><h2>{session.name}</h2><p>{session.school}</p>{session.studentCode && <span className="profile-student-code">รหัสนักเรียน {session.studentCode}</span>}</div>
       </section>

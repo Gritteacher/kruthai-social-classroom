@@ -1,0 +1,22 @@
+.teacher-settings { min-width:0; padding-block:24px; border-top:1px solid var(--line); }
+.teacher-settings h2 { font-size:20px; margin:0 0 20px; }
+.teacher-settings fieldset { border:0; padding:0; margin:0; display:grid; gap:16px; min-width:0; }
+.teacher-settings label { display:grid; gap:8px; min-width:0; }
+.teacher-settings input:not([type=checkbox]),.teacher-settings textarea,.teacher-settings select { width:100%; min-width:0; box-sizing:border-box; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); color:var(--ink); font:inherit; }
+.teacher-settings .icon-button { display:inline-flex; align-items:center; justify-content:center; flex:0 0 44px; width:44px; height:44px; }
+.ai-heading h1 {min-width:0;overflow-wrap:anywhere;}
+.teacher-settings textarea { resize:vertical; }
+.settings-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.teacher-settings .settings-check { display:flex; align-items:center; gap:10px; }
+.settings-check input { width:18px; height:18px; flex-shrink:0; }
+.settings-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.settings-update { padding-block:16px; border-top:1px solid var(--line); display:flex; gap:12px; justify-content:space-between; align-items:center; }
+.settings-update>div:first-child {min-width:0;overflow-wrap:anywhere;}
+.settings-update strong {display:block;font-weight:400;}
+.settings-update small { color:var(--muted); }
+.feature-dialog { background:var(--paper); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:24px; width:min(520px,calc(100vw - 32px)); max-height:85dvh; box-sizing:border-box; box-shadow:0 24px 80px #0004; }
+.feature-dialog::backdrop {background:#0008;}
+.feature-dialog h2 {font-size:22px;overflow-wrap:anywhere;margin:0 0 16px;}
+.feature-dialog .feature-body {white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8;max-height:55dvh;overflow:auto;}
+.feature-dialog .settings-actions {justify-content:flex-end;margin-top:20px;}
+@media(max-width:600px) { .settings-grid {grid-template-columns:1fr;} .settings-update {align-items:flex-start;flex-wrap:wrap;} .ai-mode {max-width:100%;flex-wrap:wrap;} .feature-dialog {padding:18px;} }

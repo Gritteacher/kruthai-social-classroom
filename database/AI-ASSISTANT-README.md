@@ -1,6 +1,7 @@
 # Classroom AI Assistant
 
 Run `ai-assistant-history.sql` before deploying the persistent chat feature.
+Also apply `teacher-settings.sql` for teacher-configurable chat preferences.
 Re-running it is safe. The earlier `ai-assistant.sql` usage table is retained
 for historical counts only; the endpoint no longer calls its quota RPC.
 

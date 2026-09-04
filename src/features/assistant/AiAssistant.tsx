@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Send, Sparkles, Plus } from 'lucide-react';
 import AiHistory from './AiHistory';
+import AiSettingsPanel from '../settings/AiSettingsPanel';
+import {defaultAiSettings,readAiSettings} from '../settings/settingsService';
 import { supabase } from '../../lib/supabase';
 import type { Classroom, Material, Role, StudentRecord } from '../../types';
 import './assistant.css';
@@ -13,7 +15,9 @@ type Message = { role: 'user' | 'assistant'; content: string; result?: Reply };
 const statusLabels: Record<string,string> = { ungraded:'ยังไม่ให้คะแนน',scored:'ให้คะแนนแล้ว',leave:'ลา',expired:'หมดเวลาส่ง',no_score:'ไม่มีคะแนน' };
 
 export default function AiAssistant({ role, classrooms, students, materials }: { role: Role; classrooms: Classroom[]; students: StudentRecord[]; materials: Material[] }) {
-  const [panel,setPanel] = useState<'chat'|'history'>('chat');
+  const [panel,setPanel] = useState<'chat'|'history'|'settings'>('chat');
+  const [settings,setSettings] = useState(defaultAiSettings);
+  useEffect(()=>{let active=true;const refresh=()=>{void readAiSettings().then(value=>{if(active)setSettings(value);}).catch(()=>{});};refresh();window.addEventListener('classroom-settings-changed',refresh);window.addEventListener('focus',refresh);return()=>{active=false;window.removeEventListener('classroom-settings-changed',refresh);window.removeEventListener('focus',refresh);};},[]);
   const [conversationId,setConversationId] = useState<string>(()=>crypto.randomUUID());
   const [loadingHistory,setLoadingHistory] = useState(false);
   const [classroomId,setClassroomId] = useState('');
@@ -73,10 +77,10 @@ export default function AiAssistant({ role, classrooms, students, materials }: {
   }
   const prompts = role === 'teacher' ? ['ช่วยคิดไอเดียกิจกรรมในห้องเรียน','ช่วยวางแผนงานสัปดาห์นี้'] : ['ช่วยวางแผนอ่านหนังสือให้หน่อย','ตอนนี้ฉันได้กี่คะแนนแล้ว'];
   return <div className="ai-page">
-    <header className="ai-heading"><h1><Sparkles aria-hidden />ผู้ช่วย AI</h1><button className="icon-button" type="button" title="เริ่มบทสนทนาใหม่" aria-label="เริ่มบทสนทนาใหม่" disabled={busy || loadingHistory} onClick={reset}><Plus aria-hidden /></button></header>
-    <div className="ai-mode" role="tablist" aria-label="ผู้ช่วย AI"><button role="tab" aria-selected={panel==='chat'} disabled={busy || loadingHistory} onClick={()=>setPanel('chat')}>แชท</button><button role="tab" aria-selected={panel==='history'} disabled={busy || loadingHistory} onClick={()=>setPanel('history')}>{role==='teacher' ? 'ประวัติการสนทนา' : 'ประวัติของฉัน'}</button></div>
+    <header className="ai-heading"><h1><Sparkles aria-hidden />{settings.name}</h1><button className="icon-button" type="button" title="เริ่มบทสนทนาใหม่" aria-label="เริ่มบทสนทนาใหม่" disabled={busy || loadingHistory} onClick={reset}><Plus aria-hidden /></button></header>
+    <div className="ai-mode" role="tablist" aria-label="ผู้ช่วย AI"><button role="tab" aria-selected={panel==='chat'} disabled={busy || loadingHistory} onClick={()=>setPanel('chat')}>แชท</button><button role="tab" aria-selected={panel==='history'} disabled={busy || loadingHistory} onClick={()=>setPanel('history')}>{role==='teacher' ? 'ประวัติการสนทนา' : 'ประวัติของฉัน'}</button>{role==='teacher'&&<button role="tab" aria-selected={panel==='settings'} disabled={busy||loadingHistory} onClick={()=>setPanel('settings')}>ตั้งค่า</button>}</div>
     <div className="ai-disclaimer">คำถามและคำตอบถูกบันทึก · ไม่ควรส่งรหัสผ่านหรือข้อมูลลับ · AI อาจตอบผิดได้</div>
-    {panel==='history' ? <AiHistory role={role} onResume={resume} disabled={loadingHistory} /> : <>
+    {panel==='settings'&&role==='teacher'?<AiSettingsPanel/>:panel==='history' ? <AiHistory role={role} onResume={resume} disabled={loadingHistory} /> : role==='student'&&!settings.student_enabled?<p role="status">ครูปิดผู้ช่วย AI ชั่วคราว</p>:<>
     <details className="ai-context"><summary>ข้อมูลประกอบ</summary>
     <div className="ai-filters">
       <label>สื่ออ้างอิง<select aria-label="สื่ออ้างอิง" value={materialId} disabled={busy} onChange={e=>setMaterialId(e.target.value)}><option value="">ไม่ระบุสื่อ</option>{materials.filter(m=>m.type === 'PDF').map(m=><option key={m.id} value={m.id}>{m.title}</option>)}</select></label>
@@ -86,7 +90,7 @@ export default function AiAssistant({ role, classrooms, students, materials }: {
     </details>
     <div className="ai-conversation" ref={log} role="log" aria-label="บทสนทนากับผู้ช่วย AI" aria-live="polite">
       {!messages.length && <div className="ai-empty"><Sparkles aria-hidden /><h2>วันนี้อยากคุยเรื่องอะไรครับ</h2><div>{prompts.map(prompt=><button type="button" key={prompt} disabled={busy} onClick={()=>setDraft(prompt)}>{prompt}</button>)}</div></div>}
-      {messages.map((message,index)=><article className={`ai-message ${message.role}`} key={index}><strong>{message.role === 'user' ? 'คุณ' : 'ผู้ช่วย AI'}</strong><p>{message.content}</p>{message.result?.truncated && <small>คำตอบยังไม่จบ พิมพ์ “ต่อ” เพื่อให้ AI อธิบายต่อได้</small>}{message.result?.source && <small>สื่ออ้างอิง: {message.result.source}</small>}{message.result?.snapshot && <ScoreSnapshot snapshot={message.result.snapshot} />}</article>)}
+      {messages.map((message,index)=><article className={`ai-message ${message.role}`} key={index}><strong>{message.role === 'user' ? 'คุณ' : settings.name}</strong><p>{message.content}</p>{message.result?.truncated && <small>คำตอบยังไม่จบ พิมพ์ “ต่อ” เพื่อให้ AI อธิบายต่อได้</small>}{message.result?.source && <small>สื่ออ้างอิง: {message.result.source}</small>}{message.result?.snapshot && <ScoreSnapshot snapshot={message.result.snapshot} />}</article>)}
       {busy && <div className="ai-pending" role="status">กำลังอ่านข้อมูลและเตรียมคำตอบ…</div>}
     </div>
     <form className="ai-compose" onSubmit={send}><textarea aria-label="คำถามถึงผู้ช่วย AI" rows={2} maxLength={6000} placeholder="พิมพ์ข้อความ…" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Enter' && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia('(pointer:fine)').matches){e.preventDefault();e.currentTarget.form?.requestSubmit();}}} /><button className="icon-button" type="submit" disabled={busy || !draft.trim()} title="ส่งข้อความ" aria-label="ส่งข้อความ"><Send aria-hidden /></button></form>

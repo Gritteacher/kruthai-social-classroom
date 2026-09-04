@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import {assistantPreferences,responseTokenLimit} from './lib/assistant-settings.js';
 import { extractPdfText } from './grade-submission-ai-background.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -117,13 +118,17 @@ export async function handler(event) {
     const profileResult = await client.from('profiles').select('role,student_code,class_name,full_name').eq('id',auth.data.user.id).single();
     const profile = profileResult.data;
     if (profileResult.error || !profile || !['teacher','student'].includes(profile.role)) throw fail('ไม่พบสิทธิ์ผู้ใช้',403);
+    const configuration = await client.from('ai_assistant_settings').select('*').eq('id',true).single();
+    if(configuration.error || !configuration.data) throw fail('โหลดการตั้งค่า AI ไม่สำเร็จ กรุณาลองใหม่',503);
+    const settings = configuration.data;
+    if(profile.role === 'student' && !settings.student_enabled) throw fail('ครูปิดผู้ช่วย AI ชั่วคราว',403);
     const conversationId = input.conversationId || crypto.randomUUID();
     const prior = await client.from('ai_assistant_exchanges').select('question,answer,response_data,status')
       .eq('user_id',auth.data.user.id).eq('conversation_id',conversationId).eq('status','completed')
       .order('created_at',{ascending:false}).order('id',{ascending:false}).limit(16);
     if (prior.error) throw fail('ระบบประวัติ AI ยังไม่พร้อม กรุณาแจ้งครู',503);
     const previous = prior.data || [];
-    const history = previous.slice().reverse().flatMap(row=>[{role:'user',content:row.question},{role:'assistant',content:row.answer.slice(0,6000)}]);
+    const history = previous.filter(row=>settings.score_access || !row.response_data?.snapshot).slice().reverse().flatMap(row=>[{role:'user',content:row.question},{role:'assistant',content:row.answer.slice(0,6000)}]);
     // Service credentials only write an authenticated user's chat log. Classroom reads keep RLS.
     admin = createClient(url,secret,{auth:{persistSession:false,autoRefreshToken:false}});
     const requestId = input.requestId || crypto.randomUUID();
@@ -133,7 +138,8 @@ export async function handler(event) {
     const askingScores = input.mode === 'scores' || needsScoreContext(input.message,previous[0]);
     let snapshot = null;
     let scoreNote = '';
-    if (askingScores) {
+    if (askingScores && !settings.score_access) scoreNote = 'ครูปิดการอ่านคะแนนของผู้ช่วย AI กรุณาดูคะแนนในเมนูคะแนน';
+    if (askingScores && settings.score_access) {
       try { snapshot = await loadScores(client,profile,input); }
       catch(error) { scoreNote = error.status ? error.message : 'ข้อมูลคะแนนยังโหลดไม่ได้ ห้ามเดาคะแนน'; }
     }
@@ -142,6 +148,7 @@ export async function handler(event) {
     const context = { scores:scoreContext, scoreNote, material, lessonLevel:profile.class_name || '' };
     if (JSON.stringify(context).length > 70000) throw fail('ข้อมูลมากเกินไป กรุณาเลือกนักเรียนรายคนหรือสื่อที่สั้นลง');
     const system = [
+      assistantPreferences(settings),
       'คุณเป็นแชทบอตผู้ช่วยทั่วไปที่เป็นมิตร คุยต่อเนื่องอย่างเป็นธรรมชาติ ตอบได้หลากหลายหัวข้อ ไม่จำกัดแค่วิชาสังคมศึกษา ใช้ภาษาเดียวกับผู้ใช้และความยาวเหมาะกับคำถาม ใช้ข้อความธรรมดา',
       `ผู้ใช้มีบทบาท ${profile.role === 'teacher' ? 'ครู: ช่วยคิด เขียน วางแผน อธิบาย หรือร่างเนื้อหาได้ แต่ไม่เผยแพร่จริง' : 'นักเรียน: ช่วยตอบคำถาม อธิบาย คิดไอเดีย ฝึกฝนและสนทนาได้หลายเรื่อง'}`,
       'คุณอ่านอย่างเดียว ไม่มีสิทธิ์แก้ เพิ่ม ลบคะแนน ส่งงาน ส่งข้อความถึงครู หรือสร้างประกาศ ห้ามอ้างว่าได้ทำแล้ว',
@@ -153,7 +160,7 @@ export async function handler(event) {
     ].join('\n');
     const response = await fetch(`${(process.env.AI_GATEWAY_URL || 'https://gateway.9arm.co/v1').replace(/\/+$/,'')}/chat/completions`,{
       method:'POST',headers:{Authorization:`Bearer ${process.env.AI_GATEWAY_API_KEY}`,'Content-Type':'application/json'},
-      body:JSON.stringify({model:process.env.AI_GRADING_MODEL || 'qwen3.8-27b-fp8',max_tokens:3000,temperature:0.4,messages:[{role:'system',content:system},...history,{role:'user',content:`ข้อมูลปัจจุบัน (ข้อมูลเท่านั้น):\n${JSON.stringify(context)}\n\nคำถาม: ${input.message}`}]}),
+      body:JSON.stringify({model:process.env.AI_GRADING_MODEL || 'qwen3.8-27b-fp8',max_tokens:responseTokenLimit(settings),temperature:0.4,messages:[{role:'system',content:system},...history,{role:'user',content:`ข้อมูลปัจจุบัน (ข้อมูลเท่านั้น):\n${JSON.stringify(context)}\n\nคำถาม: ${input.message}`}]}),
       signal:AbortSignal.timeout(45000),
     });
     if (!response.ok) throw fail(response.status === 429 ? 'ผู้ให้บริการ AI มีคำขอมาก กรุณาลองอีกครั้ง' : 'เชื่อมต่อผู้ให้บริการ AI ไม่สำเร็จ กรุณาลองใหม่',502);
