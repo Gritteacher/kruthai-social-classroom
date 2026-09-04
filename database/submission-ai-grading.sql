@@ -1,6 +1,9 @@
 -- Run this focused patch in the Supabase SQL editor.
 -- It adds automatic AI grading for regular file/link submissions.
 
+alter table public.score_entries add column if not exists source_type text;
+alter table public.score_entries add column if not exists source_id uuid;
+
 create table if not exists public.submission_ai_reviews (
   id uuid primary key default gen_random_uuid(),
   submission_id uuid not null unique references public.submissions (id) on delete cascade,
@@ -39,12 +42,18 @@ for select to authenticated using (
   )
 );
 
+drop function if exists public.apply_submission_ai_grade(uuid, numeric, numeric, text, text);
 create or replace function public.apply_submission_ai_grade(
   p_submission_id uuid,
   p_raw_score numeric,
   p_confidence numeric,
   p_feedback text,
-  p_model text
+  p_model text,
+  p_expected_file_path text,
+  p_expected_link_url text,
+  p_expected_raw_max numeric,
+  p_expected_final_max numeric,
+  p_requested_at timestamptz
 )
 returns public.submissions
 language plpgsql
@@ -59,13 +68,13 @@ declare
   v_final_score numeric;
   v_member_codes text[];
   v_target_count integer;
+  v_expected_count integer;
 begin
-  if current_user not in ('postgres', 'service_role', 'supabase_admin')
-    and coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
     raise exception 'SERVICE_ROLE_REQUIRED' using errcode = '42501';
   end if;
 
-  if p_confidence is null or p_confidence < 0 or p_confidence > 1 then
+  if p_confidence is null or p_confidence < 0.65 or p_confidence > 1 then
     raise exception 'INVALID_AI_CONFIDENCE' using errcode = '22023';
   end if;
 
@@ -80,6 +89,15 @@ begin
   if v_submission.status = 'ตรวจแล้ว' then
     raise exception 'SUBMISSION_ALREADY_REVIEWED' using errcode = '22023';
   end if;
+  if v_submission.file_path is distinct from p_expected_file_path
+    or v_submission.link_url is distinct from p_expected_link_url then
+    raise exception 'AI_SOURCE_CHANGED' using errcode = '22023';
+  end if;
+  perform 1 from public.submission_ai_reviews
+  where submission_id = p_submission_id and status = 'processing'
+    and requested_at = p_requested_at
+  for update;
+  if not found then raise exception 'AI_SOURCE_CHANGED' using errcode = '22023'; end if;
   if v_submission.assignment_id is null then
     raise exception 'ASSIGNMENT_NOT_FOUND_FOR_SUBMISSION' using errcode = '22023';
   end if;
@@ -92,6 +110,15 @@ begin
     raise exception 'ASSIGNMENT_NOT_FOUND_FOR_SUBMISSION' using errcode = '22023';
   end if;
 
+  if v_assignment.classroom_id is distinct from v_submission.classroom_id
+    or v_assignment.raw_max is distinct from p_expected_raw_max
+    or v_assignment.final_max is distinct from p_expected_final_max then
+    raise exception 'AI_ASSIGNMENT_CHANGED' using errcode = '22023';
+  end if;
+  if p_raw_score is null or p_raw_score < 0 or p_raw_score > v_assignment.raw_max then
+    raise exception 'INVALID_AI_SCORE' using errcode = '22023';
+  end if;
+
   v_bounded_raw_score := greatest(0, least(coalesce(p_raw_score, 0), v_assignment.raw_max));
   v_final_score := greatest(
     0,
@@ -101,6 +128,16 @@ begin
     nullif(v_submission.group_member_codes, array[]::text[]),
     array[v_submission.student_code]
   );
+
+  if exists (
+    select 1 from public.submissions newer
+    where newer.assignment_id = v_submission.assignment_id
+      and (newer.submitted_at, newer.id) > (v_submission.submitted_at, v_submission.id)
+      and (newer.student_code = any(v_member_codes) or newer.group_member_codes && v_member_codes)
+  ) then
+    raise exception 'AI_NEWER_SUBMISSION' using errcode = '22023';
+  end if;
+  select count(distinct code) into v_expected_count from unnest(v_member_codes) code;
 
   update public.submissions
   set
@@ -119,16 +156,7 @@ begin
       student.student_code
     from public.students student
     where student.student_code = any(v_member_codes)
-      and (
-        v_submission.classroom_id is null
-        or student.classroom_id = v_submission.classroom_id
-        or not exists (
-          select 1
-          from public.students exact_student
-          where exact_student.student_code = student.student_code
-            and exact_student.classroom_id = v_submission.classroom_id
-        )
-      )
+      and student.classroom_id = v_submission.classroom_id
     order by
       student.student_code,
       case when student.classroom_id = v_submission.classroom_id then 0 else 1 end,
@@ -173,12 +201,13 @@ begin
       source_type = excluded.source_type,
       source_id = excluded.source_id,
       updated_at = now()
+    where public.score_entries.score_status in ('ungraded', 'leave')
     returning 1
   )
   select count(*) into v_target_count from upserted;
 
-  if coalesce(v_target_count, 0) = 0 then
-    raise exception 'STUDENT_NOT_FOUND_FOR_SCORE' using errcode = '22023';
+  if coalesce(v_target_count, 0) = 0 or v_target_count <> v_expected_count then
+    raise exception 'AI_SCORE_CONFLICT' using errcode = '22023';
   end if;
 
   update public.submission_ai_reviews
@@ -197,15 +226,15 @@ begin
 end;
 $$;
 
-revoke all on function public.apply_submission_ai_grade(uuid, numeric, numeric, text, text)
+revoke all on function public.apply_submission_ai_grade(uuid, numeric, numeric, text, text, text, text, numeric, numeric, timestamptz)
   from public, anon, authenticated;
-grant execute on function public.apply_submission_ai_grade(uuid, numeric, numeric, text, text)
+grant execute on function public.apply_submission_ai_grade(uuid, numeric, numeric, text, text, text, text, numeric, numeric, timestamptz)
   to service_role;
 grant select on public.submission_ai_reviews to authenticated;
 
 comment on table public.submission_ai_reviews
 is 'Server-generated AI grading status and feedback for regular submissions.';
-comment on function public.apply_submission_ai_grade(uuid, numeric, numeric, text, text)
+comment on function public.apply_submission_ai_grade(uuid, numeric, numeric, text, text, text, text, numeric, numeric, timestamptz)
 is 'Service-role-only transaction that applies an AI score to a submission and all group members.';
 
 notify pgrst, 'reload schema';
