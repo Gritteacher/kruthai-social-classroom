@@ -218,8 +218,8 @@ const studentNav: NavItem[] = [
 ];
 
 const bottomNavKeys: Record<Role, ViewKey[]> = {
-  teacher: ["home", "materials", "scores", "work", "students"],
-  student: ["home", "materials", "work", "scores", "profile"]
+  teacher: ["home", "materials", "assistant", "scores", "work"],
+  student: ["home", "materials", "assistant", "scores", "work"]
 };
 
 function getBottomNavItems(role: Role | undefined, items: NavItem[]) {
@@ -1804,12 +1804,12 @@ function App() {
             <h2>{session.role === "teacher" ? (view === "home" ? "ภาพรวมทุกห้อง" : activeClassName) : session.room}</h2>
           </div>
           <div className="top-actions">
-            <button className="mobile-ai-button" type="button" onClick={() => setView("assistant")} title="ผู้ช่วย AI" aria-label="ผู้ช่วย AI"><Sparkles aria-hidden /></button>
+            {session.role === "teacher" && <button className={`mobile-students-button ${view === "students" ? "active" : ""}`} type="button" onClick={() => setView("students")} title="รายชื่อ" aria-label="รายชื่อ"><Users aria-hidden /></button>}
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
             <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
             <button className={`mobile-chat-button ${view === "chat" ? "active" : ""}`} type="button" onClick={() => setView("chat")} title="แชท"><MessageCircle aria-hidden /><span>แชท</span></button>
             <button className="theme-toggle-button" type="button" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title="เปลี่ยนธีม">{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}<span>{theme === "light" ? "โทนมืด" : "โทนสว่าง"}</span></button>
-            {session.role === "teacher" && <button className={`mobile-profile-button ${view === "profile" ? "active" : ""}`} type="button" onClick={() => setView("profile")} title="โปรไฟล์"><User aria-hidden /><span>โปรไฟล์</span></button>}
+            <button className={`mobile-profile-button ${view === "profile" ? "active" : ""}`} type="button" onClick={() => setView("profile")} title="โปรไฟล์"><User aria-hidden /><span>โปรไฟล์</span></button>
             <button className="mobile-logout-button" onClick={logout} title="ออกจากระบบ"><LogOut aria-hidden /><span>ออกจากระบบ</span></button>
           </div>
         </header>
@@ -1876,7 +1876,7 @@ function RoleCard({ selected, icon: Icon, title, onClick }: { selected: boolean;
 
 function NavButton({ item, active, onClick }: { item: NavItem; active: boolean; onClick: () => void }) {
   const Icon = item.icon;
-  return <button className={active ? "active" : ""} data-nav-key={item.key} onClick={onClick} title={item.label} type="button"><Icon aria-hidden /><span>{item.label}</span></button>;
+  return <button className={active ? "active" : ""} data-nav-key={item.key} aria-current={active ? "page" : undefined} onClick={onClick} title={item.label} type="button"><Icon aria-hidden /><span>{item.label}</span></button>;
 }
 
 function TeacherClassroomSelector({ classrooms, selectedClassroomId, onChange }: { classrooms: Classroom[]; selectedClassroomId: string; onChange: (id: string) => void }) {
