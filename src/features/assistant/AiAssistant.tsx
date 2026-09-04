@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Send, Sparkles, Plus } from 'lucide-react';
 import AiHistory from './AiHistory';
+import {waitForAssistantReply} from './assistantReply';
 import AiSettingsPanel from '../settings/AiSettingsPanel';
 import {defaultAiSettings,readAiSettings} from '../settings/settingsService';
 import { supabase } from '../../lib/supabase';
@@ -57,22 +58,29 @@ export default function AiAssistant({ role, classrooms, students, materials }: {
     const question = draft.trim();
     setMessages(current=>[...current,{role:'user',content:question}]); setDraft('');
     controller.current = new AbortController();
-    const timeout = window.setTimeout(()=>controller.current?.abort(),60000);
+    const timeout = window.setTimeout(()=>controller.current?.abort(),240000);
     try {
       const session = await supabase?.auth.getSession();
       const token = session?.data.session?.access_token;
-      if (!token) throw new Error('กรุณาเข้าสู่ระบบใหม่');
+      const userId=session?.data.session?.user.id;
+      if (!token||!userId) throw new Error('กรุณาเข้าสู่ระบบใหม่');
+      const requestId=crypto.randomUUID();
       const response = await fetch('/.netlify/functions/ai-assistant',{
         method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
-        body:JSON.stringify({message:question,mode:'chat',conversationId,requestId:crypto.randomUUID(),classroomId,studentId,materialId,target:target === '' ? undefined : Number(target)}),
+        body:JSON.stringify({message:question,mode:'chat',background:true,conversationId,requestId,classroomId,studentId,materialId,target:target === '' ? undefined : Number(target)}),
         signal:controller.current.signal,
-      });
-      const result = await response.json().catch(()=>null) as (Reply & {message?:string}) | null;
-      if (!response.ok || !result?.answer) throw new Error(result?.message || 'ผู้ช่วย AI ตอบไม่สำเร็จ กรุณาลองใหม่');
+      }).catch(cause=>{if(controller.current?.signal.aborted)throw cause;return null;});
+      let result = await response?.json().catch(()=>null) as (Reply & {message?:string}) | null;
+      if(response?.status===202||!response||(!response.ok&&!result?.message)) {
+        result=await waitForAssistantReply(requestId,userId,controller.current.signal) as Reply;
+      } else if(!response.ok||!result?.answer) {
+        throw new Error(result?.message||'ไม่ได้รับคำตอบที่ถูกต้องจากเซิร์ฟเวอร์ กรุณาลองใหม่');
+      }
+      if(!result?.answer)throw new Error('ยังไม่มีคำตอบ กรุณาตรวจประวัติการสนทนา');
       setMessages(current=>[...current,{role:'assistant',content:result.answer,result}]);
     } catch(cause) {
       if (!controller.current?.signal.aborted) setError(cause instanceof Error ? cause.message : 'ส่งคำถามไม่สำเร็จ');
-      else setError('การตอบใช้เวลานานเกินไป กรุณาลองใหม่');
+      else setError('การตอบใช้เวลานานกว่าปกติ สามารถตรวจคำตอบภายหลังในประวัติการสนทนา');
     } finally { clearTimeout(timeout); setBusy(false); }
   }
   const prompts = role === 'teacher' ? ['ช่วยคิดไอเดียกิจกรรมในห้องเรียน','ช่วยวางแผนงานสัปดาห์นี้'] : ['ช่วยวางแผนอ่านหนังสือให้หน่อย','ตอนนี้ฉันได้กี่คะแนนแล้ว'];
@@ -91,7 +99,7 @@ export default function AiAssistant({ role, classrooms, students, materials }: {
     <div className="ai-conversation" ref={log} role="log" aria-label="บทสนทนากับผู้ช่วย AI" aria-live="polite">
       {!messages.length && <div className="ai-empty"><Sparkles aria-hidden /><h2>วันนี้อยากคุยเรื่องอะไรครับ</h2><div>{prompts.map(prompt=><button type="button" key={prompt} disabled={busy} onClick={()=>setDraft(prompt)}>{prompt}</button>)}</div></div>}
       {messages.map((message,index)=><article className={`ai-message ${message.role}`} key={index}><strong>{message.role === 'user' ? 'คุณ' : settings.name}</strong><p>{message.content}</p>{message.result?.truncated && <small>คำตอบยังไม่จบ พิมพ์ “ต่อ” เพื่อให้ AI อธิบายต่อได้</small>}{message.result?.source && <small>สื่ออ้างอิง: {message.result.source}</small>}{message.result?.snapshot && <ScoreSnapshot snapshot={message.result.snapshot} />}</article>)}
-      {busy && <div className="ai-pending" role="status">กำลังอ่านข้อมูลและเตรียมคำตอบ…</div>}
+      {busy && <div className="ai-pending" role="status">รับคำถามแล้ว กำลังเตรียมคำตอบ…</div>}
     </div>
     <form className="ai-compose" onSubmit={send}><textarea aria-label="คำถามถึงผู้ช่วย AI" rows={2} maxLength={6000} placeholder="พิมพ์ข้อความ…" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Enter' && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia('(pointer:fine)').matches){e.preventDefault();e.currentTarget.form?.requestSubmit();}}} /><button className="icon-button" type="submit" disabled={busy || !draft.trim()} title="ส่งข้อความ" aria-label="ส่งข้อความ"><Send aria-hidden /></button></form>
     </>}

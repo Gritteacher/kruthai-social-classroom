@@ -13,8 +13,16 @@ All classroom reads use the verified caller's access token and existing RLS.
 Student selectors from the request are ignored for student accounts. The admin
 client only writes chat exchanges after verifying the user's access token.
 The app imposes no daily question quota. Provider limits and credits still apply.
-There is a 6,000-character per-message safety bound and a 45-second provider
-timeout. The newest 16 completed exchanges supply model context. User-supplied
+There is a 6,000-character per-message safety bound. New clients submit a job
+to the authenticated starter and poll their own exchange via RLS. The signed
+background worker allows up to 150 seconds for the provider; legacy synchronous
+requests retain a 45-second timeout. The browser can recover persisted replies
+after a proxy/network failure and does not automatically resend a question.
+Jobs are atomically claimed to prevent duplicate provider calls. Job signatures
+bind the exchange ID, user token and expiry using the server service key. Neither
+the signature nor token is stored in the exchange. Deploy `ai-assistant-background`
+with the same PDF native dependencies as `ai-assistant`. No new secrets or SQL
+are required. The newest 16 completed exchanges supply model context. User-supplied
 history is ignored. Conversation IDs are always scoped to the authenticated user.
 
 Questions, answers, timestamps, author identity, score snapshots and failures

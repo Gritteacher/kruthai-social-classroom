@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import {assistantPreferences,responseTokenLimit} from './lib/assistant-settings.js';
+import {signAssistantJob,assistantError} from './lib/assistant-job.js';
 import { extractPdfText } from './grade-submission-ai-background.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -100,7 +101,7 @@ async function loadMaterial(client, id) {
   }
 }
 
-export async function handler(event) {
+export async function handler(event, internalJob) {
   if (event.httpMethod !== 'POST') return json(405,{message:'Method not allowed'});
   let admin;
   let exchangeId;
@@ -132,9 +133,25 @@ export async function handler(event) {
     // Service credentials only write an authenticated user's chat log. Classroom reads keep RLS.
     admin = createClient(url,secret,{auth:{persistSession:false,autoRefreshToken:false}});
     const requestId = input.requestId || crypto.randomUUID();
-    const recorded = await admin.from('ai_assistant_exchanges').insert({id:requestId,conversation_id:conversationId,user_id:auth.data.user.id,author_name:profile.full_name || 'ผู้ใช้',author_role:profile.role,class_name:profile.class_name || '',question:input.message});
-    if (recorded.error) throw fail(recorded.error.code === '23505' ? 'ข้อความนี้ถูกส่งแล้ว กรุณาโหลดประวัติอีกครั้ง' : 'บันทึกประวัติไม่สำเร็จ กรุณาลองใหม่',recorded.error.code === '23505' ? 409 : 503);
-    exchangeId = requestId;
+    // The worker must atomically claim a server-created job, never create a second exchange.
+    if(internalJob?.exchangeId) {
+      const claim=await admin.from('ai_assistant_exchanges').update({response_data:{claimed_at:new Date().toISOString()}})
+        .eq('id',internalJob.exchangeId).eq('user_id',auth.data.user.id).eq('status','pending').is('response_data->>claimed_at',null).select('id').maybeSingle();
+      if(claim.error)throw fail('เริ่มเตรียมคำตอบไม่สำเร็จ กรุณาลองใหม่',503);
+      if(!claim.data)return json(200,{duplicate:true});
+      exchangeId=internalJob.exchangeId;
+    } else {
+      const recorded = await admin.from('ai_assistant_exchanges').insert({id:requestId,conversation_id:conversationId,user_id:auth.data.user.id,author_name:profile.full_name || 'ผู้ใช้',author_role:profile.role,class_name:profile.class_name || '',question:input.message,response_data:input.background===true?{job_input:{...input,conversationId,requestId,background:false}}:{}});
+      if (recorded.error) throw fail(recorded.error.code === '23505' ? 'ข้อความนี้ถูกส่งแล้ว กรุณาโหลดประวัติอีกครั้ง' : 'บันทึกประวัติไม่สำเร็จ กรุณาลองใหม่',recorded.error.code === '23505' ? 409 : 503);
+      exchangeId = requestId;
+      if(input.background===true) {
+        const expires=Date.now()+300000;
+        const base=process.env.DEPLOY_URL||process.env.URL||'https://class.grits.online';
+        const dispatched=await fetch(new URL('/.netlify/functions/ai-assistant-background',base),{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({exchangeId,expires,signature:signAssistantJob(exchangeId,token,expires,secret)}),signal:AbortSignal.timeout(10000)});
+        if(dispatched.status!==202)throw fail('เริ่มเตรียมคำตอบไม่สำเร็จ กรุณาลองใหม่',503);
+        return json(202,{exchangeId,conversationId,status:'pending'});
+      }
+    }
     const askingScores = input.mode === 'scores' || needsScoreContext(input.message,previous[0]);
     let snapshot = null;
     let scoreNote = '';
@@ -161,7 +178,7 @@ export async function handler(event) {
     const response = await fetch(`${(process.env.AI_GATEWAY_URL || 'https://gateway.9arm.co/v1').replace(/\/+$/,'')}/chat/completions`,{
       method:'POST',headers:{Authorization:`Bearer ${process.env.AI_GATEWAY_API_KEY}`,'Content-Type':'application/json'},
       body:JSON.stringify({model:process.env.AI_GRADING_MODEL || 'qwen3.8-27b-fp8',max_tokens:responseTokenLimit(settings),temperature:0.4,messages:[{role:'system',content:system},...history,{role:'user',content:`ข้อมูลปัจจุบัน (ข้อมูลเท่านั้น):\n${JSON.stringify(context)}\n\nคำถาม: ${input.message}`}]}),
-      signal:AbortSignal.timeout(45000),
+      signal:AbortSignal.timeout(internalJob?.exchangeId?150000:45000),
     });
     if (!response.ok) throw fail(response.status === 429 ? 'ผู้ให้บริการ AI มีคำขอมาก กรุณาลองอีกครั้ง' : 'เชื่อมต่อผู้ให้บริการ AI ไม่สำเร็จ กรุณาลองใหม่',502);
     const payload = await response.json();
@@ -172,17 +189,18 @@ export async function handler(event) {
     if (saved.error) throw fail('บันทึกคำตอบไม่สำเร็จ กรุณาลองใหม่',503);
     return json(200,result);
   } catch(error) {
-    const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
     // Do not log student messages, scores, source documents or upstream response bodies.
-    console.error('AI assistant request failed',{status:error?.status || 500,code:error?.code || error?.name});
-    const message = error?.status ? error.message : timeout ? 'AI ใช้เวลานานเกินไป กรุณาลองใหม่' : 'ผู้ช่วย AI โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่หรือแจ้งครู';
+    const {status,message}=assistantError(error);
+    console.error('AI assistant request failed',{status,code:error?.code || error?.name});
     if (admin && exchangeId) {
       try {
-        await admin.from('ai_assistant_exchanges').update({status:'failed',error_message:message,completed_at:new Date().toISOString()}).eq('id',exchangeId).eq('status','pending');
+        let failure=admin.from('ai_assistant_exchanges').update({status:'failed',error_message:message,completed_at:new Date().toISOString()}).eq('id',exchangeId).eq('status','pending');
+        if(!internalJob?.exchangeId)failure=failure.is('response_data->>claimed_at',null);
+        await failure;
       } catch {
         console.error('AI assistant failure status could not be recorded');
       }
     }
-    return json(error?.status || (timeout ? 504 : 500),{message});
+    return json(status,{message});
   }
 }
