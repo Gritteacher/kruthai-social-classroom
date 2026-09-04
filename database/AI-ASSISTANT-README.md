@@ -1,6 +1,8 @@
 # Classroom AI Assistant
 
-Run `ai-assistant.sql` once before deploying this feature. Re-running it is safe.
+Run `ai-assistant-history.sql` before deploying the persistent chat feature.
+Re-running it is safe. The earlier `ai-assistant.sql` usage table is retained
+for historical counts only; the endpoint no longer calls its quota RPC.
 
 Server environment: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`, `AI_GATEWAY_API_KEY`, optional `AI_GATEWAY_URL`
@@ -8,11 +10,21 @@ and `AI_GRADING_MODEL`. Never expose a service or AI key with a VITE prefix.
 
 All classroom reads use the verified caller's access token and existing RLS.
 Student selectors from the request are ignored for student accounts. The admin
-client only claims the daily budget: 30 requests per student, 100 per teacher,
-reset at midnight Bangkok time. Attempts that fail after claiming count too.
-Conversation contents are held in browser memory, cleared by logout/reload,
-and sent to the configured AI provider with relevant reference data. They are
-not stored in the database. Daily usage counts are stored separately.
+client only writes chat exchanges after verifying the user's access token.
+The app imposes no daily question quota. Provider limits and credits still apply.
+There is a 6,000-character per-message safety bound and a 45-second provider
+timeout. The newest 16 completed exchanges supply model context. User-supplied
+history is ignored. Conversation IDs are always scoped to the authenticated user.
+
+Questions, answers, timestamps, author identity, score snapshots and failures
+are stored in `ai_assistant_exchanges`. RLS allows students to read only their
+own exchanges; teachers can read all exchanges in the explicit history tab.
+Only the server can insert/update logs. A notice about teacher visibility is
+shown before sending. New conversations do not delete existing history.
+No pre-existing browser-only conversations can be recovered retroactively.
+The chat view resumes the latest 100 exchanges; the history browser has paging
+for older exchanges. Teachers can filter by name and role. Chat remains usable
+for general topics without selecting a classroom or reference document.
 
 The assistant cannot mutate scores, submissions, announcements or profiles.
 Score sums and target differences are calculated server-side. Missing scores
@@ -24,7 +36,7 @@ PDF references use the same bounded text reader as submission grading: maximum
 10 MB, 40 pages, 60,000 characters. Scanned/image-only pages are rejected.
 Source documents are untrusted input. There is no arbitrary URL fetch or tool
 execution in chat. Answers and page citations can still be incorrect and must
-be checked. No conversation export or persistent chat history is implemented.
+be checked. Conversation export is not implemented.
 
 For macOS CLI production deploys, ensure the matching optional package
 `@napi-rs/canvas-linux-x64-gnu` is installed in the release node_modules. The

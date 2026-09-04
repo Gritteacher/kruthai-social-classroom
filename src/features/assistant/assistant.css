@@ -35,6 +35,22 @@
 .ai-compose button { flex:0 0 44px; width:44px; height:44px; color:var(--blue); }
 .ai-pending { color:var(--muted); font-size:14px; }
 .ai-error { color:var(--coral); padding:10px; background:var(--surface-danger); border-radius:8px; font-size:13px; }
+.ai-context { color:var(--muted); font-size:13px; }
+.ai-context summary { cursor:pointer; padding:6px 0; }
+.ai-context .ai-filters { padding-top:10px; }
+.ai-history { min-width:0; }
+.ai-history-filters { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+.ai-history-filters label { display:flex; align-items:center; gap:8px; flex:1 1 180px; min-width:0; }
+.ai-history-filters label svg { width:18px; flex-shrink:0; }
+.ai-history-filters input,.ai-history-filters select { min-width:0; width:100%; padding:10px; border:1px solid var(--line); background:var(--paper); color:var(--ink); border-radius:8px; }
+.ai-history-filters select { width:auto; max-width:100%; }
+.ai-history-entry { border-bottom:1px solid var(--line); padding:16px 0; }
+.ai-history-entry summary { display:flex; justify-content:space-between; gap:12px; cursor:pointer; }
+.ai-history-entry summary>span { min-width:0; flex:1; }
+.ai-history-entry small { display:block; color:var(--muted); font-size:12px; }
+.ai-history-question { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:8px; }
+.ai-history-entry>div { margin-top:14px; padding:14px; border-left:2px solid var(--blue); background:var(--surface-subtle); }
+.ai-history-entry p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.8; }
 .mobile-ai-button { display:none; }
 @media(max-width:1120px) { .top-actions .mobile-ai-button { display:inline-flex; flex:0 0 36px; width:36px; height:36px; min-height:36px; padding:7px; align-items:center; justify-content:center; border:1px solid var(--line); border-radius:8px; background:var(--paper); color:var(--ink); box-shadow:none; } .mobile-ai-button svg { width:20px; height:20px; } }
 @media(max-width:600px) { .ai-page { gap:12px; } .ai-heading h1 { font-size:20px; } .ai-filters label,.ai-filters .ai-target { flex:1 1 140px; } .ai-conversation { max-height:48dvh; min-height:220px; padding-right:0; } .ai-message { padding:12px 0; } .ai-message.user { padding:10px 12px; } .ai-message p { font-size:14px; } .ai-score-list>div { grid-template-columns:minmax(0,1fr) 100px; } .ai-score-list strong { text-align:right; } }
