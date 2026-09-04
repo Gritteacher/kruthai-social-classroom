@@ -40,6 +40,7 @@ import {
   UserPlus,
   Users,
   Moon,
+  MoreHorizontal,
   Pencil,
   Sun,
   X
@@ -267,6 +268,7 @@ function App() {
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
+  const [mobileHeaderMenuOpen, setMobileHeaderMenuOpen] = useState(false);
   const [classroomItems, setClassroomItems] = useState<Classroom[]>([]);
   const [selectedClassroomId, setSelectedClassroomId] = useState("");
   const [materialItems, setMaterialItems] = useState<Material[]>([]);
@@ -298,6 +300,22 @@ function App() {
   const activeStudents = session?.role === "teacher"
     ? (workingClassroom ? students.filter((student) => belongsToClass(student, workingClassroom)) : [])
     : currentStudent ? [currentStudent] : [];
+
+  useEffect(() => {
+    if (!mobileHeaderMenuOpen) return;
+    document.querySelector<HTMLButtonElement>("#mobile-header-menu button")?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileHeaderMenuOpen(false);
+    };
+    const closeOnResize = () => { if (window.innerWidth > 1120) setMobileHeaderMenuOpen(false); };
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnResize);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnResize);
+      document.querySelector<HTMLButtonElement>(".mobile-account-button")?.focus();
+    };
+  }, [mobileHeaderMenuOpen]);
   const activeAssignments = orderAssignments(session?.role === "teacher"
     ? (workingClassroom ? assignments.filter((assignment) => belongsToClass(assignment, workingClassroom)) : [])
     : studentScopedItems(assignments, workingClassroom, currentStudent, session));
@@ -1804,14 +1822,33 @@ function App() {
             <h2>{session.role === "teacher" ? (view === "home" ? "ภาพรวมทุกห้อง" : activeClassName) : session.room}</h2>
           </div>
           <div className="top-actions">
-            {session.role === "teacher" && <button className={`mobile-students-button ${view === "students" ? "active" : ""}`} type="button" onClick={() => setView("students")} title="รายชื่อ" aria-label="รายชื่อ"><Users aria-hidden /></button>}
             <button className="icon-button" title="ค้นหา" onClick={() => { setView("materials"); flash("เปิดคลังสื่อแล้ว ใช้ช่องค้นหาด้านบนได้เลย"); }}><Search aria-hidden /></button>
             <button className="icon-button" title="โหลดข้อมูลใหม่" onClick={() => void loadClassroomData(true)}><Bell aria-hidden /></button>
             <button className={`mobile-chat-button ${view === "chat" ? "active" : ""}`} type="button" onClick={() => setView("chat")} title="แชท"><MessageCircle aria-hidden /><span>แชท</span></button>
             <button className="theme-toggle-button" type="button" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title="เปลี่ยนธีม">{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}<span>{theme === "light" ? "โทนมืด" : "โทนสว่าง"}</span></button>
             <button className={`mobile-profile-button ${view === "profile" ? "active" : ""}`} type="button" onClick={() => setView("profile")} title="โปรไฟล์"><User aria-hidden /><span>โปรไฟล์</span></button>
             <button className="mobile-logout-button" onClick={logout} title="ออกจากระบบ"><LogOut aria-hidden /><span>ออกจากระบบ</span></button>
+            <button className={`mobile-account-button ${mobileHeaderMenuOpen ? "active" : ""}`} type="button" title="เมนูบัญชี" aria-label="เปิดเมนูบัญชี" aria-haspopup="menu" aria-expanded={mobileHeaderMenuOpen} aria-controls="mobile-header-menu" onClick={() => setMobileHeaderMenuOpen((open) => !open)}><MoreHorizontal aria-hidden /></button>
           </div>
+          {mobileHeaderMenuOpen && <>
+            <div className="mobile-menu-backdrop" aria-hidden onPointerDown={() => setMobileHeaderMenuOpen(false)} />
+            <div className="mobile-header-menu" id="mobile-header-menu" role="menu" aria-label="เมนูบัญชี" onKeyDown={(event) => {
+              if (event.key === "Tab") { setMobileHeaderMenuOpen(false); return; }
+              const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
+              const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+              if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+                event.preventDefault();
+                const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+                buttons[next]?.focus();
+              }
+            }}>
+              <div className="mobile-menu-identity"><strong>{session.name}</strong><small>{session.role === "teacher" ? session.school : session.room}</small></div>
+              {session.role === "teacher" && <button role="menuitem" type="button" onClick={() => { setView("students"); setMobileHeaderMenuOpen(false); }}><Users aria-hidden />รายชื่อ</button>}
+              <button role="menuitem" type="button" onClick={() => { setTheme((current) => current === "light" ? "dark" : "light"); setMobileHeaderMenuOpen(false); }}>{theme === "light" ? <Moon aria-hidden /> : <Sun aria-hidden />}{theme === "light" ? "ใช้โหมดมืด" : "ใช้โหมดสว่าง"}</button>
+              <button role="menuitem" type="button" onClick={() => { setView("profile"); setMobileHeaderMenuOpen(false); }}><User aria-hidden />โปรไฟล์</button>
+              <button className="mobile-menu-logout" role="menuitem" type="button" onClick={() => { setMobileHeaderMenuOpen(false); logout(); }}><LogOut aria-hidden />ออกจากระบบ</button>
+            </div>
+          </>}
         </header>
         <section className={`content-area ${view === "scores" ? "score-content-area" : ""}`}>
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
