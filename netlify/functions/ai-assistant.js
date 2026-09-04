@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import {assistantPreferences,responseTokenLimit} from './lib/assistant-settings.js';
 import {signAssistantJob,assistantError} from './lib/assistant-job.js';
-import { extractPdfText } from './grade-submission-ai-background.js';
+import { extractPdfText } from './lib/pdf-text.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -81,8 +81,7 @@ export async function loadScores(client, profile, input) {
   let submissionsQuery = client.from('submissions').select('id,assignment_id,student_code,group_member_codes,status,submitted_at').in('classroom_id',classroomIds).order('id');
   // RLS also enforces sender/group membership for student reads.
   const submissions = await rows(submissionsQuery);
-  const reviews = submissions.length ? await rows(client.from('submission_ai_reviews').select('submission_id,feedback').eq('status','completed').in('submission_id',submissions.map(s=>s.id)).order('id')) : [];
-  return buildScoreSnapshot(students,assignments,entries,submissions,reviews,input.target);
+  return buildScoreSnapshot(students,assignments,entries,submissions,[],input.target);
 }
 
 async function loadMaterial(client, id) {

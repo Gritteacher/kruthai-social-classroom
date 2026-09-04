@@ -4,11 +4,6 @@ import { supabase } from "../../lib/supabase";
 import { storageSafeFileName } from "../../lib/validation";
 import type {
   Worksheet,
-  WorksheetAiReview,
-  WorksheetAiReviewStatus,
-  WorksheetAiSetting,
-  WorksheetAiSettingInput,
-  WorksheetAiSuggestion,
   WorksheetAnnotation,
   WorksheetDraft,
   WorksheetGradeInput,
@@ -149,59 +144,6 @@ function mapPageGrade(row: Row): WorksheetPageGrade {
   };
 }
 
-function isAiReviewStatus(value: unknown): value is WorksheetAiReviewStatus {
-  return ["queued", "processing", "completed", "failed", "confirmed", "rejected"].includes(
-    String(value),
-  );
-}
-
-function mapAiSetting(row: Row): WorksheetAiSetting {
-  return {
-    id: text(row, "id"),
-    worksheetId: text(row, "worksheet_id"),
-    pageNumber: Number(row.page_number) || 1,
-    enabled: row.enabled === true,
-    rubric: text(row, "rubric"),
-    minConfidence: Math.max(0, Math.min(1, Number(row.min_confidence) || 0.7)),
-    updatedAt: text(row, "updated_at", new Date().toISOString()),
-  };
-}
-
-function mapAiSuggestion(value: unknown): WorksheetAiSuggestion | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Row;
-  const scoreLinkId = text(row, "score_link_id");
-  const score = Number(row.score);
-  if (!scoreLinkId || !Number.isFinite(score)) return null;
-  return {
-    scoreLinkId,
-    score,
-    confidence: Math.max(0, Math.min(1, Number(row.confidence) || 0)),
-    feedback: text(row, "feedback"),
-  };
-}
-
-function mapAiReview(row: Row): WorksheetAiReview {
-  const rawSuggestions = Array.isArray(row.suggestions) ? row.suggestions : [];
-  return {
-    id: text(row, "id"),
-    answerId: text(row, "answer_id"),
-    status: isAiReviewStatus(row.status) ? row.status : "failed",
-    suggestions: rawSuggestions
-      .map(mapAiSuggestion)
-      .filter((item): item is WorksheetAiSuggestion => Boolean(item)),
-    overallConfidence: Math.max(
-      0,
-      Math.min(1, Number(row.overall_confidence) || 0),
-    ),
-    feedback: text(row, "feedback"),
-    model: text(row, "model"),
-    errorMessage: text(row, "error_message"),
-    requestedAt: text(row, "requested_at", new Date().toISOString()),
-    completedAt: optionalText(row, "completed_at"),
-  };
-}
-
 export async function fetchWorksheets() {
   if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
   const result = await supabase
@@ -257,93 +199,6 @@ export async function fetchWorksheetPageGrades() {
     throw result.error;
   }
   return (result.data ?? []).map((row) => mapPageGrade(row as Row));
-}
-
-export async function fetchWorksheetAiSettings() {
-  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
-  const result = await supabase
-    .from("worksheet_ai_settings")
-    .select("*")
-    .order("page_number", { ascending: true });
-  if (result.error) {
-    if (isWorksheetAiSchemaMissing(result.error)) return [];
-    throw result.error;
-  }
-  return (result.data ?? []).map((row) => mapAiSetting(row as Row));
-}
-
-export async function fetchWorksheetAiReviews() {
-  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
-  const result = await supabase
-    .from("worksheet_ai_reviews")
-    .select("*")
-    .order("requested_at", { ascending: false });
-  if (result.error) {
-    if (isWorksheetAiSchemaMissing(result.error)) return [];
-    throw result.error;
-  }
-  return (result.data ?? []).map((row) => mapAiReview(row as Row));
-}
-
-export async function saveWorksheetAiSetting(
-  worksheetId: string,
-  pageNumber: number,
-  input: WorksheetAiSettingInput,
-) {
-  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
-  const rubric = input.rubric.trim();
-  if (input.enabled && !rubric) throw new Error("กรอกเกณฑ์หรือแนวคำตอบสำหรับ AI ก่อน");
-  if (rubric.length > 4000) throw new Error("เกณฑ์ตรวจ AI ต้องไม่เกิน 4,000 ตัวอักษร");
-  const result = await supabase
-    .from("worksheet_ai_settings")
-    .upsert(
-      {
-        worksheet_id: worksheetId,
-        page_number: pageNumber,
-        enabled: input.enabled,
-        rubric,
-        min_confidence: Math.max(0, Math.min(1, input.minConfidence)),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "worksheet_id,page_number" },
-    )
-    .select("*")
-    .single();
-  if (result.error || !result.data) throw result.error || new Error("บันทึก AI ไม่สำเร็จ");
-  return mapAiSetting(result.data as Row);
-}
-
-export async function queueWorksheetAiReview(answerId: string, image: Blob) {
-  if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
-  if (image.size <= 0 || image.size > 4 * 1024 * 1024)
-    throw new Error("ภาพสำหรับตรวจ AI ต้องมีขนาดไม่เกิน 4MB");
-  const session = await supabase.auth.getSession();
-  const accessToken = session.data.session?.access_token;
-  if (!accessToken) throw new Error("เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
-  const imageDataUrl = await blobToDataUrl(image);
-  const response = await fetch("/.netlify/functions/grade-worksheet-ai-background", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ answerId, imageDataUrl }),
-  });
-  if (!response.ok && response.status !== 202) {
-    const payload = (await response.json().catch(() => null)) as
-      | { message?: string }
-      | null;
-    throw new Error(payload?.message || "ส่งงานให้ AI ตรวจไม่สำเร็จ");
-  }
-}
-
-function blobToDataUrl(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("เตรียมภาพสำหรับ AI ไม่สำเร็จ"));
-    reader.readAsDataURL(blob);
-  });
 }
 
 export async function replaceWorksheetPageScoreLinks(
@@ -625,14 +480,5 @@ function isWorksheetScoreSchemaMissing(error: unknown) {
       message,
     ) &&
     /does not exist|schema cache|PGRST202|PGRST205|42P01|42883/i.test(message)
-  );
-}
-
-function isWorksheetAiSchemaMissing(error: unknown) {
-  const message =
-    error && typeof error === "object" ? JSON.stringify(error) : String(error ?? "");
-  return (
-    /worksheet_ai_settings|worksheet_ai_reviews/i.test(message) &&
-    /does not exist|schema cache|PGRST205|42P01/i.test(message)
   );
 }

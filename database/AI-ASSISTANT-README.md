@@ -52,4 +52,4 @@ For macOS CLI production deploys, ensure the matching optional package
 Netlify function configuration includes it for PDF.js on Lambda Linux. Linux
 CI installs the platform package automatically.
 
-Tests: `node --test tests/ai-assistant.test.mjs tests/submission-ai.test.mjs`.
+Tests: `node --test tests/ai-assistant.test.mjs tests/pdf-text.test.mjs tests/ai-grading-retired.test.mjs`.

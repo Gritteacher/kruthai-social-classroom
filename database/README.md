@@ -12,9 +12,7 @@ For an existing production database, `assignment-groups-transaction.sql` is the 
 
 `worksheet-score-links.sql` links worksheet pages to score-assignment groups, stores page-level grades, and atomically updates each student's score entry when the teacher finishes reviewing selected pages.
 
-`worksheet-ai-grading.sql` adds teacher-only AI rubrics and server-generated score drafts for submitted worksheet pages. Apply `worksheet-score-links.sql` first.
-
-`submission-ai-grading.sql` adds automatic AI grading for regular file/link submissions and securely synchronizes the result to every student in a group. Apply `worksheet-score-links.sql` first so score-source columns are available.
+`retire-ai-grading.sql` disables all AI grading entry points while preserving existing scores, submissions, files, and archived reviews. See `AI-GRADING-RETIREMENT.md`. The chat assistant is not removed.
 
 ## Access model
 

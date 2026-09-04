@@ -5,16 +5,12 @@ import {
   Link2,
   RotateCcw,
   Save,
-  Sparkles,
   Users,
   X,
 } from "lucide-react";
 import type { Classroom, ScoreAssignment, StudentRecord } from "../../types";
 import type {
   Worksheet,
-  WorksheetAiReview,
-  WorksheetAiSetting,
-  WorksheetAiSettingInput,
   WorksheetGradeInput,
   WorksheetPageAnswer,
   WorksheetPageGrade,
@@ -34,17 +30,14 @@ export function WorksheetScoreLinkModal({
   assignments,
   links,
   grades,
-  aiSettings,
   busy,
   onClose,
   onSave,
-  onSaveAi,
 }: {
   worksheet: Worksheet;
   assignments: ScoreAssignment[];
   links: WorksheetScoreLink[];
   grades: WorksheetPageGrade[];
-  aiSettings: WorksheetAiSetting[];
   busy: boolean;
   onClose: () => void;
   onSave: (
@@ -52,17 +45,9 @@ export function WorksheetScoreLinkModal({
     pageNumber: number,
     values: WorksheetScoreLinkInput[],
   ) => Promise<boolean>;
-  onSaveAi: (
-    worksheet: Worksheet,
-    pageNumber: number,
-    value: WorksheetAiSettingInput,
-  ) => Promise<boolean>;
 }) {
   const [pageNumber, setPageNumber] = useState(1);
   const [values, setValues] = useState<Record<string, string>>({});
-  const [aiEnabled, setAiEnabled] = useState(false);
-  const [aiRubric, setAiRubric] = useState("");
-  const [aiConfidence, setAiConfidence] = useState(0.7);
   const groups = useMemo(
     () => assignmentGroupsForWorksheet(worksheet, assignments),
     [assignments, worksheet],
@@ -86,15 +71,6 @@ export function WorksheetScoreLinkModal({
       ),
     );
   }, [pageLinks]);
-
-  useEffect(() => {
-    const setting = aiSettings.find(
-      (item) => item.worksheetId === worksheet.id && item.pageNumber === pageNumber,
-    );
-    setAiEnabled(setting?.enabled === true);
-    setAiRubric(setting?.rubric || "");
-    setAiConfidence(setting?.minConfidence ?? 0.7);
-  }, [aiSettings, pageNumber, worksheet.id]);
 
   const selectedGroups = groups.filter((group) => group.id in values);
   const invalidGroup = selectedGroups.find((group) => {
@@ -144,7 +120,7 @@ export function WorksheetScoreLinkModal({
   }
 
   async function save() {
-    if (invalidGroup || (aiEnabled && (!selectedGroups.length || !aiRubric.trim()))) return;
+    if (invalidGroup) return;
     const ok = await onSave(
       worksheet,
       pageNumber,
@@ -154,13 +130,7 @@ export function WorksheetScoreLinkModal({
         sortOrder: index,
       })),
     );
-    if (!ok) return;
-    const aiOk = await onSaveAi(worksheet, pageNumber, {
-      enabled: aiEnabled,
-      rubric: aiRubric,
-      minConfidence: aiConfidence,
-    });
-    if (aiOk) onClose();
+    if (ok) onClose();
   }
 
   return (
@@ -273,51 +243,7 @@ export function WorksheetScoreLinkModal({
             </div>
           )}
 
-          <section className="worksheet-ai-setting">
-            <label className="worksheet-ai-toggle">
-              <input
-                type="checkbox"
-                checked={aiEnabled}
-                disabled={busy || !selectedGroups.length}
-                onChange={(event) => setAiEnabled(event.target.checked)}
-              />
-              <span>
-                <strong><Sparkles aria-hidden /> ให้ AI ตรวจร่างหน้านี้</strong>
-                <small>AI เสนอคะแนนก่อน ครูตรวจและกดยืนยันจึงลงตารางคะแนน</small>
-              </span>
-            </label>
-            {aiEnabled && (
-              <div className="worksheet-ai-fields">
-                <label>
-                  เกณฑ์ตรวจหรือแนวคำตอบ
-                  <textarea
-                    rows={5}
-                    maxLength={4000}
-                    value={aiRubric}
-                    disabled={busy}
-                    placeholder="ระบุสาระสำคัญ คำตอบที่ยอมรับ และวิธีแบ่งคะแนนให้ชัดเจน"
-                    onChange={(event) => setAiRubric(event.target.value)}
-                  />
-                  <small>{aiRubric.length.toLocaleString("th-TH")} / 4,000 ตัวอักษร</small>
-                </label>
-                <label>
-                  ความมั่นใจขั้นต่ำ {Math.round(aiConfidence * 100)}%
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="0.95"
-                    step="0.05"
-                    value={aiConfidence}
-                    disabled={busy}
-                    onChange={(event) => setAiConfidence(Number(event.target.value))}
-                  />
-                </label>
-              </div>
-            )}
-            {!selectedGroups.length && (
-              <small className="worksheet-link-error">เชื่อมช่องคะแนนก่อนจึงจะเปิด AI ตรวจได้</small>
-            )}
-          </section>
+
         </div>
 
         <footer>
@@ -327,7 +253,7 @@ export function WorksheetScoreLinkModal({
           <button
             className="primary-button"
             type="button"
-            disabled={busy || Boolean(invalidGroup) || (aiEnabled && (!selectedGroups.length || !aiRubric.trim()))}
+            disabled={busy || Boolean(invalidGroup)}
             onClick={() => void save()}
           >
             <Save aria-hidden />
@@ -347,7 +273,6 @@ export function WorksheetReviewPanel({
   answers,
   links,
   grades,
-  aiReviews,
   busy,
   onPreview,
   onGrade,
@@ -360,7 +285,6 @@ export function WorksheetReviewPanel({
   answers: WorksheetPageAnswer[];
   links: WorksheetScoreLink[];
   grades: WorksheetPageGrade[];
-  aiReviews: WorksheetAiReview[];
   busy: boolean;
   onPreview: (worksheet: Worksheet, answer: WorksheetPageAnswer) => void;
   onGrade: (answerIds: string[], values: WorksheetGradeInput[]) => Promise<boolean>;
@@ -486,24 +410,6 @@ export function WorksheetReviewPanel({
     setScoreDrafts(next);
   }
 
-  function aiReviewFor(answerId: string) {
-    return aiReviews.find((review) => review.answerId === answerId);
-  }
-
-  function fillAiScores(answer: WorksheetPageAnswer, review: WorksheetAiReview) {
-    const next = { ...scoreDrafts };
-    review.suggestions.forEach((suggestion) => {
-      const link = answerLinks(answer).find((item) => item.id === suggestion.scoreLinkId);
-      if (!link) return;
-      const score = Math.max(0, Math.min(link.pageMaxScore, suggestion.score));
-      next[scoreKey(answer.id, link.id)] = formatWorksheetScore(score);
-    });
-    setScoreDrafts(next);
-    setSelectedIds((current) =>
-      current.includes(answer.id) ? current : [...current, answer.id],
-    );
-  }
-
   async function saveSelected() {
     if (!selectedIds.length) return;
     const selectedAnswers = activeStudent?.items.filter((answer) => selectedIds.includes(answer.id)) || [];
@@ -618,7 +524,6 @@ export function WorksheetReviewPanel({
               {activeStudent.items.map((answer) => {
                 const pageLinks = answerLinks(answer);
                 const selected = selectedIds.includes(answer.id);
-                const aiReview = aiReviewFor(answer.id);
                 return (
                   <article className={`worksheet-review-page ${selected ? "selected" : ""}`} key={answer.id}>
                     <div className="worksheet-review-page-heading">
@@ -681,36 +586,6 @@ export function WorksheetReviewPanel({
                     ) : (
                       <div className="worksheet-review-unlinked">
                         หน้านี้ไม่เชื่อมคะแนน สามารถเลือกแล้วบันทึกเพื่อตรวจรับได้
-                      </div>
-                    )}
-                    {aiReview && (
-                      <div className={`worksheet-ai-review ${aiReview.status}`}>
-                        <div>
-                          <Sparkles aria-hidden />
-                          <span>
-                            <strong>{aiReviewStatusLabel(aiReview)}</strong>
-                            {aiReview.status === "completed" && (
-                              <small>
-                                ความมั่นใจ {Math.round(aiReview.overallConfidence * 100)}%
-                                {aiReview.feedback ? ` · ${aiReview.feedback}` : ""}
-                              </small>
-                            )}
-                            {aiReview.status === "failed" && aiReview.errorMessage && (
-                              <small>{aiReview.errorMessage}</small>
-                            )}
-                          </span>
-                        </div>
-                        {aiReview.status === "completed" && aiReview.suggestions.length > 0 && (
-                          <button
-                            className="template-button"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => fillAiScores(answer, aiReview)}
-                          >
-                            <Sparkles aria-hidden />
-                            ใช้คะแนน AI
-                          </button>
-                        )}
                       </div>
                     )}
                   </article>
@@ -795,13 +670,6 @@ function assignmentGroupsForWorksheet(
     .sort((a, b) => a.title.localeCompare(b.title, "th"));
 }
 
-function aiReviewStatusLabel(review: WorksheetAiReview) {
-  if (review.status === "queued" || review.status === "processing") return "AI กำลังตรวจร่าง";
-  if (review.status === "completed") return "AI เสนอคะแนนแล้ว";
-  if (review.status === "confirmed") return "ครูยืนยันคะแนน AI แล้ว";
-  if (review.status === "rejected") return "ครูไม่ใช้คะแนน AI";
-  return "AI ตรวจร่างไม่สำเร็จ";
-}
 
 function formatWorksheetScore(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");

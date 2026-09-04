@@ -11,7 +11,6 @@ import type {
   StudentHomeCard,
   StudentRecord,
   SubmissionRecord,
-  SubmissionAiReview,
   SubmissionKind,
   SubmissionStatus
 } from "../types";
@@ -226,25 +225,6 @@ export function mapSubmissionRow(row: DatabaseRow): SubmissionRecord {
     rawMax,
     finalScore: roundedScore(row, ["final_score", "finalScore"], scaledScore(rawScore, rawMax, finalMax)),
     finalMax
-  };
-}
-
-export function mapSubmissionAiReviewRow(row: DatabaseRow): SubmissionAiReview {
-  const rawStatus = text(row, ["status"], "queued");
-  const status = ["queued", "processing", "completed", "failed"].includes(rawStatus)
-    ? rawStatus as SubmissionAiReview["status"]
-    : "failed";
-  return {
-    id: text(row, ["id"]),
-    submissionId: text(row, ["submission_id", "submissionId"]),
-    status,
-    suggestedRawScore: number(row, ["suggested_raw_score", "suggestedRawScore"], 0),
-    confidence: number(row, ["confidence"], 0),
-    feedback: text(row, ["feedback"]),
-    model: text(row, ["model"]),
-    errorMessage: text(row, ["error_message", "errorMessage"]),
-    requestedAt: optionalText(row, ["requested_at", "requestedAt"]),
-    completedAt: optionalText(row, ["completed_at", "completedAt"])
   };
 }
 
