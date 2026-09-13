@@ -28,7 +28,12 @@ try {
     throw new Error("School logo is unavailable in the production bundle");
   }
   const assetPath = html.match(/<script[^>]+src="([^"]+\.js)"/)?.[1];
-  const asset = assetPath ? await fetch(new URL(assetPath, origin)) : null;
+  let asset = assetPath ? await fetch(new URL(assetPath, origin)) : null;
+  if (assetPath && (!asset?.ok || !String(asset.headers.get("content-type")).includes("javascript"))) {
+    // Vite preview serves dist at root even when the bundle targets a GitHub Pages subpath.
+    const assetName = assetPath.split("/").pop();
+    asset = assetName ? await fetch(`${origin}/assets/${assetName}`) : null;
+  }
   if (!asset?.ok || !String(asset.headers.get("content-type")).includes("javascript")) {
     throw new Error("Production JavaScript asset is unavailable");
   }
