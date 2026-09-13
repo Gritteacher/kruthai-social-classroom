@@ -29,6 +29,8 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Test
+        run: npm test
       - name: Build
         run: npm run build
         env:
@@ -36,6 +38,10 @@ jobs:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
           VITE_STUDENT_ACCOUNT_FUNCTION_URL: ${{ vars.VITE_STUDENT_ACCOUNT_FUNCTION_URL }}
+      - name: Check bundle budget
+        run: npm run check:bundle
+      - name: Smoke test production bundle
+        run: npm run test:smoke
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

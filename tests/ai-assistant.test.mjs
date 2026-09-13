@@ -45,14 +45,14 @@ test('endpoint rejects unauthenticated requests without calling AI',async()=>{
   assert.equal(result.statusCode,401);
   assert.equal((await handler({httpMethod:'GET'})).statusCode,405);
 });
-test('records authenticated identity, uses owned server history and never claims a daily quota',async()=>{
+test('records authenticated identity, uses owned server history and claims the configured daily budget',async()=>{
   const keys=['VITE_SUPABASE_URL','VITE_SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY','AI_GATEWAY_API_KEY'];
   const original=Object.fromEntries(keys.map(k=>[k,process.env[k]]));
   const originalFetch=globalThis.fetch;
   const userId='11111111-1111-4111-8111-111111111111';
   const requests=[];
   let recorded,updated,provider;
-  const settings={name:'ผู้ช่วยทดสอบ',student_enabled:true,score_access:true,tone:'formal',answer_length:'short',instructions:'ตอบอย่างสุภาพ'};
+  const settings={name:'ผู้ช่วยทดสอบ',student_enabled:true,score_access:true,tone:'formal',answer_length:'short',instructions:'ตอบอย่างสุภาพ',daily_student_limit:30,daily_teacher_limit:100,history_retention_days:90};
   Object.assign(process.env,{VITE_SUPABASE_URL:'https://mock.supabase.co',VITE_SUPABASE_ANON_KEY:'anon-test',SUPABASE_SERVICE_ROLE_KEY:'server-test',AI_GATEWAY_API_KEY:'ai-test'});
   globalThis.fetch=async(input,options={})=>{
     const url=String(input);const method=options.method||'GET';requests.push(url);
@@ -60,6 +60,7 @@ test('records authenticated identity, uses owned server history and never claims
     if(url.includes('/auth/v1/user')) data={id:userId};
     else if(url.includes('/profiles')) data={role:'student',student_code:'123',full_name:'Authenticated student',class_name:'M1'};
     else if(url.includes('/ai_assistant_settings')) data=settings;
+    else if(url.includes('/rpc/claim_ai_assistant_request')) data=29;
     else if(url.includes('/ai_assistant_exchanges') && method==='GET') {
       assert.match(decodeURIComponent(url),new RegExp(`user_id=eq.${userId}`));
       data=[{question:'คำถามก่อนหน้า',answer:'คำตอบก่อนหน้า',status:'completed',response_data:null}];
@@ -76,7 +77,7 @@ test('records authenticated identity, uses owned server history and never claims
     assert.equal(updated.answer,'สวัสดีครับ');assert.equal(updated.status,'completed');
     assert.ok(provider.messages.some(m=>m.content==='คำถามก่อนหน้า'));
     assert.ok(!JSON.stringify(provider).includes('forged history'));
-    assert.ok(!requests.some(url=>url.includes('claim_ai_assistant_request')));
+    assert.equal(requests.filter(url=>url.includes('claim_ai_assistant_request')).length,1);
     assert.equal(provider.max_tokens,1200);
     assert.match(provider.messages[0].content,/ผู้ช่วยทดสอบ/);
     settings.student_enabled=false;

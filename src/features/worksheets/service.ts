@@ -340,15 +340,12 @@ export async function createWorksheet(draft: WorksheetDraft) {
 
 export async function deleteWorksheet(worksheet: Worksheet) {
   if (!supabase) throw new Error("ระบบยังไม่ได้เชื่อมต่อ Supabase");
-  const removed = await supabase.storage
-    .from(STORAGE_BUCKET)
-    .remove([worksheet.filePath]);
-  if (removed.error) throw removed.error;
-  const deleted = await supabase
-    .from("worksheets")
-    .delete()
-    .eq("id", worksheet.id);
+  const deleted = await supabase.rpc("delete_worksheet_with_cleanup", {
+    p_worksheet_id: worksheet.id,
+  });
   if (deleted.error) throw deleted.error;
+  if (deleted.data !== true)
+    throw new Error("ไม่พบสมุดงาน หรือสมุดงานนี้ถูกลบไปแล้ว");
 }
 
 export async function getWorksheetUrl(worksheet: Worksheet) {

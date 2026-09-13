@@ -16,6 +16,10 @@ For an existing production database, `assignment-groups-transaction.sql` is the 
 
 ## Access model
 
+`score-entry-history.sql` installs append-only teacher score history with initial snapshots. See `SCORE-HISTORY-README.md`.
+
+Production changes are now tracked in `supabase/migrations`. `20260625000000_initial_schema.sql` is the reproducible baseline; `20260913110000_teacher_settings_and_assistant_history.sql` brings settings and AI history under migrations; `20260913120000_release_hardening.sql` adds transactional deletion, deferred file cleanup and query indexes. Follow `DEPLOYMENT-RUNBOOK.md` instead of pasting individual patches in an arbitrary order.
+
 - Teachers are identified only by `profiles.role = 'teacher'`.
 - Students are linked through `profiles.student_code` and `students.student_code`.
 - Student classroom access is derived by `user_classroom_id()`.

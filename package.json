@@ -9,7 +9,14 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit --pretty false",
+    "test": "npm run test:unit && npm run test:db",
+    "test:unit": "node --experimental-strip-types --test --test-concurrency=1 tests/ai-assistant.test.mjs tests/ai-grading-retired.test.mjs tests/assistant-job.test.mjs tests/pagination.test.mjs tests/pdf-text.test.mjs tests/release-hardening.test.mjs tests/score-history.test.mjs",
+    "test:db": "node --experimental-strip-types --test tests/score-history-db.test.mjs && node --experimental-strip-types --test tests/release-hardening-db.test.mjs",
     "build": "vite build",
+    "check:bundle": "node scripts/check-build.mjs",
+    "test:smoke": "node scripts/smoke-build.mjs",
+    "test:staging": "node scripts/staging-rls-smoke.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run check:bundle && npm run test:smoke",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
@@ -31,6 +38,7 @@
     "nanoid@>=4 <5.1.16": "5.1.16"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@types/node": "^26.0.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

@@ -17,6 +17,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  History,
   FileText,
   FileSpreadsheet,
   GraduationCap,
@@ -58,8 +59,8 @@ import {
   validateSubmissionFile
 } from "./lib/validation";
 import { createOrResetStudentAccount } from "./services/studentService";
-import { fetchAllScoreEntryRows } from "./services/scoreService";
-import { fetchAllRows } from "./services/pagination";
+import ScoreHistoryPanel from "./features/score-history/ScoreHistoryPanel";
+import { fetchChatMessageRows, fetchCoreClassroomRows, fetchMaterialDownloadLogRows } from "./services/classroomDataService";
 import AiAssistant from "./features/assistant/AiAssistant";
 import { FeatureUpdateManager, FeatureUpdatePopup } from "./features/settings/FeatureUpdates";
 import { exportClassroomScoreExcel, exportClassroomScorePdf } from "./services/pdfExportService";
@@ -110,6 +111,7 @@ type SubmissionDraft = { assignmentId: string; file: File | null; linkUrl: strin
 type AssignmentGroup = { key: string; assignmentGroupId?: string; title: string; assignmentType: string; rawMax: number; finalMax: number; acceptingSubmissions: boolean; submissionOpenAt?: string; submissionCloseAt?: string; assignments: ScoreAssignment[]; classroomIds: string[]; hasMixedValues: boolean };
 type ThemeMode = "light" | "dark";
 type ScoreAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
+type PendingScoreSave = { assignment: ScoreAssignment; student: StudentRecord; rawScore: number; status: ScoreEntryStatus; version: number };
 type ProfileRow = { full_name?: string | null; role?: string | null; class_name?: string | null; school_name?: string | null; student_code?: string | null };
 type ChatTypingStatus = { role: Role; name: string; at: number };
 type ChatTypingPayload = { studentCode?: string; role?: Role; name?: string; isTyping?: boolean };
@@ -158,6 +160,7 @@ type ScoresViewProps = {
   moveAssignment: (assignment: ScoreAssignment, direction: -1 | 1) => void;
   updateScoreDraft: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void;
   updateScoreStatus: (assignment: ScoreAssignment, student: StudentRecord, status: ScoreEntryStatus) => void;
+  flushScoreEntry: (assignment: ScoreAssignment, student: StudentRecord) => void;
   saveScoreSheet: (assignment: ScoreAssignment) => void;
   saveAllScoreSheets: () => void;
   applySameScoreSheet: (assignment: ScoreAssignment, value: string) => Promise<void>;
@@ -234,22 +237,21 @@ function isRole(value: unknown): value is Role {
   return value === "teacher" || value === "student";
 }
 
-async function resolveAppSession(user: SupabaseUser | null | undefined, fallbackRole: Role): Promise<AppSession> {
+async function resolveAppSession(user: SupabaseUser | null | undefined, _fallbackRole: Role): Promise<AppSession> {
   const metadata = (user?.user_metadata ?? {}) as Record<string, unknown>;
-  let profile: ProfileRow | null = null;
-
-  if (isSupabaseConfigured && user?.id) {
-    const result = await supabase!
-      .from("profiles")
-      .select("full_name, role, class_name, school_name, student_code")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (!result.error) profile = result.data;
+  if (!isSupabaseConfigured || !user?.id) throw new Error("ไม่พบข้อมูลบัญชี กรุณาเข้าสู่ระบบใหม่");
+  const result = await supabase!
+    .from("profiles")
+    .select("full_name, role, class_name, school_name, student_code")
+    .eq("id", user.id)
+    .maybeSingle();
+  const profile = result.data as ProfileRow | null;
+  if (result.error || !profile || !isRole(profile.role)) {
+    throw new Error("ไม่พบสิทธิ์ผู้ใช้ในระบบ กรุณาติดต่อผู้ดูแล");
   }
 
-  const profileRole = profile?.role;
-  const metadataRole = metadata.role;
-  const resolvedRole: Role = isRole(profileRole) ? profileRole : isRole(metadataRole) ? metadataRole : fallbackRole;
+  // The profile table is the only trusted source for authorization and role UI.
+  const resolvedRole = profile.role;
   const base = sessions[resolvedRole];
   const school = String(profile?.school_name || metadata.school_name || base.school);
   const name = String(profile?.full_name || metadata.full_name || metadata.name || base.name);
@@ -287,6 +289,7 @@ function App() {
   const scoreAutoSaveTimers = useRef(new Map<string, number>());
   const scoreAutoSaveVersions = useRef(new Map<string, number>());
   const scoreAutoSaveInFlight = useRef(new Map<string, Promise<void>>());
+  const pendingScoreAutoSaves = useRef(new Map<string, PendingScoreSave>());
   const scoreDraftEntries = useRef(new Map<string, ScoreEntry>());
   const scoreWriteRevision = useRef(0);
   const chatTypingChannel = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(null);
@@ -351,8 +354,34 @@ function App() {
     window.localStorage.setItem("classroom-theme", theme);
   }, [theme]);
 
-  useEffect(() => () => {
-    scoreAutoSaveTimers.current.forEach((timer) => window.clearTimeout(timer));
+  useEffect(() => {
+    if (view !== "scores") void flushPendingScoreAutoSaves();
+  }, [view]);
+
+  useEffect(() => {
+    void flushPendingScoreAutoSaves();
+  }, [selectedClassroomId]);
+
+  useEffect(() => {
+    const flushPendingScores = () => { void flushPendingScoreAutoSaves(); };
+    const flushWhenHidden = () => {
+      if (document.visibilityState === "hidden") flushPendingScores();
+    };
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      if (!pendingScoreAutoSaves.current.size && !scoreAutoSaveInFlight.current.size) return;
+      flushPendingScores();
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("pagehide", flushPendingScores);
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    document.addEventListener("visibilitychange", flushWhenHidden);
+    return () => {
+      flushPendingScores();
+      window.removeEventListener("pagehide", flushPendingScores);
+      window.removeEventListener("beforeunload", warnBeforeLeaving);
+      document.removeEventListener("visibilitychange", flushWhenHidden);
+    };
   }, []);
 
   async function loadClassroomData(showToast = false) {
@@ -366,24 +395,13 @@ function App() {
     }
     try {
       const client = supabase!;
-      const [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult, chatResult] = await Promise.all([
-        client.from("classrooms").select("*").order("created_at", { ascending: false }),
-        client.from("materials").select("*").order("published_at", { ascending: false }),
-        client.from("announcements").select("*").order("published_at", { ascending: false }),
-        client.from("student_home_cards").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
-        client.from("material_download_logs").select("*").order("downloaded_at", { ascending: false }),
-        fetchAllRows((from, to) => client.from("students").select("*", { count: "exact" }).order("student_no", { ascending: true }).order("id").range(from, to)),
-        fetchAllRows((from, to) => client.from("score_assignments").select("*", { count: "exact" }).order("created_at", { ascending: true }).order("id").range(from, to)),
-        fetchAllScoreEntryRows(),
-        fetchAllRows((from, to) => client.from("submissions").select("*", { count: "exact" }).order("submitted_at", { ascending: false }).order("id").range(from, to)),
-        client.from("chat_messages").select("*").order("created_at", { ascending: true })
-      ]);
+      const [classroomsResult, materialsResult, announcementsResult, homeCardsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult] = await fetchCoreClassroomRows();
 
       if (loadVersion !== classroomLoadVersion.current) return false;
       const criticalError = [classroomsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult].find((result) => result.error)?.error;
       if (criticalError) throw new Error(userFacingError(criticalError, "โหลดงานหรือคะแนนไม่ครบ ระบบยังคงแสดงข้อมูลชุดก่อนหน้า กรุณาลองโหลดใหม่"));
 
-      const errors = [classroomsResult, materialsResult, announcementsResult, homeCardsResult, downloadLogsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult, chatResult].filter((result) => result.error);
+      const errors = [classroomsResult, materialsResult, announcementsResult, homeCardsResult, studentsResult, assignmentsResult, entriesResult, submissionsResult].filter((result) => result.error);
       if (errors.length) flash("บางตารางใน Supabase ยังไม่พร้อม กรุณาตรวจ schema แล้วลองโหลดใหม่");
 
       const nextClassrooms = (classroomsResult.data ?? []).map(mapClassroomRow).sort(sortClassrooms);
@@ -399,7 +417,6 @@ function App() {
       if (!materialsResult.error) setMaterialItems((materialsResult.data ?? []).filter((row) => row.file_path).map(mapMaterialRow));
       if (!announcementsResult.error) setAnnouncementItems((announcementsResult.data ?? []).map(mapAnnouncementRow));
       if (!homeCardsResult.error) setStudentHomeCards((homeCardsResult.data ?? []).map(mapStudentHomeCardRow));
-      if (!downloadLogsResult.error) setMaterialDownloadLogs((downloadLogsResult.data ?? []).map(mapMaterialDownloadLogRow));
       setStudents((studentsResult.data ?? []).map(mapStudentRow));
       if (session?.role === "student") {
         const peersResult = await client.rpc("get_classroom_peers");
@@ -428,7 +445,6 @@ function App() {
           })
           .filter((item) => !isLegacyDemoSubmission(item));
       });
-      if (!chatResult.error) setChatMessages((chatResult.data ?? []).map(mapChatMessageRow));
       if (showToast && errors.length === 0) flash("โหลดข้อมูลล่าสุดจาก Supabase แล้ว");
       return true;
     } catch (error) {
@@ -443,6 +459,31 @@ function App() {
     if (!session) return;
     void loadClassroomData();
   }, [session?.role]);
+
+  useEffect(() => {
+    if (!session || !isSupabaseConfigured || (view !== "materials" && view !== "students")) return;
+    let active = true;
+    void fetchMaterialDownloadLogRows()
+      .then((result) => {
+        if (!active) return;
+        if (result.error) flash("โหลดประวัติการดาวน์โหลดไม่สำเร็จ กรุณาลองใหม่");
+        else setMaterialDownloadLogs((result.data ?? []).map(mapMaterialDownloadLogRow));
+      });
+    return () => { active = false; };
+  }, [session?.role, view]);
+
+  useEffect(() => {
+    if (!session || !isSupabaseConfigured || view !== "chat" || !workingClassroom?.id) return;
+    let active = true;
+    const classroomId = workingClassroom.id;
+    void fetchChatMessageRows(classroomId)
+      .then((result) => {
+        if (!active) return;
+        if (result.error) flash("โหลดข้อความไม่สำเร็จ กรุณาลองใหม่");
+        else setChatMessages((result.data ?? []).map(mapChatMessageRow));
+      });
+    return () => { active = false; };
+  }, [session?.role, view, workingClassroom?.id]);
 
   useEffect(() => {
     if (!session || !isSupabaseConfigured || !workingClassroom?.id) return;
@@ -514,10 +555,18 @@ function App() {
 
     void supabase!.auth.getSession().then(async ({ data }) => {
       if (!active || !data.session?.user) return;
-      const restored = await resolveAppSession(data.session.user, role);
-      if (!active) return;
-      setRole(restored.role);
-      setSession(restored);
+      try {
+        const restored = await resolveAppSession(data.session.user, role);
+        if (!active) return;
+        setRole(restored.role);
+        setSession(restored);
+      } catch (error) {
+        if (!active) return;
+        await supabase!.auth.signOut();
+        flash(userFacingError(error, "กู้คืนการเข้าสู่ระบบไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่"));
+      }
+    }).catch((error) => {
+      if (active) flash(userFacingError(error, "ตรวจสอบการเข้าสู่ระบบไม่สำเร็จ"));
     });
 
     return () => {
@@ -539,7 +588,8 @@ function App() {
     try {
       const { data, error } = await supabase!.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      const nextSession = data.user ? await resolveAppSession(data.user, role) : sessions[role];
+      if (!data.user) throw new Error("ระบบไม่ได้ส่งข้อมูลผู้ใช้กลับมา กรุณาลองใหม่");
+      const nextSession = await resolveAppSession(data.user, role);
       setRole(nextSession.role);
       setSession(nextSession);
       setView("home");
@@ -568,6 +618,7 @@ function App() {
   }
 
   async function logout() {
+    await flushPendingScoreAutoSaves();
     if (isSupabaseConfigured) await supabase!.auth.signOut();
     classroomLoadVersion.current++;
     submissionReviewDrafts.current.clear();
@@ -652,15 +703,15 @@ function App() {
   }
 
   async function deleteMaterial(item: Material) {
+    if (!window.confirm(`ลบสื่อ "${item.title}" หรือไม่\nไฟล์แนบจะถูกนำไปลบจากพื้นที่จัดเก็บด้วย`)) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
-      const client = supabase!;
-      const result = await client.from("materials").delete().eq("id", item.id);
+      const result = await supabase!.rpc("delete_material_with_cleanup", { p_material_id: item.id });
       if (result.error) throw result.error;
-      const removed = item.filePath ? await client.storage.from(STORAGE_BUCKET).remove([item.filePath]) : null;
+      if (result.data !== true) throw new Error("ไม่พบสื่อที่ต้องการลบ หรือสื่อนี้ถูกลบไปแล้ว");
       setMaterialItems((current) => current.filter((material) => material.id !== item.id));
-      flash(removed?.error ? "ลบข้อมูลสื่อแล้ว แต่ลบไฟล์แนบไม่สำเร็จ" : `ลบสื่อ "${item.title}" แล้ว`);
+      flash(`ลบสื่อ "${item.title}" แล้ว ระบบจะจัดการไฟล์แนบให้อัตโนมัติ`);
     } catch (error) {
       flash(userFacingError(error, "ลบสื่อการสอนไม่สำเร็จ"));
     } finally {
@@ -745,6 +796,7 @@ function App() {
   }
 
   async function deleteAnnouncement(item: Announcement) {
+    if (!window.confirm(`ลบประกาศ "${item.title}" หรือไม่`)) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
@@ -947,24 +999,14 @@ function App() {
   }
 
   async function deleteClassroom(classroom: Classroom) {
+    if (!window.confirm(`ลบห้องเรียน ${classroom.displayName} หรือไม่\nรายชื่อ งาน คะแนน งานส่ง ประกาศ และข้อมูลที่เกี่ยวข้องกับห้องนี้จะถูกลบ`)) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
-      const client = supabase!;
-      const results = await Promise.all([
-        client.from("announcements").delete().eq("classroom_id", classroom.id),
-        client.from("material_download_logs").delete().eq("classroom_id", classroom.id),
-        client.from("materials").delete().eq("classroom_id", classroom.id),
-        client.from("score_assignments").delete().eq("classroom_id", classroom.id),
-        client.from("students").delete().eq("classroom_id", classroom.id),
-        client.from("submissions").delete().eq("classroom_id", classroom.id)
-      ]);
-      const relatedError = results.find((result) => result.error)?.error;
-      if (relatedError) throw relatedError;
-      const result = await client.from("classrooms").delete().eq("id", classroom.id);
+      const result = await supabase!.rpc("delete_classroom_with_cleanup", { p_classroom_id: classroom.id });
       if (result.error) throw result.error;
       await loadClassroomData();
-      flash(`ลบห้องเรียน ${classroom.displayName} แล้ว`);
+      flash(`ลบห้องเรียน ${classroom.displayName} และจัดคิวลบไฟล์ที่เกี่ยวข้องแล้ว`);
     } catch (error) {
       await loadClassroomData();
       flash(userFacingError(error, "ลบห้องเรียนไม่สำเร็จ กรุณาตรวจข้อมูลอีกครั้ง"));
@@ -1036,6 +1078,8 @@ function App() {
 
   async function deleteStudentsBatch(targetStudents: StudentRecord[]) {
     if (!targetStudents.length) return false;
+    const label = targetStudents.length === 1 ? targetStudents[0].name : `${targetStudents.length} คน`;
+    if (!window.confirm(`ลบรายชื่อนักเรียน ${label} หรือไม่\nคะแนนที่ผูกกับรายชื่อนี้จะถูกลบด้วย`)) return false;
     if (!isSupabaseConfigured) {
       flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
       return false;
@@ -1245,6 +1289,7 @@ function App() {
   }
 
   async function deleteMaterialDownloadLog(log: MaterialDownloadLog) {
+    if (!window.confirm(`ลบประวัติการดาวน์โหลด "${log.materialTitle}" ของ ${log.studentName} หรือไม่`)) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
@@ -1342,6 +1387,7 @@ function App() {
       scoreAutoSaveTimers.current.delete(key);
       scoreAutoSaveVersions.current.set(key, (scoreAutoSaveVersions.current.get(key) ?? 0) + 1);
       scoreDraftEntries.current.delete(key);
+      pendingScoreAutoSaves.current.delete(key);
     });
     setScoreAutoSaveStates((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !keys.has(key))));
   }
@@ -1384,9 +1430,37 @@ function App() {
       scoreAutoSaveTimers.current.set(key, timer);
     } catch (error) {
       if (scoreAutoSaveVersions.current.get(key) !== version) return;
+      pendingScoreAutoSaves.current.set(key, { assignment, student, rawScore, status, version });
       setScoreAutoSaveState(key, "error");
       flash(userFacingError(error, `บันทึกคะแนนของ ${student.name} ไม่สำเร็จ`));
     }
+  }
+
+  function flushScoreAutoSaveKey(key: string): Promise<void> {
+    const pending = pendingScoreAutoSaves.current.get(key);
+    if (!pending) return scoreAutoSaveInFlight.current.get(key) ?? Promise.resolve();
+    const timer = scoreAutoSaveTimers.current.get(key);
+    if (timer) window.clearTimeout(timer);
+    scoreAutoSaveTimers.current.delete(key);
+    pendingScoreAutoSaves.current.delete(key);
+
+    const previous = scoreAutoSaveInFlight.current.get(key) ?? Promise.resolve();
+    const saving = previous.catch(() => undefined).then(async () => {
+      if (scoreAutoSaveVersions.current.get(key) === pending.version) {
+        await autoSaveScoreEntry(pending.assignment, pending.student, pending.rawScore, pending.status, key, pending.version);
+      }
+    });
+    scoreAutoSaveInFlight.current.set(key, saving);
+    void saving.finally(() => {
+      if (scoreAutoSaveInFlight.current.get(key) === saving) scoreAutoSaveInFlight.current.delete(key);
+    });
+    return saving;
+  }
+
+  async function flushPendingScoreAutoSaves() {
+    const pendingKeys = [...pendingScoreAutoSaves.current.keys()];
+    await Promise.all(pendingKeys.map((key) => flushScoreAutoSaveKey(key)));
+    await Promise.all([...scoreAutoSaveInFlight.current.values()]);
   }
 
   function setScoreEntryDraft(assignment: ScoreAssignment, student: StudentRecord, rawScore: number, status: ScoreEntryStatus) {
@@ -1407,21 +1481,16 @@ function App() {
     scoreAutoSaveVersions.current.set(key, version);
     const currentTimer = scoreAutoSaveTimers.current.get(key);
     if (currentTimer) window.clearTimeout(currentTimer);
+    pendingScoreAutoSaves.current.set(key, { assignment, student, rawScore, status, version });
     setScoreAutoSaveState(key, "pending");
     const timer = window.setTimeout(() => {
-      // Serialize writes to the same cell so a slower old request cannot win.
-      const previous = scoreAutoSaveInFlight.current.get(key) ?? Promise.resolve();
-      const saving = previous.then(async () => {
-        if (scoreAutoSaveVersions.current.get(key) === version) {
-          await autoSaveScoreEntry(assignment, student, rawScore, status, key, version);
-        }
-      });
-      scoreAutoSaveInFlight.current.set(key, saving);
-      void saving.finally(() => {
-        if (scoreAutoSaveInFlight.current.get(key) === saving) scoreAutoSaveInFlight.current.delete(key);
-      });
+      void flushScoreAutoSaveKey(key);
     }, 900);
     scoreAutoSaveTimers.current.set(key, timer);
+  }
+
+  function flushScoreEntry(assignment: ScoreAssignment, student: StudentRecord) {
+    void flushScoreAutoSaveKey(scoreEntryKey(assignment.id, student.id));
   }
 
   function updateScoreDraft(assignment: ScoreAssignment, student: StudentRecord, value: string) {
@@ -1632,15 +1701,11 @@ function App() {
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
-      const client = supabase!;
-      if (item.filePath) {
-        const removed = await client.storage.from(STORAGE_BUCKET).remove([item.filePath]);
-        if (removed.error) throw new Error(`ลบไฟล์ที่นักเรียนอัปโหลดไม่สำเร็จ: ${removed.error.message}`);
-      }
-      const result = await client.from("submissions").delete().eq("id", item.id);
+      const result = await supabase!.rpc("delete_submission_with_cleanup", { p_submission_id: item.id });
       if (result.error) throw result.error;
+      if (result.data !== true) throw new Error("ไม่พบรายการส่งงาน หรือรายการนี้ถูกลบไปแล้ว");
       setSubmissionItems((current) => current.filter((submission) => submission.id !== item.id));
-      flash(`ลบงานของ ${item.studentName}${item.filePath ? "และไฟล์ที่อัปโหลด" : ""}แล้ว`);
+      flash(`ลบงานของ ${item.studentName} แล้ว${item.filePath ? " ระบบจะจัดการไฟล์ที่อัปโหลดให้อัตโนมัติ" : ""}`);
     } catch (error) {
       flash(userFacingError(error, "ลบรายการส่งงานไม่สำเร็จ"));
     } finally {
@@ -1845,7 +1910,7 @@ function App() {
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
-          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} deleteAssignmentGroup={deleteAssignments} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} />}
+          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} deleteAssignmentGroup={deleteAssignments} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} flushScoreEntry={flushScoreEntry} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} />}
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} students={session.role === "teacher" ? students : classroomPeers} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} onScoresChanged={async () => { await loadClassroomData(); }} flash={flash} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} submissions={activeSubmissions} downloadLogs={activeDownloadLogs} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
@@ -2299,13 +2364,13 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
   );
 }
 
-function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, deleteAssignmentGroup, moveAssignment, updateScoreDraft, updateScoreStatus, saveScoreSheet, saveAllScoreSheets, applySameScoreSheet }: ScoresViewProps) {
+function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, deleteAssignmentGroup, moveAssignment, updateScoreDraft, updateScoreStatus, flushScoreEntry, saveScoreSheet, saveAllScoreSheets, applySameScoreSheet }: ScoresViewProps) {
   const [draft, setDraft] = useState<AssignmentDraft>({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", acceptingSubmissions: true, submissionOpenAt: "", submissionCloseAt: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   const [editingGroupKey, setEditingGroupKey] = useState("");
   const [editDraft, setEditDraft] = useState<AssignmentDraft | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"raw" | "scaled">("raw");
-  const [teacherView, setTeacherView] = useState<"add" | "entry" | "overview">("add");
+  const [teacherView, setTeacherView] = useState<"add" | "entry" | "overview" | "history">("add");
   const [sameScoreAssignmentId, setSameScoreAssignmentId] = useState("");
   const [sameScoreValue, setSameScoreValue] = useState("");
   const assignmentGroups = useMemo(() => groupAssignments(allAssignments), [allAssignments]);
@@ -2440,11 +2505,12 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
 
   return (
     <div className="page-stack teacher-score-page">
-      <PageHeader title={teacherView === "add" ? "เพิ่มงาน" : teacherView === "entry" ? "กรอกคะแนน" : "ดูคะแนนรวม"} eyebrow={teacherView === "add" ? "กำหนดงานคะแนน" : activeClassName} />
+      <PageHeader title={teacherView === "add" ? "เพิ่มงาน" : teacherView === "entry" ? "กรอกคะแนน" : teacherView === "history" ? "ประวัติการแก้คะแนน" : "ดูคะแนนรวม"} eyebrow={teacherView === "add" ? "กำหนดงานคะแนน" : activeClassName} />
       <div className="teacher-score-view-switch" role="tablist" aria-label="มุมมองคะแนน">
         <button className={teacherView === "add" ? "active" : ""} type="button" role="tab" aria-selected={teacherView === "add"} onClick={() => setTeacherView("add")}><Plus aria-hidden />เพิ่มงาน</button>
         <button className={teacherView === "entry" ? "active" : ""} type="button" role="tab" aria-selected={teacherView === "entry"} onClick={() => setTeacherView("entry")}><Pencil aria-hidden />กรอกคะแนน</button>
         <button className={teacherView === "overview" ? "active" : ""} type="button" role="tab" aria-selected={teacherView === "overview"} onClick={() => setTeacherView("overview")}><BarChart3 aria-hidden />ดูคะแนนรวม</button>
+        <button className={teacherView === "history" ? "active" : ""} type="button" role="tab" aria-selected={teacherView === "history"} onClick={() => setTeacherView("history")}><History aria-hidden />ประวัติการแก้คะแนน</button>
       </div>
       {teacherView === "add" &&
         <section className="panel compact-form">
@@ -2471,7 +2537,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
               {students.length ? <div className="desktop-score-matrix"><div className="score-matrix-scroll"><table className="score-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment, index) => <th className="matrix-assignment" key={assignment.id}><div><span className="assignment-type-badge compact">{assignment.assignmentType}</span><strong>{assignment.title}</strong><span>ดิบ {formatScore(assignment.rawMax)} → เก็บ {formatScore(assignment.finalMax)}</span><div className="matrix-header-actions"><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} title={`ย้าย ${assignment.title} ไปก่อนหน้า`} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} title={`ย้าย ${assignment.title} ไปถัดไป`} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button><button className="matrix-delete" type="button" disabled={busy} onClick={() => deleteAssignment(assignment)} title={`ลบ ${assignment.title}`} aria-label={`ลบ ${assignment.title}`}><Trash2 aria-hidden /></button></div></div></th>)}</tr></thead><tbody>{students.map((student) => <tr key={student.id}><td className="matrix-no">{student.no}</td><td className="matrix-id">{student.studentId}</td><th className="matrix-name" scope="row">{student.name}</th>{assignments.map((assignment) => {
                 const entry = findScoreEntry(entries, assignment.id, student.id);
                 const status = entry?.status ?? "ungraded";
-                return <td className={`matrix-score-cell score-status-${status}`} key={assignment.id}><ScoreEntryControls assignment={assignment} student={student} entry={entry} onScore={updateScoreDraft} onStatus={updateScoreStatus} /></td>;
+                return <td className={`matrix-score-cell score-status-${status}`} key={assignment.id}><ScoreEntryControls assignment={assignment} student={student} entry={entry} onScore={updateScoreDraft} onStatus={updateScoreStatus} onCommit={flushScoreEntry} /></td>;
               })}</tr>)}</tbody></table></div><BulkSameScorePanel assignments={assignments} selectedAssignmentId={sameScoreAssignment?.id || ""} scoreValue={sameScoreValue} busy={busy} studentsCount={students.length} onAssignmentChange={setSameScoreAssignmentId} onScoreChange={setSameScoreValue} onApply={() => void submitSameScore()} /><div className="matrix-actions"><div className="matrix-save-copy"><span>กรอกคะแนนดิบ ระบบคำนวณคะแนนเก็บและบันทึกให้อัตโนมัติ</span><ScoreAutoSaveIndicator status={scoreAutoSaveStatus} /></div><button className="primary-button" disabled={busy || !students.length} onClick={saveAllScoreSheets}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกทั้งหมดตอนนี้"}</button></div></div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
               <div className="mobile-score-editor">
                 <div className="assignment-list">{assignments.map((assignment, index) => <div className="assignment-order-item" key={assignment.id}><button className={`assignment-chip ${selected?.id === assignment.id ? "active" : ""}`} type="button" onClick={() => setSelectedId(assignment.id)}><span className="assignment-type-badge compact">{assignment.assignmentType}</span>{assignment.title}<span>{formatScore(assignment.rawMax)}{" → "}{formatScore(assignment.finalMax)}</span></button><div><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button></div></div>)}</div>
@@ -2479,7 +2545,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
                 {selected && students.length ? <div className="score-table">{students.map((student) => {
                   const entry = findScoreEntry(entries, selected.id, student.id);
                   const status = entry?.status ?? "ungraded";
-                  return <article className={`score-row score-row-wide score-status-${status}`} key={student.id}><div className="student-score-identity"><strong>{student.name}</strong><span>รหัสนักเรียน {student.studentId}</span></div>{mode === "raw" ? <ScoreEntryControls assignment={selected} student={student} entry={entry} onScore={updateScoreDraft} onStatus={updateScoreStatus} /> : <ScoreEntryResult entry={entry} assignment={selected} />}</article>;
+                  return <article className={`score-row score-row-wide score-status-${status}`} key={student.id}><div className="student-score-identity"><strong>{student.name}</strong><span>รหัสนักเรียน {student.studentId}</span></div>{mode === "raw" ? <ScoreEntryControls assignment={selected} student={student} entry={entry} onScore={updateScoreDraft} onStatus={updateScoreStatus} onCommit={flushScoreEntry} /> : <ScoreEntryResult entry={entry} assignment={selected} />}</article>;
                 })}</div> : <EmptyState title="ยังไม่มีรายชื่อนักเรียน" body="ไปที่เมนูรายชื่อเพื่อเพิ่มนักเรียนก่อนกรอกคะแนน" />}
                 <BulkSameScorePanel assignments={assignments} selectedAssignmentId={sameScoreAssignment?.id || ""} scoreValue={sameScoreValue} busy={busy} studentsCount={students.length} onAssignmentChange={setSameScoreAssignmentId} onScoreChange={setSameScoreValue} onApply={() => void submitSameScore()} />
                 <ScoreAutoSaveIndicator status={scoreAutoSaveStatus} />
@@ -2489,6 +2555,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
           ) : <EmptyState title="ยังไม่มีงานคะแนน" body="เพิ่มงานคะแนนแรก แล้วระบบจะสร้างตารางให้กรอกตามรายชื่อนักเรียน" />}
         </section>}
       {teacherView === "overview" && <TeacherScoreOverview classrooms={classrooms} selectedClassroomId={selectedClassroomId} onClassroomChange={onClassroomChange} students={students} assignments={assignments} entries={entries} onEdit={() => setTeacherView("entry")} />}
+      {teacherView === "history" && <ScoreHistoryPanel key={selectedClassroomId} classrooms={classrooms} classroomId={selectedClassroomId} onClassroomChange={onClassroomChange} students={students} assignments={assignments} />}
       {editingGroup && editDraft && <div className="modal-backdrop assignment-edit-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) closeAssignmentEditor(); }}>
         <section className="assignment-edit-modal" role="dialog" aria-modal="true" aria-labelledby="assignment-edit-title">
           <header className="assignment-edit-modal-header">
@@ -2554,13 +2621,13 @@ function BulkSameScorePanel({ assignments, selectedAssignmentId, scoreValue, bus
   </div>;
 }
 
-function ScoreEntryControls({ assignment, student, entry, onScore, onStatus }: { assignment: ScoreAssignment; student: StudentRecord; entry?: ScoreEntry; onScore: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; onStatus: (assignment: ScoreAssignment, student: StudentRecord, status: ScoreEntryStatus) => void }) {
+function ScoreEntryControls({ assignment, student, entry, onScore, onStatus, onCommit }: { assignment: ScoreAssignment; student: StudentRecord; entry?: ScoreEntry; onScore: (assignment: ScoreAssignment, student: StudentRecord, value: string) => void; onStatus: (assignment: ScoreAssignment, student: StudentRecord, status: ScoreEntryStatus) => void; onCommit: (assignment: ScoreAssignment, student: StudentRecord) => void }) {
   const status = entry?.status ?? "ungraded";
   const acceptsScore = status === "ungraded" || status === "scored";
   const inputValue = status === "scored" ? formatScore(entry?.rawScore ?? 0) : "";
   return <div className={`score-entry-controls score-status-${status}`}>
-    <select aria-label={`สถานะ ${assignment.title} ของ ${student.name}`} value={status} onChange={(event) => onStatus(assignment, student, event.target.value as ScoreEntryStatus)}>{scoreEntryStatusOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
-    <label className="score-entry-number"><input aria-label={`${assignment.title} ของ ${student.name}`} type="number" min="0" max={assignment.rawMax} value={inputValue} disabled={!acceptsScore} onChange={(event) => onScore(assignment, student, event.target.value)} placeholder={acceptsScore ? "0" : "–"} /><span>/ {formatScore(assignment.rawMax)}</span></label>
+    <select aria-label={`สถานะ ${assignment.title} ของ ${student.name}`} value={status} onChange={(event) => onStatus(assignment, student, event.target.value as ScoreEntryStatus)} onBlur={() => onCommit(assignment, student)}>{scoreEntryStatusOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+    <label className="score-entry-number"><input aria-label={`${assignment.title} ของ ${student.name}`} type="number" min="0" max={assignment.rawMax} value={inputValue} disabled={!acceptsScore} onChange={(event) => onScore(assignment, student, event.target.value)} onBlur={() => onCommit(assignment, student)} placeholder={acceptsScore ? "0" : "–"} /><span>/ {formatScore(assignment.rawMax)}</span></label>
     <small>{scoreEntryStatusSummary(entry, assignment)}</small>
     {entry?.sourceType === "worksheet" && <span className="score-source-badge">จากใบงาน</span>}
   </div>;
@@ -3010,7 +3077,6 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
       flash("เลือกรายชื่อที่ต้องการลบก่อน");
       return;
     }
-    if (!window.confirm(`ลบรายชื่อ ${selectedStudents.length} คนออกจากห้องนี้?`)) return;
     const ok = await deleteStudents(selectedStudents);
     if (ok) setSelectedStudentIds([]);
   }

@@ -131,6 +131,15 @@ export async function handler(event, internalJob) {
     const history = previous.filter(row=>settings.score_access || !row.response_data?.snapshot).slice().reverse().flatMap(row=>[{role:'user',content:row.question},{role:'assistant',content:row.answer.slice(0,6000)}]);
     // Service credentials only write an authenticated user's chat log. Classroom reads keep RLS.
     admin = createClient(url,secret,{auth:{persistSession:false,autoRefreshToken:false}});
+    if(!internalJob?.exchangeId && ('daily_student_limit' in settings || 'daily_teacher_limit' in settings)) {
+      const usage = await admin.rpc('claim_ai_assistant_request',{p_user_id:auth.data.user.id});
+      if(usage.error) {
+        const detail=String(usage.error.message || '');
+        if(detail.includes('AI_DAILY_LIMIT')) throw fail('วันนี้ใช้ผู้ช่วย AI ครบจำนวนที่ครูกำหนดแล้ว กรุณาลองใหม่วันพรุ่งนี้',429);
+        if(!detail.includes('Could not find the function') && usage.error.code!=='PGRST202') throw fail('ตรวจสอบสิทธิ์การใช้งาน AI ไม่สำเร็จ กรุณาลองใหม่',503);
+        // Temporary compatibility while the settings migration is being installed.
+      }
+    }
     const requestId = input.requestId || crypto.randomUUID();
     // The worker must atomically claim a server-created job, never create a second exchange.
     if(internalJob?.exchangeId) {

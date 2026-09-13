@@ -20,7 +20,7 @@ export default function AiSettingsPanel() {
   async function save(event:FormEvent) {
     event.preventDefault();if(busy||!ready)return;setBusy(true);setMessage('');
     try {
-      const result=await supabase!.from('ai_assistant_settings').update({name:value.name.trim(),student_enabled:value.student_enabled,score_access:value.score_access,tone:value.tone,answer_length:value.answer_length,instructions:value.instructions.trim()}).eq('id',true).select('id').single();
+      const result=await supabase!.from('ai_assistant_settings').update({name:value.name.trim(),student_enabled:value.student_enabled,score_access:value.score_access,tone:value.tone,answer_length:value.answer_length,instructions:value.instructions.trim(),daily_student_limit:value.daily_student_limit,daily_teacher_limit:value.daily_teacher_limit,history_retention_days:value.history_retention_days}).eq('id',true).select('id').single();
       if(result.error)throw result.error;
       settingsChanged();setMessage('บันทึกแล้ว มีผลกับคำถามถัดไป');
     } catch {setMessage('บันทึกไม่สำเร็จ กรุณาตรวจสิทธิ์ครูแล้วลองใหม่');}
@@ -31,6 +31,8 @@ export default function AiSettingsPanel() {
     <div className="settings-grid"><label>น้ำเสียง<select aria-label="น้ำเสียง" value={value.tone} onChange={e=>setValue({...value,tone:e.target.value as AiSettings['tone']})}><option value="friendly">เป็นกันเอง</option><option value="formal">สุภาพเป็นทางการ</option><option value="coach">ผู้ช่วยฝึกคิด</option></select></label><label>ความยาวคำตอบ<select aria-label="ความยาวคำตอบ" value={value.answer_length} onChange={e=>setValue({...value,answer_length:e.target.value as AiSettings['answer_length']})}><option value="short">กระชับ</option><option value="balanced">พอดีกับคำถาม</option><option value="detailed">ละเอียด</option></select></label></div>
     <label className="settings-check"><input type="checkbox" checked={value.student_enabled} onChange={e=>setValue({...value,student_enabled:e.target.checked})}/>เปิดผู้ช่วย AI ให้นักเรียน</label>
     <label className="settings-check"><input type="checkbox" checked={value.score_access} onChange={e=>setValue({...value,score_access:e.target.checked})}/>ให้ AI อ่านคะแนนที่ผู้ถามมีสิทธิ์ดู</label>
+    <div className="settings-grid"><label>จำนวนครั้งต่อนักเรียนต่อวัน<input type="number" min="0" max="1000" value={value.daily_student_limit} onChange={e=>setValue({...value,daily_student_limit:Math.max(0,Math.min(1000,Number(e.target.value)||0))})}/><small>ใส่ 0 เพื่อไม่จำกัด</small></label><label>จำนวนครั้งต่อครูต่อวัน<input type="number" min="0" max="2000" value={value.daily_teacher_limit} onChange={e=>setValue({...value,daily_teacher_limit:Math.max(0,Math.min(2000,Number(e.target.value)||0))})}/><small>ใส่ 0 เพื่อไม่จำกัด</small></label></div>
+    <label>เก็บประวัติการสนทนา<input type="number" min="7" max="3650" value={value.history_retention_days} onChange={e=>setValue({...value,history_retention_days:Math.max(7,Math.min(3650,Number(e.target.value)||90))})}/><small>จำนวนวัน ระบบจะลบประวัติที่เก่ากว่านี้อัตโนมัติ</small></label>
     <label>แนวทางตอบเพิ่มเติม<textarea rows={5} maxLength={4000} value={value.instructions} onChange={e=>setValue({...value,instructions:e.target.value})}/></label>
     <button className="primary-button" disabled={!value.name.trim()}><Save aria-hidden/>{busy?'กำลังบันทึก':'บันทึกการตั้งค่า'}</button>
   </fieldset></form>}{message&&<p role="status">{message}</p>}</section>;

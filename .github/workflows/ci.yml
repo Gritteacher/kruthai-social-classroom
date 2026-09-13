@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/github-development]
   pull_request:
     branches: [main]
 
@@ -21,5 +21,25 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Test
+        run: npm test
       - name: Build
         run: npm run build
+      - name: Check bundle budget
+        run: npm run check:bundle
+      - name: Smoke test production bundle
+        run: npm run test:smoke
+      - name: Staging authentication and RLS smoke test
+        env:
+          STAGING_SUPABASE_URL: ${{ vars.STAGING_SUPABASE_URL }}
+          STAGING_SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          STAGING_TEACHER_EMAIL: ${{ secrets.STAGING_TEACHER_EMAIL }}
+          STAGING_TEACHER_PASSWORD: ${{ secrets.STAGING_TEACHER_PASSWORD }}
+          STAGING_STUDENT_EMAIL: ${{ secrets.STAGING_STUDENT_EMAIL }}
+          STAGING_STUDENT_PASSWORD: ${{ secrets.STAGING_STUDENT_PASSWORD }}
+        run: |
+          if [ -n "$STAGING_SUPABASE_URL" ] && [ -n "$STAGING_STUDENT_EMAIL" ]; then
+            npm run test:staging
+          else
+            echo "Staging RLS smoke test skipped: staging secrets are not configured."
+          fi
