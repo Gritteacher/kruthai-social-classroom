@@ -1,0 +1,865 @@
+/* Soft Green Classroom: visual overrides only. Application behavior stays unchanged. */
+:root {
+  color-scheme: light;
+  --green-900: #183a2b;
+  --green-800: #24543f;
+  --green-700: #34745a;
+  --green-100: #e6f1e9;
+  --amber: #dfb83f;
+  --amber-soft: #fff3c4;
+  --blue: #477987;
+  --blue-soft: #e8f1f2;
+  --coral: #c95e50;
+  --coral-soft: #fbe9e5;
+  --ink: #1b2a21;
+  --muted: #68766d;
+  --line: #dbe6dd;
+  --paper: #fffefa;
+  --page: #f3f6f1;
+  --surface-soft: #edf4ee;
+  --surface-subtle: #f7f9f5;
+  --surface-selected: #e1efe5;
+  --surface-danger: #fff2ee;
+  --shadow: 0 1px 2px rgba(24, 58, 43, 0.06);
+  --ring-fill: #4d8a6c;
+  --ring-track: #e2ebe4;
+  --radius-control: 12px;
+  --radius-card: 16px;
+  --radius-panel: 20px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --green-900: #e7f3ea;
+  --green-800: #1b3025;
+  --green-700: #82bd98;
+  --green-100: #24382d;
+  --amber: #e7c865;
+  --amber-soft: #3c351f;
+  --blue: #8eb6bf;
+  --blue-soft: #23363a;
+  --coral: #ef998c;
+  --coral-soft: #402824;
+  --ink: #edf4ef;
+  --muted: #a8b6ac;
+  --line: #304039;
+  --paper: #18211c;
+  --page: #111713;
+  --surface-soft: #223029;
+  --surface-subtle: #1d2822;
+  --surface-selected: #294335;
+  --surface-danger: #3a2622;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --ring-fill: #82bd98;
+  --ring-track: #2b3931;
+}
+
+html {
+  background: var(--page);
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, opacity 140ms ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--green-700) 24%, transparent);
+  outline-offset: 2px;
+}
+
+/* Authentication */
+.brand-panel {
+  border-right: 1px solid var(--line);
+  background: #e8f2e9;
+  color: var(--ink);
+}
+
+.brand-panel p,
+.brand-panel span {
+  color: var(--muted);
+}
+
+.brand-mark {
+  padding: 15px;
+  border: 1px solid #d7e6da;
+  background: #fff9df;
+  box-shadow: none;
+}
+
+.brand-logo {
+  filter: none;
+}
+
+.auth-panel {
+  background: var(--page);
+}
+
+.auth-card {
+  gap: 22px;
+  padding: clamp(22px, 4vw, 36px);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.role-card {
+  min-height: 82px;
+  border-color: var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+.role-card:hover {
+  border-color: #b9d2c0;
+  background: var(--surface-subtle);
+}
+
+.role-card.selected {
+  border-color: var(--green-700);
+  background: var(--surface-selected);
+  box-shadow: none;
+}
+
+.role-card > svg:first-child {
+  border-radius: 12px;
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.role-card:nth-child(2) > svg:first-child {
+  background: var(--amber-soft);
+  color: #856719;
+}
+
+.input-shell,
+.field input,
+.field select,
+.field textarea,
+.score-input input,
+.chat-compose input {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.input-shell:focus-within,
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.score-input input:focus,
+.chat-compose input:focus {
+  border-color: var(--green-700);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green-700) 14%, transparent);
+}
+
+/* Navigation */
+.app-shell {
+  grid-template-columns: 278px minmax(0, 1fr);
+}
+
+.side-nav {
+  gap: 20px;
+  border-right: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  backdrop-filter: none;
+}
+
+.side-brand {
+  border-bottom-color: var(--line);
+}
+
+.side-logo,
+.mobile-head-brand img {
+  border: 1px solid #d7e6da;
+  background: #fff9df;
+  box-shadow: none;
+}
+
+.side-brand small {
+  color: var(--muted);
+}
+
+.side-nav nav {
+  gap: 6px;
+}
+
+.side-nav nav button,
+.logout-button {
+  min-height: 48px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  color: var(--muted);
+}
+
+.side-nav nav button:hover,
+.logout-button:hover {
+  border-color: transparent;
+  background: var(--surface-subtle);
+  color: var(--ink);
+}
+
+.side-nav nav button.active {
+  border-color: transparent;
+  background: var(--surface-selected);
+  color: var(--green-800);
+}
+
+.side-nav nav button.active::before {
+  background: var(--green-700);
+}
+
+.top-bar {
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--page) 92%, transparent);
+  box-shadow: none;
+  backdrop-filter: blur(12px);
+}
+
+.icon-button,
+.avatar-button,
+.theme-toggle-button,
+.mobile-profile-button,
+.mobile-chat-button,
+.mobile-account-button,
+.mobile-logout-button {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.icon-button,
+.avatar-button,
+.mobile-profile-button,
+.mobile-chat-button,
+.mobile-account-button,
+.mobile-logout-button {
+  border-radius: 999px;
+}
+
+.avatar-button {
+  border-color: var(--green-700);
+  background: var(--green-700);
+  color: #fff;
+}
+
+.theme-toggle-button {
+  border-radius: 999px;
+}
+
+.icon-button:hover,
+.theme-toggle-button:hover,
+.mobile-profile-button:hover,
+.mobile-chat-button:hover,
+.mobile-account-button:hover {
+  border-color: #b9d2c0;
+  background: var(--surface-selected);
+  color: var(--green-800);
+}
+
+/* Surfaces and hierarchy */
+.content-area {
+  width: min(1260px, 100%);
+}
+
+.page-stack {
+  gap: 20px;
+}
+
+.panel,
+.material-card,
+.score-hero,
+.upload-panel,
+.profile-panel,
+.stat-card,
+.student-home-card,
+.student-resource-card,
+.auth-card,
+.chat-thread,
+.chat-roster button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.panel,
+.upload-panel,
+.profile-panel {
+  padding: clamp(16px, 2vw, 24px);
+}
+
+.hero-strip,
+.score-hero {
+  border: 1px solid #d6e5d8;
+  border-radius: var(--radius-panel);
+  background: #e6f1e9;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.hero-strip .eyebrow,
+.score-hero span {
+  color: var(--muted);
+}
+
+.grade-badge {
+  border: 1px solid #ead684;
+  border-radius: var(--radius-card);
+  background: var(--amber-soft);
+  color: #584817;
+}
+
+.stat-grid {
+  gap: 12px;
+}
+
+.stat-card {
+  min-height: 94px;
+  border-radius: var(--radius-card);
+  box-shadow: none;
+}
+
+.stat-card.tone-green,
+.tone-green {
+  background: #e6f1e9;
+  color: var(--green-800);
+}
+
+.stat-card.tone-amber,
+.tone-amber {
+  background: var(--amber-soft);
+  color: #685418;
+}
+
+.stat-card.tone-blue,
+.tone-blue {
+  background: var(--blue-soft);
+  color: #315f69;
+}
+
+.stat-card.tone-coral,
+.tone-coral {
+  background: var(--coral-soft);
+  color: #8f4036;
+}
+
+.student-home-welcome {
+  gap: 4px;
+  padding: 6px 2px;
+}
+
+.student-home-welcome h1 {
+  color: var(--green-900);
+}
+
+.student-home-card {
+  border-radius: var(--radius-panel);
+  background: var(--paper);
+  box-shadow: none;
+  transform: none;
+}
+
+.student-home-card:hover {
+  border-color: #b9d2c0;
+  background: var(--surface-subtle);
+  box-shadow: none;
+  transform: none;
+}
+
+.student-home-card svg,
+.student-resource-icon,
+.announcement-overview-icon {
+  border-radius: 12px;
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.home-score-ring > div,
+.score-ring > div,
+.created-score-ring > div {
+  box-shadow: none;
+}
+
+.student-resource-card {
+  box-shadow: none;
+}
+
+/* Buttons and segmented controls */
+.primary-button,
+.small-primary,
+.account-button,
+.avatar-button {
+  border: 1px solid var(--green-700) !important;
+  border-radius: var(--radius-control);
+  background: var(--green-700) !important;
+  color: #fff !important;
+  box-shadow: none;
+}
+
+.primary-button:hover,
+.small-primary:hover,
+.account-button:hover {
+  border-color: var(--green-800) !important;
+  background: var(--green-800) !important;
+}
+
+.template-button,
+.select-button,
+.outline-file-button,
+.filter-row button,
+.review-mode-switch button,
+.teacher-score-view-switch button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.template-button:hover,
+.select-button:hover,
+.filter-row button:hover,
+.review-mode-switch button:hover,
+.teacher-score-view-switch button:hover {
+  border-color: #b9d2c0;
+  background: var(--surface-subtle);
+}
+
+.filter-row button.active,
+.template-button.active,
+.review-mode-switch button.active,
+.teacher-score-view-switch button.active {
+  border-color: var(--green-700) !important;
+  background: var(--surface-selected) !important;
+  color: var(--green-800) !important;
+}
+
+.outline-file-button {
+  border-color: #e4cd71;
+  background: var(--amber-soft);
+  color: #6f5815;
+}
+
+.danger-button,
+.icon-danger {
+  border-color: color-mix(in srgb, var(--coral) 32%, var(--line));
+  border-radius: var(--radius-control);
+  background: var(--surface-danger);
+  color: var(--coral);
+}
+
+/* Lists, cards, and messages */
+.material-card,
+.lesson-card,
+.submission-card,
+.score-card,
+.score-row,
+.score-summary-row,
+.announcement-card,
+.download-log-row,
+.student-preview-row,
+.review-card,
+.student-review-work-card,
+.home-card-admin-item {
+  border-color: var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+  box-shadow: none;
+}
+
+.material-card {
+  border-left-width: 1px;
+}
+
+.tone-border-green,
+.tone-border-amber,
+.tone-border-blue,
+.tone-border-coral {
+  border-left-color: var(--line);
+}
+
+.material-icon,
+.type-pill.pdf,
+.type-pill.video,
+.type-pill.img,
+.status-pill.pass,
+.status-pill.info {
+  background: var(--green-100);
+  color: var(--green-800);
+}
+
+.status-pill.pending {
+  background: var(--amber-soft);
+  color: #725a14;
+}
+
+.status-pill.fail {
+  background: var(--coral-soft);
+  color: var(--coral);
+}
+
+.announcement-home-card,
+.announcement-panel-red,
+.announcement-card-student,
+.teacher-announcement-panel {
+  border-color: #eadc9f;
+  background: #fffaf0;
+  box-shadow: none;
+}
+
+.announcement-home-card svg,
+.announcement-overview-icon,
+.announcement-count {
+  background: var(--amber-soft);
+  color: #765d15;
+}
+
+.announcement-overview-header,
+.announcement-overview-item {
+  border-color: #eee2b5;
+}
+
+/* Tables */
+.score-matrix-scroll,
+.score-summary-table,
+.student-preview {
+  border-color: var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+  box-shadow: none;
+}
+
+.score-matrix th,
+.score-matrix td {
+  border-color: var(--line);
+  background: var(--paper);
+}
+
+.score-matrix thead th,
+.score-matrix thead .matrix-no,
+.score-matrix thead .matrix-id,
+.score-matrix thead .matrix-name,
+.score-matrix thead .matrix-total,
+.score-summary-head,
+.student-preview-head {
+  background: #eaf2eb;
+  color: var(--green-900);
+}
+
+.score-matrix tbody tr:hover td {
+  background: var(--surface-subtle);
+}
+
+.score-matrix td.score-status-scored {
+  background: #edf7ef;
+}
+
+.score-matrix td.score-status-leave {
+  background: #fff7d8;
+}
+
+.score-matrix td.score-status-expired,
+.score-matrix td.score-status-no_score {
+  background: #f7eeeb;
+}
+
+.panel-classroom-picker {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+}
+
+/* Upload, overlays, and feedback */
+.upload-panel,
+.empty-state {
+  border-color: #b9d2c0;
+  border-radius: var(--radius-panel);
+  background: var(--surface-subtle);
+}
+
+.upload-panel > svg,
+.text-button {
+  color: var(--green-700);
+}
+
+.modal-backdrop,
+.student-detail-backdrop,
+.assignment-edit-backdrop {
+  background: rgba(24, 42, 32, 0.38);
+  backdrop-filter: blur(8px);
+}
+
+.download-confirm-panel,
+.student-detail-modal,
+.assignment-edit-modal,
+.submission-preview-modal,
+.mobile-header-menu {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--paper);
+  box-shadow: 0 18px 48px rgba(24, 58, 43, 0.16);
+}
+
+.toast {
+  border: 1px solid color-mix(in srgb, var(--green-700) 38%, var(--line));
+  border-radius: 14px;
+  background: var(--green-900);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(24, 58, 43, 0.18);
+}
+
+/* Dark theme keeps the same green/yellow visual language. */
+:root[data-theme="dark"] body,
+:root[data-theme="dark"] .auth-panel,
+:root[data-theme="dark"] .workspace,
+:root[data-theme="dark"] .content-area {
+  background: var(--page);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .panel,
+:root[data-theme="dark"] .material-card,
+:root[data-theme="dark"] .score-hero,
+:root[data-theme="dark"] .upload-panel,
+:root[data-theme="dark"] .profile-panel,
+:root[data-theme="dark"] .stat-card,
+:root[data-theme="dark"] .auth-card,
+:root[data-theme="dark"] .student-home-card,
+:root[data-theme="dark"] .student-resource-card,
+:root[data-theme="dark"] .student-preview-row,
+:root[data-theme="dark"] .submission-card,
+:root[data-theme="dark"] .score-card,
+:root[data-theme="dark"] .score-row,
+:root[data-theme="dark"] .score-summary-row,
+:root[data-theme="dark"] .download-log-row,
+:root[data-theme="dark"] .review-card,
+:root[data-theme="dark"] .student-review-work-card,
+:root[data-theme="dark"] .home-card-admin-item {
+  border-color: var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+:root[data-theme="dark"] .brand-panel,
+:root[data-theme="dark"] .hero-strip,
+:root[data-theme="dark"] .score-hero {
+  border-color: var(--line);
+  background: #1d3025;
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .brand-mark,
+:root[data-theme="dark"] .side-logo,
+:root[data-theme="dark"] .mobile-head-brand img {
+  border-color: #4a4931;
+  background: #302d1d;
+}
+
+:root[data-theme="dark"] .side-nav,
+:root[data-theme="dark"] .top-bar,
+:root[data-theme="dark"] .bottom-nav,
+:root[data-theme="dark"] .mobile-header-menu {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+:root[data-theme="dark"] .teacher-announcement-panel,
+:root[data-theme="dark"] .announcement-panel-red,
+:root[data-theme="dark"] .announcement-card-student {
+  border-color: #514824;
+  background: #282719;
+  box-shadow: none;
+}
+
+:root[data-theme="dark"] .announcement-overview-header,
+:root[data-theme="dark"] .announcement-overview-item {
+  border-color: #4b4427;
+}
+
+:root[data-theme="dark"] .score-matrix th,
+:root[data-theme="dark"] .score-matrix td,
+:root[data-theme="dark"] .score-matrix tbody .matrix-no,
+:root[data-theme="dark"] .score-matrix tbody .matrix-id,
+:root[data-theme="dark"] .score-matrix tbody .matrix-name,
+:root[data-theme="dark"] .score-matrix tbody .matrix-total {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .score-matrix thead th,
+:root[data-theme="dark"] .score-matrix thead .matrix-no,
+:root[data-theme="dark"] .score-matrix thead .matrix-id,
+:root[data-theme="dark"] .score-matrix thead .matrix-name,
+:root[data-theme="dark"] .score-matrix thead .matrix-total,
+:root[data-theme="dark"] .score-summary-head,
+:root[data-theme="dark"] .student-preview-head {
+  background: #23382c;
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .score-matrix tbody tr:hover td {
+  background: var(--surface-subtle);
+}
+
+:root[data-theme="dark"] .score-matrix td.score-status-scored {
+  background: #20382a;
+}
+
+:root[data-theme="dark"] .score-matrix td.score-status-leave {
+  background: #3a351f;
+}
+
+:root[data-theme="dark"] .score-matrix td.score-status-expired,
+:root[data-theme="dark"] .score-matrix td.score-status-no_score {
+  background: #382724;
+}
+
+@media (max-width: 1120px) {
+  .app-shell .top-bar,
+  .app-shell.role-student .top-bar,
+  .app-shell.role-teacher .top-bar {
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--page) 94%, transparent);
+    box-shadow: none;
+    backdrop-filter: blur(12px);
+  }
+
+  .app-shell .mobile-head-brand img {
+    border-radius: 999px;
+  }
+
+  .app-shell .top-actions .mobile-chat-button,
+  .app-shell .top-actions .mobile-account-button {
+    border-color: var(--line);
+    background: var(--paper);
+    color: var(--ink);
+    box-shadow: none;
+  }
+
+  .mobile-header-menu {
+    background: var(--paper);
+    box-shadow: 0 14px 36px rgba(24, 58, 43, 0.14);
+    backdrop-filter: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    padding-bottom: 88px;
+  }
+
+  .bottom-nav,
+  :root[data-theme="dark"] .bottom-nav {
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    left: max(10px, env(safe-area-inset-left));
+    min-height: 66px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    background: var(--paper);
+    box-shadow: 0 6px 18px rgba(24, 58, 43, 0.12);
+    backdrop-filter: none;
+  }
+
+  .bottom-nav button,
+  :root[data-theme="dark"] .bottom-nav button {
+    min-height: 52px;
+    border-radius: 18px;
+    color: var(--muted);
+  }
+
+  .bottom-nav button.active,
+  :root[data-theme="dark"] .bottom-nav button.active {
+    background: var(--surface-selected);
+    color: var(--green-800);
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .content-area {
+    padding: 18px 12px 30px;
+  }
+
+  .page-stack {
+    gap: 14px;
+  }
+
+  .panel,
+  .upload-panel,
+  .profile-panel {
+    padding: 15px;
+    border-radius: 17px;
+  }
+
+  .hero-strip {
+    padding: 16px;
+    border-radius: 17px;
+  }
+
+  .stat-grid {
+    gap: 8px;
+  }
+
+  .stat-card {
+    min-height: 72px;
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .student-home-grid {
+    gap: 10px;
+  }
+
+  .student-home-card,
+  .score-home-card {
+    min-height: 148px;
+    border-radius: 17px;
+  }
+
+  .panel-classroom-picker {
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .download-confirm-panel,
+  .student-detail-modal,
+  .assignment-edit-modal,
+  .submission-preview-modal {
+    border-radius: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
