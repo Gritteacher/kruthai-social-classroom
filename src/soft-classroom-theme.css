@@ -659,6 +659,41 @@ textarea:focus-visible {
   box-shadow: var(--shadow);
 }
 
+:root[data-theme="dark"] .primary-button,
+:root[data-theme="dark"] .small-primary,
+:root[data-theme="dark"] .account-button,
+:root[data-theme="dark"] .avatar-button {
+  border-color: var(--green-700) !important;
+  background: var(--green-700) !important;
+  color: #102218 !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="dark"] .primary-button:hover,
+:root[data-theme="dark"] .small-primary:hover,
+:root[data-theme="dark"] .account-button:hover {
+  border-color: #9bcead !important;
+  background: #9bcead !important;
+}
+
+:root[data-theme="dark"] .role-card,
+:root[data-theme="dark"] .input-shell,
+:root[data-theme="dark"] .field input,
+:root[data-theme="dark"] .field select,
+:root[data-theme="dark"] .field textarea,
+:root[data-theme="dark"] .score-input input,
+:root[data-theme="dark"] .chat-compose input {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+:root[data-theme="dark"] .role-card.selected {
+  border-color: var(--green-700);
+  background: var(--surface-selected);
+}
+
 :root[data-theme="dark"] .brand-panel,
 :root[data-theme="dark"] .hero-strip,
 :root[data-theme="dark"] .score-hero {
