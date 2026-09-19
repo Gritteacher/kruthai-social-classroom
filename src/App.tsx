@@ -61,6 +61,7 @@ import {
 import { createOrResetStudentAccount } from "./services/studentService";
 import ScoreHistoryPanel from "./features/score-history/ScoreHistoryPanel";
 import SubmissionHistoryPanel from "./features/submission-history/SubmissionHistoryPanel";
+import { calculateStudentScoreSummary } from "./features/student-scores/summary";
 import { fetchChatMessageRows, fetchCoreClassroomRows, fetchMaterialDownloadLogRows } from "./services/classroomDataService";
 import AiAssistant from "./features/assistant/AiAssistant";
 import { FeatureUpdateManager, FeatureUpdatePopup } from "./features/settings/FeatureUpdates";
@@ -2700,14 +2701,38 @@ function TeacherScoreOverview({ classrooms, selectedClassroomId, onClassroomChan
 
 function StudentScoresView({ assignments, entries, students }: { assignments: ScoreAssignment[]; entries: ScoreEntry[]; students: StudentRecord[] }) {
   const student = students[0];
-  const studentEntries = student ? entries.filter((entry) => entry.studentRecordId === student.id && entry.status !== "ungraded") : [];
-  const totalFinal = studentEntries.reduce((sum, entry) => sum + (scoreEntryCountsTowardTotal(entry) ? entry.finalScore : 0), 0);
-  const totalMax = studentEntries.reduce((sum, entry) => sum + (scoreEntryCountsTowardTotal(entry) ? entry.finalMax : 0), 0);
-  const ringPercent = totalMax > 0 ? Math.max(0, Math.min(100, (totalFinal / totalMax) * 100)) : 0;
-  return <div className="page-stack"><PageHeader title="คะแนนของฉัน" eyebrow={student?.name || "ยังไม่มีข้อมูลนักเรียน"} />{studentEntries.length ? <><section className="panel score-overview student-score-simple"><SectionTitle title="คะแนนทั้งหมด" note={`รวม ${studentEntries.length} รายการ`} /><div className="score-overview-layout"><div className="score-ring" style={{ background: `conic-gradient(var(--ring-fill) 0deg ${ringPercent * 3.6}deg, var(--ring-track) ${ringPercent * 3.6}deg 360deg)` }}><div><strong>{formatScore(totalFinal)}</strong><span>คะแนน</span></div></div><div className="score-overview-copy"><p>คะแนนสะสมจากงานที่ครูบันทึกแล้ว</p></div></div></section><section className="panel"><SectionTitle title="คะแนนทั้งหมด" note={`${studentEntries.length} รายการ`} /><div className="score-summary-table student-score-table"><div className="score-summary-head"><span>งานคะแนน</span><span>คะแนนที่ได้</span></div>{studentEntries.map((entry) => {
-    const assignment = assignments.find((item) => item.id === entry.assignmentId);
-    return <div className={`score-summary-row static score-status-${entry.status}`} key={entry.id}><strong><span className="assignment-type-badge compact">{assignment?.assignmentType || "ทั่วไป"}</span>{assignment?.title || "งานคะแนน"}</strong><span>{studentScoreEntryLabel(entry)}</span></div>;
-  })}</div></section></> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูบันทึกคะแนนแล้วจะแสดงที่นี่" />}</div>;
+  const summary = calculateStudentScoreSummary(assignments, entries, student?.id);
+  const ringLabel = summary.grade === null
+    ? "ยังไม่มีงานคะแนน"
+    : `ได้ ${formatScore(summary.earned)} จาก ${formatScore(summary.total)} คะแนน คิดเป็น ${formatScore(summary.percentage)} เปอร์เซ็นต์ เกรด ${summary.grade}`;
+
+  return <div className="page-stack">
+    <PageHeader title="คะแนนของฉัน" eyebrow={student?.name || "ยังไม่มีข้อมูลนักเรียน"} />
+    {summary.total > 0 ? <>
+      <section className="panel score-overview student-score-simple">
+        <SectionTitle title="คะแนนทั้งหมด" note={`${summary.gradedCount} จาก ${summary.rows.length} งานมีผลคะแนนแล้ว`} />
+        <div className="score-overview-layout">
+          <div className="score-ring" role="img" aria-label={ringLabel} style={{ background: `conic-gradient(var(--ring-fill) 0deg ${summary.percentage * 3.6}deg, var(--ring-track) ${summary.percentage * 3.6}deg 360deg)` }}>
+            <div><strong>{formatScore(summary.earned)}</strong><span>/ {formatScore(summary.total)} คะแนน</span></div>
+          </div>
+          <div className="score-overview-copy student-score-result">
+            <div className="student-grade-result"><span>เกรด</span><strong>{summary.grade}</strong></div>
+            <div><strong>{formatScore(summary.percentage)}%</strong><p>คำนวณจากคะแนนเต็มรวมของงานทั้งหมดในห้องเรียน</p></div>
+          </div>
+        </div>
+      </section>
+      <section className="panel">
+        <SectionTitle title="คะแนนทั้งหมด" note={`${summary.rows.length} งาน · เต็ม ${formatScore(summary.total)} คะแนน`} />
+        <div className="score-summary-table student-score-table">
+          <div className="score-summary-head"><span>งานคะแนน</span><span>คะแนนที่ได้ / คะแนนเต็ม</span></div>
+          {summary.rows.map(({ assignment, entry }) => <div className={`score-summary-row static score-status-${entry?.status ?? "ungraded"}`} key={assignment.id}>
+            <strong><span className="assignment-type-badge compact">{assignment.assignmentType || "ทั่วไป"}</span>{assignment.title}</strong>
+            <span>{entry ? studentScoreEntryLabel(entry, assignment.finalMax) : `ยังไม่กรอก · เต็ม ${formatScore(assignment.finalMax)}`}</span>
+          </div>)}
+        </div>
+      </section>
+    </> : <EmptyState title="ยังไม่มีคะแนน" body="เมื่อคุณครูเพิ่มงานคะแนนแล้ว คะแนนเต็มรวมและเกรดจะแสดงที่นี่" />}
+  </div>;
 }
 
 function WorkView({ role, classrooms, students, selectedClassroomId, onClassroomChange, assignments, allAssignments, submissions, classmates, currentStudent, busy, activeClassName, submitWork, updateSubmission, saveSubmission, saveSubmissions, deleteSubmission, openSubmission, getSubmissionPreviewUrl, onScoresChanged, flash }: WorkViewProps) {
@@ -3511,11 +3536,13 @@ function scoreEntryStatusSummary(entry: ScoreEntry | undefined, assignment: Scor
   return `เก็บ ${formatScore(entry.finalScore)} / ${formatScore(assignment.finalMax)}`;
 }
 
-function studentScoreEntryLabel(entry: ScoreEntry) {
-  if (entry.status === "leave") return "ลา · รอให้คะแนน";
-  if (entry.status === "expired") return "0 คะแนน · หมดเวลาส่ง";
-  if (entry.status === "no_score") return "0 คะแนน · ไม่มีคะแนน";
-  return `${formatScore(entry.finalScore)} คะแนน`;
+function studentScoreEntryLabel(entry: ScoreEntry, assignmentFinalMax = entry.finalMax) {
+  const fullScore = formatScore(assignmentFinalMax);
+  if (entry.status === "ungraded") return `ยังไม่กรอก · เต็ม ${fullScore}`;
+  if (entry.status === "leave") return `ลา · รอให้คะแนน · เต็ม ${fullScore}`;
+  if (entry.status === "expired") return `0 / ${fullScore} · หมดเวลาส่ง`;
+  if (entry.status === "no_score") return `0 / ${fullScore} · ไม่มีคะแนน`;
+  return `${formatScore(entry.finalScore)} / ${fullScore}`;
 }
 
 function scaledScore(rawScore: number, rawMax: number, finalMax: number) {

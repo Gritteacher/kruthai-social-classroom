@@ -635,6 +635,42 @@ textarea {
   font-size: 18px;
 }
 
+.student-score-result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.student-score-result > div:last-child > strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: clamp(26px, 4vw, 38px);
+  line-height: 1;
+}
+
+.student-grade-result {
+  display: grid;
+  min-width: 112px;
+  min-height: 112px;
+  place-items: center;
+  align-content: center;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface-selected);
+  color: var(--green-800);
+}
+
+.student-grade-result span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.student-grade-result strong {
+  font-size: 40px;
+  line-height: 1.1;
+}
+
 .student-score-table .score-summary-head,
 .student-score-table .score-summary-row {
   grid-template-columns: minmax(0, 1fr) minmax(120px, 0.35fr);
@@ -1591,6 +1627,10 @@ textarea {
 
   .student-score-simple .score-overview-copy {
     text-align: center;
+  }
+
+  .student-score-result {
+    justify-content: center;
   }
 
   .download-confirm-panel {
