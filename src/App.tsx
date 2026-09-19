@@ -60,6 +60,7 @@ import {
 } from "./lib/validation";
 import { createOrResetStudentAccount } from "./services/studentService";
 import ScoreHistoryPanel from "./features/score-history/ScoreHistoryPanel";
+import SubmissionHistoryPanel from "./features/submission-history/SubmissionHistoryPanel";
 import { fetchChatMessageRows, fetchCoreClassroomRows, fetchMaterialDownloadLogRows } from "./services/classroomDataService";
 import AiAssistant from "./features/assistant/AiAssistant";
 import { FeatureUpdateManager, FeatureUpdatePopup } from "./features/settings/FeatureUpdates";
@@ -1922,7 +1923,7 @@ function App() {
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} students={session.role === "teacher" ? students : classroomPeers} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} onScoresChanged={async () => { await loadClassroomData(); }} flash={flash} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} submissions={activeSubmissions} downloadLogs={activeDownloadLogs} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
-          {view === "profile" && <ProfileView session={session} busy={busy} changePassword={changePassword} />}
+          {view === "profile" && <ProfileView session={session} classrooms={classroomItems} busy={busy} changePassword={changePassword} />}
           <div hidden={view !== "assistant"}><AiAssistant active={view === "assistant"} role={session.role} classrooms={classroomItems} students={students} materials={activeMaterials} /></div>
         </section>
       </main>
@@ -3199,7 +3200,7 @@ function UploadPanel({ file, setFile, accept, label, help }: { file: File | null
   return <section className="upload-panel"><CloudUpload aria-hidden /><strong>{label}</strong><span>หรือ</span><label className="outline-file-button"><Upload aria-hidden /><input accept={accept} type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><span className="file-choice-label">{file ? file.name : "เลือกไฟล์จากเครื่อง"}</span></label><small>{help}</small></section>;
 }
 
-function ProfileView({ session, busy, changePassword }: { session: AppSession; busy: boolean; changePassword: (newPassword: string) => void }) {
+function ProfileView({ session, classrooms, busy, changePassword }: { session: AppSession; classrooms: Classroom[]; busy: boolean; changePassword: (newPassword: string) => void }) {
   const [newPassword, setNewPassword] = useState("");
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -3209,10 +3210,11 @@ function ProfileView({ session, busy, changePassword }: { session: AppSession; b
   return (
     <div className="page-stack">
       <PageHeader title="โปรไฟล์" eyebrow={session.room} />
-      {session.role === "teacher" && <FeatureUpdateManager />}
       <section className="profile-panel">
         <div><h2>{session.name}</h2><p>{session.school}</p>{session.studentCode && <span className="profile-student-code">รหัสนักเรียน {session.studentCode}</span>}</div>
       </section>
+      <SubmissionHistoryPanel role={session.role} classrooms={classrooms} />
+      {session.role === "teacher" && <FeatureUpdateManager />}
       <section className="panel compact-form">
         <SectionTitle title="เปลี่ยนรหัสผ่าน" />
         <form className="form-actions password-form" onSubmit={submit}>
