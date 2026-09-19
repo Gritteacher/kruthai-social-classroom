@@ -1439,9 +1439,49 @@ textarea {
   background: var(--surface-subtle);
 }
 
-.student-review-toolbar .template-button {
+.student-review-toolbar-actions,
+.student-review-save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.student-review-toolbar .template-button,
+.full-score-button {
   min-height: 40px;
   height: 40px;
+}
+
+.full-score-button,
+.student-review-full-one {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--amber) 13%, var(--paper));
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+}
+
+.full-score-button {
+  padding: 0 14px;
+}
+
+.full-score-button svg,
+.student-review-full-one svg {
+  width: 17px;
+  height: 17px;
+  color: color-mix(in srgb, var(--amber) 75%, var(--ink));
+}
+
+.full-score-button:disabled,
+.student-review-full-one:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .student-review-work-list {
@@ -1538,6 +1578,12 @@ textarea {
   font-size: 12px;
 }
 
+.student-review-score-wrap {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
 .student-review-score input {
   min-height: 40px;
 }
@@ -1545,6 +1591,12 @@ textarea {
 .student-review-score small {
   color: var(--muted);
   font-size: 11px;
+}
+
+.student-review-full-one {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 .student-review-savebar {
@@ -1559,6 +1611,11 @@ textarea {
 
 .student-review-savebar .primary-button {
   flex: 0 0 auto;
+}
+
+.student-review-save-actions .template-button,
+.student-review-save-actions .primary-button {
+  min-height: 42px;
 }
 
 .inline-link {
@@ -1957,7 +2014,16 @@ textarea {
   }
 
   .student-review-toolbar .template-button,
-  .student-review-savebar .primary-button {
+  .student-review-toolbar .full-score-button,
+  .student-review-savebar .primary-button,
+  .student-review-savebar .template-button {
+    width: 100%;
+  }
+
+  .student-review-toolbar-actions,
+  .student-review-save-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     width: 100%;
   }
 
@@ -1972,7 +2038,7 @@ textarea {
     align-self: start;
   }
 
-  .student-review-score {
+  .student-review-score-wrap {
     grid-column: 2 / -1;
   }
 

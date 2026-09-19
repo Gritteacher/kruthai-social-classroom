@@ -1676,16 +1676,24 @@ function App() {
     setBusy(true);
     try {
       await finishPriorScoreSaves(uniqueItems);
-      const results = await Promise.allSettled(uniqueItems.map(reviewSubmissionAndSyncScores));
-      const savedItems = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      const result = await supabase!.rpc("review_submissions_and_sync_scores", {
+        p_reviews: uniqueItems.map((item) => ({
+          submission_id: item.id,
+          raw_score: Math.max(0, Math.min(item.rawMax, item.rawScore)),
+          raw_max: item.rawMax,
+          final_max: item.finalMax
+        }))
+      });
+      if (result.error) throw result.error;
+      const savedItems = (Array.isArray(result.data) ? result.data : []).map(mapSubmissionRow);
+      const requestedIds = new Set(uniqueItems.map((item) => item.id));
+      if (savedItems.length !== uniqueItems.length || savedItems.some((item) => !requestedIds.has(item.id) || item.status !== "ตรวจแล้ว")) {
+        throw new Error("ระบบยังไม่ได้ยืนยันผลตรวจครบทุกงาน กรุณาโหลดข้อมูลใหม่ก่อนลองอีกครั้ง");
+      }
+      savedItems.forEach((item) => submissionReviewDrafts.current.delete(item.id));
       const savedById = new Map(savedItems.map((item) => [item.id, item]));
       setSubmissionItems((current) => current.map((item) => savedById.get(item.id) ?? item));
       const refreshed = await loadClassroomData();
-      const failedCount = results.length - savedItems.length;
-      if (failedCount) {
-        flash(`บันทึกสำเร็จ ${savedItems.length} งาน และไม่สำเร็จ ${failedCount} งาน กรุณาตรวจคะแนนแล้วลองอีกครั้ง`);
-        return false;
-      }
       flash(refreshed ? `บันทึกคะแนน ${savedItems.length} งานแล้ว คะแนนขึ้นในหน้ากรอกคะแนนเรียบร้อย` : "บันทึกผลตรวจแล้ว แต่โหลดตารางคะแนนล่าสุดไม่สำเร็จ กรุณาโหลดข้อมูลใหม่");
       return true;
     } catch (error) {
@@ -2950,8 +2958,26 @@ function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubm
       : Array.from(new Set([...current, ...pendingIds])));
   }
 
+  function fillFullScores(items: SubmissionRecord[], includeInSelection = false) {
+    items.forEach((item) => updateSubmission(item.id, { rawScore: item.rawMax }));
+    if (includeInSelection) {
+      setSelectedSubmissionIds((current) => Array.from(new Set([...current, ...items.map((item) => item.id)])));
+    }
+  }
+
   async function saveSelectedItems() {
+    if (!selectedItems.length) return;
+    if (!window.confirm(`บันทึกคะแนน ${selectedItems.length} งานของ ${selectedStudent.studentName} หรือไม่`)) return;
     const saved = await saveSubmissions(selectedItems);
+    if (saved) setSelectedSubmissionIds([]);
+  }
+
+  async function saveAllAtFullScore() {
+    if (!pendingItems.length) return;
+    if (!window.confirm(`ให้คะแนนเต็มและบันทึกงานรอตรวจทั้งหมด ${pendingItems.length} งานของ ${selectedStudent.studentName} หรือไม่`)) return;
+    const fullScoreItems = pendingItems.map((item) => ({ ...item, rawScore: item.rawMax, finalScore: item.finalMax }));
+    fillFullScores(pendingItems, true);
+    const saved = await saveSubmissions(fullScoreItems);
     if (saved) setSelectedSubmissionIds([]);
   }
 
@@ -2965,13 +2991,19 @@ function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubm
       </aside>
       <section className="student-review-detail">
         <div className="student-review-detail-heading"><div><span>งานของนักเรียน</span><strong>{selectedStudent.studentName}</strong><small>รหัสนักเรียน {selectedStudent.studentId}</small></div><div><span className="status-pill pending">รอตรวจ {selectedStudent.pendingCount}</span><span className="status-pill pass">ตรวจแล้ว {selectedStudent.reviewedCount}</span></div></div>
-        <div className="student-review-toolbar"><button className="template-button" type="button" disabled={busy || !pendingItems.length} onClick={togglePendingItems}><CheckCircle2 aria-hidden />{allPendingSelected ? "ยกเลิกงานรอตรวจ" : "เลือกงานรอตรวจทั้งหมด"}</button><span>เลือกแล้ว {selectedItems.length} งาน</span></div>
+        <div className="student-review-toolbar">
+          <div className="student-review-toolbar-actions">
+            <button className="template-button" type="button" disabled={busy || !pendingItems.length} onClick={togglePendingItems}><CheckCircle2 aria-hidden />{allPendingSelected ? "ยกเลิกทั้งหมด" : "เลือกทั้งหมด"}</button>
+            <button className="full-score-button" type="button" disabled={busy || !pendingItems.length} onClick={() => void saveAllAtFullScore()}><Sparkles aria-hidden />ให้เต็มทุกงาน</button>
+          </div>
+          <span>เลือกแล้ว {selectedItems.length} จาก {pendingItems.length} งาน</span>
+        </div>
         <div className="student-review-work-list">{selectedStudent.items.map((item) => {
           const checked = selectedSubmissionIds.includes(item.id);
           const retentionNote = submissionFileRetentionNote(item);
-          return <article className={`student-review-work ${checked ? "selected" : ""}`} key={item.id}><label className="student-review-work-check"><input type="checkbox" checked={checked} disabled={busy} onChange={() => toggleSubmission(item.id)} /><span className="sr-only">เลือก {item.assignmentTitle}</span></label><div className="student-review-work-info"><div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div><span>{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"} · {item.submittedAt}</span><SubmissionMemberList item={item} />{retentionNote && <span className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</span>}</div><div className="student-review-work-actions"><button className="icon-button student-review-open" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl} title={item.fileDeletedAtRaw ? "ไฟล์ถูกลบอัตโนมัติแล้ว" : "ดูตัวอย่างงาน"} aria-label={`ดูตัวอย่างงาน ${item.assignmentTitle}`}><Eye aria-hidden /></button><button className="icon-danger student-review-delete" type="button" disabled={busy} onClick={() => deleteSubmission(item)} title={`ลบงาน ${item.assignmentTitle}`} aria-label={`ลบงาน ${item.assignmentTitle} ของ ${item.studentName}`}><Trash2 aria-hidden /></button></div><label className="field student-review-score">คะแนนดิบ<input type="number" min="0" max={item.rawMax} value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="คะแนน" /><small>เต็ม {formatScore(item.rawMax)} · เก็บ {formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}/{formatScore(item.finalMax)}</small></label></article>;
+          return <article className={`student-review-work ${checked ? "selected" : ""}`} key={item.id}><label className="student-review-work-check"><input type="checkbox" checked={checked} disabled={busy} onChange={() => toggleSubmission(item.id)} /><span className="sr-only">เลือก {item.assignmentTitle}</span></label><div className="student-review-work-info"><div className="submission-title-line"><strong>{item.assignmentTitle}</strong><span className={`status-pill ${statusTone(item.status)}`}>{item.status}</span></div><span>{item.submissionKind === "group" ? `งานกลุ่ม ${item.groupMemberCodes.length} คน` : "งานเดี่ยว"} · {item.submittedAt}</span><SubmissionMemberList item={item} />{retentionNote && <span className={`submission-retention-note ${item.fileDeletedAtRaw ? "deleted" : ""}`}>{retentionNote}</span>}</div><div className="student-review-work-actions"><button className="icon-button student-review-open" type="button" onClick={() => openSubmission(item)} disabled={!item.filePath && !item.linkUrl} title={item.fileDeletedAtRaw ? "ไฟล์ถูกลบอัตโนมัติแล้ว" : "ดูตัวอย่างงาน"} aria-label={`ดูตัวอย่างงาน ${item.assignmentTitle}`}><Eye aria-hidden /></button><button className="icon-danger student-review-delete" type="button" disabled={busy} onClick={() => deleteSubmission(item)} title={`ลบงาน ${item.assignmentTitle}`} aria-label={`ลบงาน ${item.assignmentTitle} ของ ${item.studentName}`}><Trash2 aria-hidden /></button></div><div className="student-review-score-wrap"><label className="field student-review-score">คะแนนดิบ<input type="number" min="0" max={item.rawMax} value={numericInputValue(item.rawScore)} onChange={(event) => updateSubmission(item.id, { rawScore: clampScore(event.target.value, item.rawMax) })} placeholder="คะแนน" /><small>เต็ม {formatScore(item.rawMax)} · เก็บ {formatScore(scaledScore(item.rawScore, item.rawMax, item.finalMax))}/{formatScore(item.finalMax)}</small></label><button className="student-review-full-one" type="button" disabled={busy} onClick={() => fillFullScores([item], true)}><CheckCircle2 aria-hidden />ให้เต็มงานนี้</button></div></article>;
         })}</div>
-        <div className="student-review-savebar"><div><strong>{selectedItems.length ? `พร้อมบันทึก ${selectedItems.length} งาน` : "เลือกงานที่ต้องการให้คะแนน"}</strong><span>แต่ละงานใช้คะแนนเต็มตามที่กำหนดไว้</span></div><button className="primary-button" type="button" disabled={busy || !selectedItems.length} onClick={() => void saveSelectedItems()}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกงานที่เลือก"}</button></div>
+        <div className="student-review-savebar"><div><strong>{selectedItems.length ? `พร้อมบันทึก ${selectedItems.length} งาน` : "เลือกงานที่ต้องการให้คะแนน"}</strong><span>คะแนนของงานกลุ่มจะบันทึกให้สมาชิกทุกคน</span></div><div className="student-review-save-actions"><button className="template-button" type="button" disabled={busy || !selectedItems.length} onClick={() => fillFullScores(selectedItems)}><CheckCircle2 aria-hidden />ให้เต็มที่เลือก</button><button className="primary-button" type="button" disabled={busy || !selectedItems.length} onClick={() => void saveSelectedItems()}><Save aria-hidden />{busy ? "กำลังบันทึก" : "บันทึกงานที่เลือก"}</button></div></div>
       </section>
     </div>
   );
