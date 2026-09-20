@@ -1,7 +1,8 @@
 import {useCallback,useEffect,useRef,useState,type FormEvent} from 'react';
-import {Eye,Pencil,Plus,RefreshCw,Save,Trash2} from 'lucide-react';
+import {Eye,Pencil,Plus,RefreshCw,Save,Sparkles,Trash2,X} from 'lucide-react';
 import {supabase} from '../../lib/supabase';
 import type {Role} from '../../types';
+import {useAppDialog} from '../../components/dialogs/AppDialogProvider';
 import {settingsChanged,type FeatureUpdate} from './settingsService';
 import './settings.css';
 
@@ -9,10 +10,11 @@ const empty={title:'',body:'',audience:'student' as FeatureUpdate['audience'],en
 function UpdateDialog({item,onClose,busy=false,error='',preview=false}:{item:Pick<FeatureUpdate,'title'|'body'>;onClose:()=>void;busy?:boolean;error?:string;preview?:boolean}) {
   const ref=useRef<HTMLDialogElement>(null);
   useEffect(()=>{const dialog=ref.current;dialog?.showModal();return()=>dialog?.close();},[]);
-  return <dialog ref={ref} className="feature-dialog" aria-labelledby="feature-dialog-title" onCancel={e=>{e.preventDefault();if(!busy)onClose();}}><h2 id="feature-dialog-title">{item.title}</h2><div className="feature-body">{item.body}</div>{error&&<p role="alert">{error}</p>}<div className="settings-actions"><button className="primary-button" disabled={busy} onClick={onClose}>{busy?'กำลังบันทึก':preview?'ปิดตัวอย่าง':'รับทราบ'}</button></div></dialog>;
+  return <dialog ref={ref} className="feature-dialog" aria-labelledby="feature-dialog-title" onClick={e=>{if(e.target===e.currentTarget&&!busy)onClose();}} onCancel={e=>{e.preventDefault();if(!busy)onClose();}}><header className="feature-dialog-header"><span><Sparkles aria-hidden/></span><div><small>{preview?'ตัวอย่างประกาศ':'มีฟีเจอร์ใหม่'}</small><h2 id="feature-dialog-title">{item.title}</h2></div><button type="button" className="app-dialog-close" disabled={busy} onClick={onClose} aria-label="ปิด"><X aria-hidden/></button></header><div className="feature-body">{item.body}</div>{error&&<p role="alert">{error}</p>}<div className="settings-actions"><button className="primary-button" disabled={busy} onClick={onClose}>{busy?'กำลังบันทึก':preview?'ปิดตัวอย่าง':'รับทราบ'}</button></div></dialog>;
 }
 
 export function FeatureUpdateManager() {
+  const {confirm:confirmDialog}=useAppDialog();
   const [items,setItems]=useState<FeatureUpdate[]>([]);
   const [draft,setDraft]=useState(empty);
   const [editing,setEditing]=useState<FeatureUpdate|null>(null);
@@ -40,7 +42,7 @@ export function FeatureUpdateManager() {
     finally {setBusy(false);}
   }
   async function remove(item:FeatureUpdate) {
-    if(busy||!window.confirm(`ลบป๊อปอัป “${item.title}” หรือไม่?`))return;
+    if(busy||!await confirmDialog({title:`ลบป๊อปอัป “${item.title}”`,message:'ป๊อปอัปนี้จะหยุดแสดงและถูกลบออกจากรายการ การดำเนินการนี้ไม่สามารถย้อนกลับได้',confirmLabel:'ลบป๊อปอัป',tone:'danger'}))return;
     setBusy(true);setMessage('');
     try {const result=await supabase!.from('feature_updates').delete().eq('id',item.id).select('id').single();if(result.error)throw result.error;setItems(current=>current.filter(i=>i.id!==item.id));if(editing?.id===item.id)reset();settingsChanged();setMessage('ลบแล้ว');}
     catch {setMessage('ลบไม่สำเร็จ กรุณาลองใหม่');}

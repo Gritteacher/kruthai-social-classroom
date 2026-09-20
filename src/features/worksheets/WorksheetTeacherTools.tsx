@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import type { Classroom, ScoreAssignment, StudentRecord } from "../../types";
+import { useModalDismiss } from "../../components/dialogs/AppDialogProvider";
 import type {
   Worksheet,
   WorksheetGradeInput,
@@ -46,6 +47,7 @@ export function WorksheetScoreLinkModal({
     values: WorksheetScoreLinkInput[],
   ) => Promise<boolean>;
 }) {
+  useModalDismiss(true, onClose, busy);
   const [pageNumber, setPageNumber] = useState(1);
   const [values, setValues] = useState<Record<string, string>>({});
   const groups = useMemo(
@@ -134,7 +136,7 @@ export function WorksheetScoreLinkModal({
   }
 
   return (
-    <div className="modal-backdrop worksheet-link-backdrop" role="presentation">
+    <div className="modal-backdrop worksheet-link-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) onClose(); }}>
       <section
         className="worksheet-link-modal"
         role="dialog"

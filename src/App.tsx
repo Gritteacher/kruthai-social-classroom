@@ -59,6 +59,7 @@ import {
   validateSubmissionFile
 } from "./lib/validation";
 import { createOrResetStudentAccount } from "./services/studentService";
+import { useAppDialog, useModalDismiss } from "./components/dialogs/AppDialogProvider";
 import ScoreHistoryPanel from "./features/score-history/ScoreHistoryPanel";
 import SubmissionHistoryPanel from "./features/submission-history/SubmissionHistoryPanel";
 import { calculateStudentScoreSummary } from "./features/student-scores/summary";
@@ -269,6 +270,7 @@ async function resolveAppSession(user: SupabaseUser | null | undefined, _fallbac
 }
 
 function App() {
+  const { confirm: confirmDialog } = useAppDialog();
   const [role, setRole] = useState<Role>("teacher");
   const [session, setSession] = useState<AppSession | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => window.localStorage.getItem("classroom-theme") === "dark" ? "dark" : "light");
@@ -710,7 +712,7 @@ function App() {
   }
 
   async function deleteMaterial(item: Material) {
-    if (!window.confirm(`ลบสื่อ "${item.title}" หรือไม่\nไฟล์แนบจะถูกนำไปลบจากพื้นที่จัดเก็บด้วย`)) return;
+    if (!await confirmDialog({ title: `ลบสื่อ “${item.title}”`, message: "ไฟล์แนบจะถูกนำไปลบจากพื้นที่จัดเก็บด้วย และไม่สามารถย้อนกลับได้", confirmLabel: "ลบสื่อ", tone: "danger" })) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
@@ -803,7 +805,7 @@ function App() {
   }
 
   async function deleteAnnouncement(item: Announcement) {
-    if (!window.confirm(`ลบประกาศ "${item.title}" หรือไม่`)) return;
+    if (!await confirmDialog({ title: `ลบประกาศ “${item.title}”`, message: "ประกาศนี้จะหายจากหน้าเว็บของนักเรียนทันที", confirmLabel: "ลบประกาศ", tone: "danger" })) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
@@ -881,7 +883,7 @@ function App() {
   }
 
   async function deleteStudentHomeCard(card: StudentHomeCard) {
-    if (!window.confirm(`ลบการ์ด "${card.title}" ออกจากหน้าแรกนักเรียนหรือไม่`)) return;
+    if (!await confirmDialog({ title: `ลบการ์ด “${card.title}”`, message: "การ์ดนี้จะถูกนำออกจากหน้าแรกของนักเรียนทุกห้องที่กำหนด", confirmLabel: "ลบการ์ด", tone: "danger" })) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
@@ -1006,7 +1008,7 @@ function App() {
   }
 
   async function deleteClassroom(classroom: Classroom) {
-    if (!window.confirm(`ลบห้องเรียน ${classroom.displayName} หรือไม่\nรายชื่อ งาน คะแนน งานส่ง ประกาศ และข้อมูลที่เกี่ยวข้องกับห้องนี้จะถูกลบ`)) return;
+    if (!await confirmDialog({ title: `ลบห้องเรียน ${classroom.displayName}`, message: "รายชื่อ งาน คะแนน งานส่ง ประกาศ และข้อมูลที่เกี่ยวข้องกับห้องนี้จะถูกลบ การดำเนินการนี้ไม่สามารถย้อนกลับได้", confirmLabel: "ลบห้องเรียน", tone: "danger" })) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
@@ -1086,7 +1088,7 @@ function App() {
   async function deleteStudentsBatch(targetStudents: StudentRecord[]) {
     if (!targetStudents.length) return false;
     const label = targetStudents.length === 1 ? targetStudents[0].name : `${targetStudents.length} คน`;
-    if (!window.confirm(`ลบรายชื่อนักเรียน ${label} หรือไม่\nคะแนนที่ผูกกับรายชื่อนี้จะถูกลบด้วย`)) return false;
+    if (!await confirmDialog({ title: `ลบรายชื่อนักเรียน ${label}`, message: "คะแนนที่ผูกกับรายชื่อนี้จะถูกลบด้วย การดำเนินการนี้ไม่สามารถย้อนกลับได้", confirmLabel: "ลบรายชื่อ", tone: "danger" })) return false;
     if (!isSupabaseConfigured) {
       flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
       return false;
@@ -1296,7 +1298,7 @@ function App() {
   }
 
   async function deleteMaterialDownloadLog(log: MaterialDownloadLog) {
-    if (!window.confirm(`ลบประวัติการดาวน์โหลด "${log.materialTitle}" ของ ${log.studentName} หรือไม่`)) return;
+    if (!await confirmDialog({ title: "ลบประวัติการดาวน์โหลด", message: `ลบประวัติ “${log.materialTitle}” ของ ${log.studentName} หรือไม่`, confirmLabel: "ลบประวัติ", tone: "danger" })) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
@@ -1321,7 +1323,7 @@ function App() {
     const title = targetAssignments[0].title;
     const classroomCount = new Set(targetAssignments.map((assignment) => assignment.classroomId || assignment.className)).size;
     const scope = classroomCount > 1 ? `ออกจาก ${classroomCount} ห้อง` : "ออกจากห้องเรียนนี้";
-    if (!window.confirm(`ลบงานคะแนน "${title}" ${scope} หรือไม่\nคะแนนของนักเรียนในงานนี้จะถูกลบด้วย`)) return false;
+    if (!await confirmDialog({ title: `ลบงานคะแนน “${title}”`, message: `งานนี้จะถูกลบ${scope} พร้อมคะแนนนักเรียนที่ผูกกับงาน และไม่สามารถย้อนกลับได้`, confirmLabel: "ลบงานคะแนน", tone: "danger" })) return false;
     setBusy(true);
     try {
       const autoSaveKeys = new Set(
@@ -1712,7 +1714,7 @@ function App() {
   }
 
   async function deleteSubmissionRecord(item: SubmissionRecord) {
-    if (!window.confirm(`ลบรายการส่งงาน "${item.assignmentTitle}" ของ ${item.studentName}${item.filePath ? " พร้อมไฟล์ที่อัปโหลด" : ""} หรือไม่`)) return;
+    if (!await confirmDialog({ title: `ลบงาน “${item.assignmentTitle}”`, message: `รายการส่งงานของ ${item.studentName}${item.filePath ? " พร้อมไฟล์ที่อัปโหลด" : ""} จะถูกลบ และไม่สามารถย้อนกลับได้`, confirmLabel: "ลบงานที่ส่ง", tone: "danger" })) return;
     if (!isSupabaseConfigured) return flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
     setBusy(true);
     try {
@@ -2380,6 +2382,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
   }
 
   const downloadTarget = items.find((entry) => entry.id === downloadTargetId);
+  useModalDismiss(Boolean(downloadTarget && role === "student"), () => setDownloadTargetId(""), busy);
   return (
     <div className="page-stack">
       <PageHeader title="สื่อการสอน" eyebrow="คลังสื่อการสอน" />
@@ -2401,7 +2404,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
           <button className="primary-button full-button" disabled={busy} onClick={saveMaterial}><Upload aria-hidden />{busy ? "กำลังอัปโหลด" : "อัปโหลดสื่อการสอน"}</button>
         </section>
       )}
-      {downloadTarget && role === "student" && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="download-dialog-title"><section id="material-download-confirm" className="panel compact-form download-confirm-panel"><SectionTitle title="ยืนยันการดาวน์โหลด" note={downloadTarget.title} /><p className="modal-copy">กรอกรหัสนักเรียนและรหัสผ่านก่อนดาวน์โหลด ระบบจะบันทึกประวัติการดาวน์โหลดให้ครูเห็น</p><div className="form-grid"><label className="field">รหัสนักเรียน<input value={downloadStudentId} onChange={(event) => setDownloadStudentId(event.target.value)} placeholder="เช่น 65001" /></label><label className="field">รหัสผ่าน<input type="password" value={downloadPassword} onChange={(event) => setDownloadPassword(event.target.value)} placeholder="รหัสผ่านนักเรียน" /></label></div><div className="form-actions"><button className="primary-button" disabled={busy} onClick={() => void submitDownload(downloadTarget)}><Download aria-hidden />{busy ? "กำลังดาวน์โหลด" : "ยืนยันดาวน์โหลด"}</button><button className="template-button" type="button" onClick={() => setDownloadTargetId("")}>ยกเลิก</button></div></section></div>}
+      {downloadTarget && role === "student" && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) setDownloadTargetId(""); }}><section id="material-download-confirm" className="download-confirm-panel" role="dialog" aria-modal="true" aria-labelledby="download-dialog-title"><header className="download-confirm-header"><span className="app-dialog-icon"><Download aria-hidden /></span><div><span>ยืนยันตัวตนก่อนดาวน์โหลด</span><h2 id="download-dialog-title">{downloadTarget.title}</h2></div><button className="app-dialog-close" type="button" disabled={busy} onClick={() => setDownloadTargetId("")} aria-label="ปิด"><X aria-hidden /></button></header><div className="download-confirm-body"><p className="modal-copy">กรอกรหัสนักเรียนและรหัสผ่าน ระบบจะบันทึกประวัติการดาวน์โหลดให้ครูเห็น</p><div className="form-grid"><label className="field">รหัสนักเรียน<input value={downloadStudentId} onChange={(event) => setDownloadStudentId(event.target.value)} placeholder="เช่น 65001" /></label><label className="field">รหัสผ่าน<input type="password" value={downloadPassword} onChange={(event) => setDownloadPassword(event.target.value)} placeholder="รหัสผ่านนักเรียน" /></label></div></div><footer className="download-confirm-actions"><button className="template-button" type="button" disabled={busy} onClick={() => setDownloadTargetId("")}>ยกเลิก</button><button className="primary-button" disabled={busy} onClick={() => void submitDownload(downloadTarget)}><Download aria-hidden />{busy ? "กำลังดาวน์โหลด" : "ยืนยันดาวน์โหลด"}</button></footer></section></div>}
       {filtered.length ? <div className="material-grid">{filtered.map((item) => <MaterialCard key={item.id} item={item} role={role} downloadCount={logs.filter((log) => log.materialId === item.id).length} onOpen={() => onOpen(item)} onDownload={() => role === "student" ? chooseDownloadTarget(item) : void directDownload(item)} onDelete={() => onDelete(item)} />)}</div> : <EmptyState title={role === "student" && studentLevel ? `ยังไม่มีสื่อสำหรับ ${studentLevel}` : "ยังไม่มีสื่อการสอน"} body={role === "student" ? "เมื่อคุณครูอัปโหลดสื่อของระดับชั้นคุณ รายการจะแสดงที่นี่" : "เมื่ออัปโหลดไฟล์แล้ว รายการจะมาแสดงในหน้านี้"} />}
       <section className="panel">
         <SectionTitle title={role === "teacher" ? "ประวัติดาวน์โหลดทั้งหมด" : "ประวัติดาวน์โหลดของฉัน"} note={`${logs.length} รายการ`} />
@@ -2949,6 +2952,7 @@ function submissionPreviewKind(item: SubmissionRecord): SubmissionPreviewKind {
 }
 
 function SubmissionPreviewModal({ item, url, loading, error, onClose }: { item: SubmissionRecord; url: string; loading: boolean; error: string; onClose: () => void }) {
+  useModalDismiss(true, onClose);
   const kind = submissionPreviewKind(item);
   const attachmentName = item.linkUrl || item.originalFileName || fileNameFromPath(item.filePath || "") || "งานที่นักเรียนส่ง";
   return (
@@ -2982,6 +2986,7 @@ function SubmissionPreviewModal({ item, url, loading, error, onClose }: { item: 
 }
 
 function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubmissions, deleteSubmission, openSubmission }: { submissions: SubmissionRecord[]; busy: boolean; updateSubmission: (id: string, patch: Partial<SubmissionRecord>) => void; saveSubmissions: (items: SubmissionRecord[]) => Promise<boolean>; deleteSubmission: (item: SubmissionRecord) => void; openSubmission: (item: SubmissionRecord) => void }) {
+  const { confirm: confirmDialog } = useAppDialog();
   const studentGroups = useMemo(() => groupSubmissionsByStudent(submissions).filter((group) => group.pendingCount > 0), [submissions]);
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<string[]>([]);
@@ -3032,14 +3037,14 @@ function StudentSubmissionReview({ submissions, busy, updateSubmission, saveSubm
 
   async function saveSelectedItems() {
     if (!selectedItems.length) return;
-    if (!window.confirm(`บันทึกคะแนน ${selectedItems.length} งานของ ${selectedStudent.studentName} หรือไม่`)) return;
+    if (!await confirmDialog({ title: `บันทึกคะแนน ${selectedItems.length} งาน`, message: `ยืนยันการบันทึกคะแนนงานที่เลือกของ ${selectedStudent.studentName}`, confirmLabel: "บันทึกคะแนน", tone: "info" })) return;
     const saved = await saveSubmissions(selectedItems);
     if (saved) setSelectedSubmissionIds([]);
   }
 
   async function saveAllAtFullScore() {
     if (!pendingItems.length) return;
-    if (!window.confirm(`ให้คะแนนเต็มและบันทึกงานรอตรวจทั้งหมด ${pendingItems.length} งานของ ${selectedStudent.studentName} หรือไม่`)) return;
+    if (!await confirmDialog({ title: `ให้คะแนนเต็ม ${pendingItems.length} งาน`, message: `งานรอตรวจทั้งหมดของ ${selectedStudent.studentName} จะได้รับคะแนนเต็มและเปลี่ยนเป็นตรวจแล้ว`, confirmLabel: "ให้คะแนนเต็ม", tone: "warning" })) return;
     const fullScoreItems = pendingItems.map((item) => ({ ...item, rawScore: item.rawMax, finalScore: item.finalMax }));
     fillFullScores(pendingItems, true);
     const saved = await saveSubmissions(fullScoreItems);
@@ -3224,6 +3229,7 @@ function StudentsView({ classrooms, selectedClassroom, selectedClassroomId, stud
 }
 
 function StudentDetailModal({ student, classroom, assignments, entries, submissions, downloadLogs, busy, onClose, onAccount, onDelete }: { student: StudentRecord; classroom?: Classroom; assignments: ScoreAssignment[]; entries: ScoreEntry[]; submissions: SubmissionRecord[]; downloadLogs: MaterialDownloadLog[]; busy: boolean; onClose: () => void; onAccount: () => void; onDelete: () => void }) {
+  useModalDismiss(true, onClose, busy);
   const hasAccount = Boolean(student.authEmail || student.accountCreatedAt);
   const studentEntries = entries.filter((entry) => entry.studentRecordId === student.id || entry.studentId === student.studentId);
   const entryByAssignmentId = new Map(studentEntries.map((entry) => [entry.assignmentId, entry]));

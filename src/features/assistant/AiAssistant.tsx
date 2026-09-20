@@ -114,13 +114,13 @@ export default function AiAssistant({ active = true, role, classrooms, students,
     </header>
     {panel==='settings'&&role==='teacher'?<div className="ai-panel-scroll"><AiSettingsPanel/></div>:panel==='history' ? <div className="ai-panel-scroll"><AiHistory role={role} onResume={resume} disabled={loadingHistory} /></div> : role==='student'&&!settings.student_enabled?<p role="status">ครูปิดผู้ช่วย AI ชั่วคราว</p>:<>
     <dialog className="ai-dialog" ref={contextDialog} aria-labelledby="ai-context-title" onClick={e=>{if(e.target===e.currentTarget)contextDialog.current?.close();}}>
-    <div className="ai-dialog-heading"><h2 id="ai-context-title">ข้อมูลประกอบ</h2><button className="icon-button" aria-label="ปิดข้อมูลประกอบ" title="ปิดข้อมูลประกอบ" onClick={()=>contextDialog.current?.close()}><X aria-hidden /></button></div>
-    <div className="ai-filters">
+    <header className="ai-dialog-heading"><span className="app-dialog-icon"><SlidersHorizontal aria-hidden /></span><div><small>ปรับคำตอบให้ตรงความต้องการ</small><h2 id="ai-context-title">ข้อมูลประกอบ</h2></div><button className="app-dialog-close" aria-label="ปิดข้อมูลประกอบ" title="ปิดข้อมูลประกอบ" onClick={()=>contextDialog.current?.close()}><X aria-hidden /></button></header>
+    <div className="ai-dialog-body"><div className="ai-filters">
       <label>สื่ออ้างอิง<select aria-label="สื่ออ้างอิง" value={materialId} disabled={busy} onChange={e=>setMaterialId(e.target.value)}><option value="">ไม่ระบุสื่อ</option>{materials.filter(m=>m.type === 'PDF').map(m=><option key={m.id} value={m.id}>{m.title}</option>)}</select></label>
       {role === 'teacher' && <><label>ห้องเรียน<select aria-label="ห้องเรียน" value={classroomId} disabled={busy} onChange={e=>{setClassroomId(e.target.value);setStudentId('');}}><option value="">ไม่ระบุห้อง</option>{classrooms.map(c=><option value={c.id} key={c.id}>{c.displayName}</option>)}</select></label><label>นักเรียน<select aria-label="นักเรียน" value={studentId} disabled={busy || !classroomId} onChange={e=>setStudentId(e.target.value)}><option value="">ภาพรวมทั้งห้อง</option>{students.filter(s=>s.classroomId === classroomId).map(s=><option key={s.id} value={s.id}>{s.no}. {s.name}</option>)}</select></label></>}
       <label className="ai-target">คะแนนเป้าหมาย<input type="number" min="0" max="10000" step="0.01" placeholder="เช่น 80" value={target} disabled={busy} onChange={e=>setTarget(e.target.value)} /></label>
-    </div>
-    <button className="ai-dialog-done" onClick={()=>contextDialog.current?.close()}>เสร็จสิ้น</button>
+    </div></div>
+    <footer className="app-dialog-actions"><button className="primary-button" onClick={()=>contextDialog.current?.close()}>เสร็จสิ้น</button></footer>
     </dialog>
     <div className="ai-conversation" ref={log} role="log" aria-label="บทสนทนากับผู้ช่วย AI" aria-live="polite">
       {!messages.length && <div className="ai-empty"><Sparkles aria-hidden /><h2>วันนี้ให้ช่วยอะไรดีครับ</h2><div>{prompts.map(prompt=><button type="button" key={prompt} disabled={busy} onClick={()=>{setDraft(prompt);input.current?.focus();}}><span>{prompt}</span><ArrowUpRight aria-hidden /></button>)}</div></div>}
@@ -133,7 +133,7 @@ export default function AiAssistant({ active = true, role, classrooms, students,
     </form><small className="ai-compose-note">AI อาจตอบผิดได้ ควรตรวจสอบข้อมูลสำคัญ</small></div>
     </>}
     {error && <p className="ai-error" role="alert">{error}</p>}
-    <dialog className="ai-dialog" ref={infoDialog} aria-labelledby="ai-info-title"><div className="ai-dialog-heading"><h2 id="ai-info-title">ข้อมูลการสนทนา</h2><button className="icon-button" aria-label="ปิดข้อมูลการสนทนา" onClick={()=>infoDialog.current?.close()}><X aria-hidden /></button></div><p>คำถามและคำตอบถูกบันทึก ไม่ควรส่งรหัสผ่านหรือข้อมูลลับ และควรตรวจสอบข้อมูลสำคัญจากคำตอบของ AI</p></dialog>
+    <dialog className="ai-dialog" ref={infoDialog} aria-labelledby="ai-info-title" onClick={e=>{if(e.target===e.currentTarget)infoDialog.current?.close();}}><header className="ai-dialog-heading"><span className="app-dialog-icon"><Info aria-hidden /></span><div><small>การใช้งานอย่างปลอดภัย</small><h2 id="ai-info-title">ข้อมูลการสนทนา</h2></div><button className="app-dialog-close" aria-label="ปิดข้อมูลการสนทนา" onClick={()=>infoDialog.current?.close()}><X aria-hidden /></button></header><div className="ai-dialog-body"><p>คำถามและคำตอบถูกบันทึก ไม่ควรส่งรหัสผ่านหรือข้อมูลลับ และควรตรวจสอบข้อมูลสำคัญจากคำตอบของ AI</p></div><footer className="app-dialog-actions"><button className="primary-button" onClick={()=>infoDialog.current?.close()}>รับทราบ</button></footer></dialog>
   </div>;
 }
 

@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import type { Classroom, Role, ScoreAssignment, StudentRecord } from "../../types";
+import { useAppDialog, useModalDismiss } from "../../components/dialogs/AppDialogProvider";
 import {
   createWorksheet,
   deleteWorksheet,
@@ -104,6 +105,7 @@ export default function WorksheetHub({
   onScoresChanged,
   flash,
 }: WorksheetHubProps) {
+  const { confirm: confirmDialog } = useAppDialog();
   const [worksheets, setWorksheets] = useState<Worksheet[]>([]);
   const [answers, setAnswers] = useState<WorksheetPageAnswer[]>([]);
   const [teacherPages, setTeacherPages] = useState<WorksheetTeacherPage[]>([]);
@@ -206,12 +208,12 @@ export default function WorksheetHub({
     const answerCount = answers.filter(
       (answer) => answer.worksheetId === worksheet.id,
     ).length;
-    if (
-      !window.confirm(
-        `ลบสมุดงาน “${worksheet.title}” พร้อมไฟล์ PDF${answerCount ? ` และคำตอบ ${answerCount} หน้า` : ""} หรือไม่`,
-      )
-    )
-      return;
+    if (!await confirmDialog({
+      title: `ลบสมุดงาน “${worksheet.title}”`,
+      message: `ไฟล์ PDF${answerCount ? ` และคำตอบ ${answerCount} หน้า` : ""} จะถูกลบ และไม่สามารถย้อนกลับได้`,
+      confirmLabel: "ลบสมุดงาน",
+      tone: "danger"
+    })) return;
     setBusy(true);
     try {
       await deleteWorksheet(worksheet);
@@ -803,10 +805,12 @@ function WorksheetEditorModal({
   onWorksheetUpdated: (worksheet: Worksheet) => void;
   flash: (message: string) => void;
 }) {
+  useModalDismiss(true, onClose);
   return (
     <div
       className="modal-backdrop worksheet-editor-backdrop"
       role="presentation"
+      onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}
     >
       <section
         className="worksheet-editor-modal"
@@ -868,6 +872,7 @@ function WorksheetEditor({
   onWorksheetUpdated: (worksheet: Worksheet) => void;
   flash: (message: string) => void;
 }) {
+  const { confirm: confirmDialog } = useAppDialog();
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(initialPage);
   const [annotations, setAnnotations] = useState<WorksheetAnnotation[]>([]);
@@ -1074,12 +1079,12 @@ function WorksheetEditor({
 
   async function rotateEveryPage() {
     if (locked || mode !== "teacher" || viewBusy) return;
-    if (
-      !window.confirm(
-        `กลับหัวสมุดงาน “${worksheet.title}” ทั้ง ${worksheet.pageCount} หน้า 180° หรือไม่`,
-      )
-    )
-      return;
+    if (!await confirmDialog({
+      title: "หมุนสมุดงานทุกหน้า",
+      message: `สมุดงาน “${worksheet.title}” ทั้ง ${worksheet.pageCount} หน้าจะถูกหมุน 180°`,
+      confirmLabel: "หมุนทุกหน้า",
+      tone: "warning"
+    })) return;
     setViewBusy(true);
     try {
       const saved = await rotateAllWorksheetPages(worksheet, 180);
@@ -1117,13 +1122,12 @@ function WorksheetEditor({
 
   async function persistPage(submit: boolean) {
     if (readOnly || pageLocked || saveInFlightRef.current) return pageRecord;
-    if (
-      submit &&
-      !window.confirm(
-        `ส่งสมุดงานหน้า ${pageNumber} หรือไม่ เมื่อส่งแล้วจะไม่สามารถแก้ไขหน้านี้ได้`,
-      )
-    )
-      return;
+    if (submit && !await confirmDialog({
+      title: `ส่งสมุดงานหน้า ${pageNumber}`,
+      message: "เมื่อส่งแล้วจะไม่สามารถแก้ไขหน้านี้ได้ กรุณาตรวจงานบนหน้านี้ให้เรียบร้อยก่อนยืนยัน",
+      confirmLabel: "ยืนยันส่งหน้านี้",
+      tone: "warning"
+    })) return;
     const savingAnnotations = annotationsRef.current;
     saveInFlightRef.current = true;
     setSaveInFlight(true);

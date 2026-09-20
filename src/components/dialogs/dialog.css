@@ -1,0 +1,496 @@
+.app-dialog-backdrop,
+.modal-backdrop,
+.student-detail-backdrop,
+.assignment-edit-backdrop,
+.submission-preview-backdrop,
+.worksheet-editor-backdrop,
+.worksheet-link-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 3vw, 28px);
+  background: color-mix(in srgb, #13251a 48%, transparent);
+  backdrop-filter: blur(12px) saturate(90%);
+  -webkit-backdrop-filter: blur(12px) saturate(90%);
+  animation: app-dialog-fade-in 160ms ease-out both;
+}
+
+.app-confirm-dialog,
+.download-confirm-panel,
+.student-detail-modal,
+.assignment-edit-modal,
+.submission-preview-panel,
+.student-monitor-message-modal,
+.worksheet-editor-modal,
+.worksheet-link-modal,
+.feature-dialog,
+.ai-page .ai-dialog {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, #fff 18%) !important;
+  border-radius: 24px !important;
+  background: color-mix(in srgb, var(--paper) 97%, var(--surface-soft) 3%) !important;
+  color: var(--ink);
+  box-shadow: 0 28px 90px rgba(18, 44, 28, .24), 0 2px 8px rgba(18, 44, 28, .08) !important;
+  animation: app-dialog-rise-in 190ms cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.app-confirm-dialog {
+  display: grid;
+  width: min(480px, calc(100vw - 28px));
+  max-height: min(720px, calc(100dvh - 28px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.app-dialog-header {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 13px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 70%, transparent), transparent);
+}
+
+.app-dialog-header > div {
+  min-width: 0;
+}
+
+.app-dialog-header span:not(.app-dialog-icon) {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.app-dialog-header h2 {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.app-dialog-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--amber-soft);
+  color: #836512;
+}
+
+.app-dialog-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.tone-danger .app-dialog-icon {
+  background: var(--surface-danger);
+  color: var(--coral);
+}
+
+.tone-info .app-dialog-icon {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.app-dialog-close {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--muted);
+}
+
+.app-dialog-close:hover {
+  border-color: color-mix(in srgb, var(--green-700) 35%, var(--line));
+  color: var(--ink);
+}
+
+.app-dialog-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.app-dialog-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px;
+}
+
+.app-dialog-body p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.75;
+  white-space: pre-line;
+}
+
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--surface-subtle);
+}
+
+.app-dialog-actions button {
+  min-width: 112px;
+  min-height: 44px;
+  justify-content: center;
+}
+
+.app-dialog-actions .danger-button {
+  border: 1px solid var(--coral);
+  background: var(--coral);
+  color: #fff;
+}
+
+.app-dialog-actions .danger-button:hover {
+  filter: brightness(.94);
+}
+
+.download-confirm-panel,
+.student-detail-modal,
+.assignment-edit-modal,
+.submission-preview-panel,
+.student-monitor-message-modal,
+.worksheet-editor-modal,
+.worksheet-link-modal {
+  max-height: calc(100dvh - clamp(24px, 6vw, 56px)) !important;
+}
+
+.assignment-edit-modal-header,
+.student-detail-header,
+.submission-preview-header,
+.student-monitor-message-modal > header,
+.worksheet-editor-modal > header,
+.worksheet-link-modal > header,
+.download-confirm-header {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 72%, transparent), transparent);
+}
+
+.assignment-edit-modal-body,
+.student-detail-body,
+.submission-preview-stage,
+.student-monitor-message-body,
+.worksheet-link-body,
+.download-confirm-body {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.assignment-edit-modal-actions,
+.student-detail-actions,
+.submission-preview-actions,
+.student-monitor-message-modal > footer,
+.worksheet-link-modal > footer,
+.download-confirm-actions {
+  background: var(--surface-subtle) !important;
+}
+
+.feature-dialog {
+  width: min(540px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  padding: 0 !important;
+}
+
+.feature-dialog::backdrop {
+  background: color-mix(in srgb, #13251a 48%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.ai-dialog::backdrop {
+  background: color-mix(in srgb, #13251a 48%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(90%);
+  -webkit-backdrop-filter: blur(12px) saturate(90%);
+}
+
+.ai-page .ai-dialog {
+  width: min(560px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  padding: 0;
+}
+
+.ai-dialog .ai-dialog-heading {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 13px;
+  margin: 0;
+  padding: 18px 20px 15px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--surface-soft), transparent);
+}
+
+.ai-dialog .ai-dialog-heading > div {
+  min-width: 0;
+}
+
+.ai-dialog .ai-dialog-heading small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-dialog .ai-dialog-heading h2 {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.ai-dialog .ai-dialog-body {
+  max-height: 55dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px;
+}
+
+.ai-dialog .ai-dialog-body p {
+  margin: 0;
+}
+
+.ai-dialog .app-dialog-actions {
+  margin: 0;
+}
+
+.feature-dialog-header,
+.download-confirm-header {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 13px;
+  padding: 18px 20px 15px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--surface-soft), transparent);
+}
+
+.feature-dialog-header > span {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--amber-soft);
+  color: #836512;
+}
+
+.feature-dialog-header > span svg {
+  width: 23px;
+  height: 23px;
+}
+
+.feature-dialog-header > div,
+.download-confirm-header > div {
+  min-width: 0;
+}
+
+.feature-dialog-header small,
+.download-confirm-header > div > span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.feature-dialog h2,
+.download-confirm-header h2 {
+  margin: 2px 0 0 !important;
+  overflow-wrap: anywhere;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.feature-dialog .feature-body,
+.feature-dialog > p[role="alert"] {
+  margin: 0;
+  padding: 20px 22px 0;
+}
+
+.feature-dialog .feature-body {
+  max-height: 55dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.feature-dialog .settings-actions {
+  justify-content: flex-end;
+  margin: 20px 0 0 !important;
+  padding: 14px 22px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--surface-subtle);
+}
+
+.download-confirm-panel {
+  display: grid;
+  width: min(560px, calc(100vw - 28px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: 0 !important;
+}
+
+.download-confirm-body {
+  display: grid;
+  gap: 18px;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.download-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+}
+
+.download-confirm-actions button {
+  min-height: 44px;
+}
+
+:root[data-theme="dark"] .app-confirm-dialog,
+:root[data-theme="dark"] .download-confirm-panel,
+:root[data-theme="dark"] .student-detail-modal,
+:root[data-theme="dark"] .assignment-edit-modal,
+:root[data-theme="dark"] .submission-preview-panel,
+:root[data-theme="dark"] .student-monitor-message-modal,
+:root[data-theme="dark"] .worksheet-editor-modal,
+:root[data-theme="dark"] .worksheet-link-modal,
+:root[data-theme="dark"] .feature-dialog,
+:root[data-theme="dark"] .ai-page .ai-dialog {
+  border-color: #3b4d43 !important;
+  box-shadow: 0 32px 100px rgba(0, 0, 0, .56) !important;
+}
+
+@keyframes app-dialog-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes app-dialog-rise-in {
+  from { opacity: 0; transform: translateY(10px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 620px) {
+  .app-dialog-backdrop,
+  .modal-backdrop,
+  .student-detail-backdrop,
+  .assignment-edit-backdrop,
+  .submission-preview-backdrop,
+  .worksheet-editor-backdrop,
+  .worksheet-link-backdrop {
+    align-items: end;
+    padding: 10px;
+  }
+
+  .app-confirm-dialog,
+  .download-confirm-panel,
+  .student-detail-modal,
+  .assignment-edit-modal,
+  .submission-preview-panel,
+  .student-monitor-message-modal,
+  .worksheet-editor-modal,
+  .worksheet-link-modal {
+    width: 100% !important;
+    max-height: calc(100dvh - 20px) !important;
+    border-radius: 24px 24px 18px 18px !important;
+  }
+
+  .app-dialog-header {
+    grid-template-columns: 42px minmax(0, 1fr) 36px;
+    gap: 10px;
+    padding: 16px 15px 13px;
+  }
+
+  .app-dialog-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+  }
+
+  .app-dialog-header h2 {
+    font-size: 19px;
+  }
+
+  .app-dialog-body {
+    padding: 17px 16px;
+  }
+
+  .app-dialog-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .app-dialog-actions button {
+    min-width: 0;
+  }
+
+  .feature-dialog-header,
+  .download-confirm-header {
+    grid-template-columns: 42px minmax(0, 1fr) 36px;
+    gap: 10px;
+    padding: 15px;
+  }
+
+  .feature-dialog-header > span,
+  .download-confirm-header .app-dialog-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+  }
+
+  .download-confirm-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .download-confirm-actions button {
+    justify-content: center;
+  }
+
+  .ai-page .ai-dialog {
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+    margin: auto auto 10px;
+    border-radius: 24px 24px 18px 18px !important;
+  }
+
+  .ai-dialog .ai-dialog-heading {
+    grid-template-columns: 42px minmax(0, 1fr) 36px;
+    gap: 10px;
+    padding: 15px;
+  }
+
+  .ai-dialog .ai-dialog-heading .app-dialog-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-dialog-backdrop,
+  .app-confirm-dialog,
+  .download-confirm-panel,
+  .student-detail-modal,
+  .assignment-edit-modal,
+  .submission-preview-panel,
+  .student-monitor-message-modal,
+  .worksheet-editor-modal,
+  .worksheet-link-modal,
+  .feature-dialog,
+  .ai-page .ai-dialog {
+    animation: none !important;
+  }
+}
