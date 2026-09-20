@@ -898,3 +898,534 @@ textarea:focus-visible {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Student follow-up workspace */
+.teacher-score-view-switch {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.student-monitor-panel {
+  display: grid;
+  gap: 22px;
+}
+
+.student-monitor-heading,
+.student-monitor-toolbar,
+.student-monitor-group > header,
+.student-monitor-message-modal > header,
+.student-monitor-message-modal > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.student-monitor-heading h2,
+.student-monitor-heading p,
+.student-monitor-group h3,
+.student-monitor-message-modal h2,
+.student-monitor-message-modal p {
+  margin: 0;
+}
+
+.student-monitor-heading h2 {
+  margin-top: 5px;
+  font-size: clamp(24px, 3vw, 32px);
+}
+
+.student-monitor-heading p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.student-monitor-eyebrow,
+.student-monitor-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--green-700);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.student-monitor-eyebrow svg,
+.student-monitor-count svg {
+  width: 17px;
+  height: 17px;
+}
+
+.student-monitor-count {
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.student-monitor-count strong {
+  font-size: 20px;
+}
+
+.student-monitor-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+}
+
+.student-monitor-classroom,
+.student-monitor-assignment {
+  grid-column: span 2;
+}
+
+.student-monitor-mode {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.student-monitor-mode legend {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.student-monitor-mode > div {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+}
+
+.student-monitor-mode button {
+  min-width: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.student-monitor-mode button.active {
+  background: var(--surface-selected);
+  color: var(--green-700);
+}
+
+.student-monitor-number {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+}
+
+.student-monitor-number:focus-within {
+  border-color: var(--green-700);
+}
+
+.student-monitor-number input {
+  width: 100%;
+  min-width: 0;
+  height: 46px;
+  padding: 0 12px;
+  border: 0 !important;
+  outline: 0;
+  background: transparent !important;
+}
+
+.student-monitor-number span {
+  flex: 0 0 auto;
+  padding-right: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.student-monitor-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.student-monitor-summary-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 4px;
+  min-height: 72px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--blue);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+}
+
+.student-monitor-summary-item.both { border-left-color: var(--coral); }
+.student-monitor-summary-item.missing-work { border-left-color: var(--amber); }
+.student-monitor-summary-item.low-score { border-left-color: var(--blue); }
+.student-monitor-summary-item span { color: var(--muted); font-size: 13px; }
+.student-monitor-summary-item strong { color: var(--ink); font-size: 28px; line-height: 1; }
+.student-monitor-summary-item small { color: var(--muted); }
+
+.student-monitor-toolbar {
+  min-height: 52px;
+  padding-block: 2px;
+}
+
+.student-monitor-toolbar > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.student-monitor-toolbar svg {
+  width: 17px;
+  height: 17px;
+}
+
+.student-monitor-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.student-monitor-select-all input,
+.student-monitor-row > input {
+  width: 19px;
+  height: 19px;
+  margin: 0;
+  accent-color: var(--green-700);
+}
+
+.student-monitor-groups,
+.student-monitor-list {
+  display: grid;
+  gap: 10px;
+}
+
+.student-monitor-group {
+  display: grid;
+  gap: 10px;
+}
+
+.student-monitor-group + .student-monitor-group {
+  margin-top: 12px;
+}
+
+.student-monitor-group > header {
+  padding: 0 4px;
+}
+
+.student-monitor-group > header > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.student-monitor-group > header h3 {
+  font-size: 17px;
+}
+
+.student-monitor-group > header > strong {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.student-monitor-group-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--blue);
+}
+
+.student-monitor-group.both .student-monitor-group-dot { background: var(--coral); }
+.student-monitor-group.missing-work .student-monitor-group-dot { background: var(--amber); }
+
+.student-monitor-list-head,
+.student-monitor-row {
+  display: grid;
+  grid-template-columns: 24px minmax(220px, 1.2fr) minmax(120px, .45fr) minmax(220px, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.student-monitor-list-head {
+  padding: 5px 14px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.student-monitor-row {
+  min-height: 76px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.student-monitor-row:hover,
+.student-monitor-row.selected {
+  border-color: color-mix(in srgb, var(--green-700) 48%, var(--line));
+  background: var(--surface-selected);
+}
+
+.student-monitor-identity,
+.student-monitor-score,
+.student-monitor-missing {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.student-monitor-row small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.student-monitor-score strong {
+  font-size: 17px;
+}
+
+.student-monitor-empty {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 24px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  text-align: center;
+}
+
+.student-monitor-empty svg {
+  width: 38px;
+  height: 38px;
+  padding: 8px;
+  border-radius: 50%;
+  background: var(--surface-selected);
+  color: var(--green-700);
+}
+
+.student-monitor-empty span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.student-monitor-message-backdrop {
+  z-index: 80;
+}
+
+.student-monitor-message-modal {
+  display: grid;
+  width: min(620px, calc(100vw - 28px));
+  max-height: min(760px, calc(100vh - 28px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--paper);
+  box-shadow: 0 24px 70px rgba(20, 40, 28, .18);
+}
+
+.student-monitor-message-modal > header,
+.student-monitor-message-modal > footer {
+  padding: 18px 20px;
+}
+
+.student-monitor-message-modal > header {
+  border-bottom: 1px solid var(--line);
+}
+
+.student-monitor-message-modal > header span,
+.student-monitor-message-preview > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.student-monitor-message-modal > header h2 {
+  font-size: 22px;
+}
+
+.student-monitor-message-modal .icon-button {
+  display: grid;
+  flex: 0 0 auto;
+}
+
+.student-monitor-message-body {
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.student-monitor-message-body textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.student-monitor-tokens {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.student-monitor-message-preview {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+}
+
+.student-monitor-message-preview p {
+  color: var(--ink);
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+.student-monitor-message-modal > footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 900px) {
+  .student-monitor-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .student-monitor-classroom,
+  .student-monitor-assignment {
+    grid-column: span 1;
+  }
+
+  .student-monitor-list-head {
+    display: none;
+  }
+
+  .student-monitor-row {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+  }
+
+  .student-monitor-score {
+    justify-items: end;
+  }
+
+  .student-monitor-missing {
+    grid-column: 2 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  .teacher-score-view-switch {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .teacher-score-view-switch button:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .student-monitor-panel {
+    gap: 16px;
+  }
+
+  .student-monitor-heading {
+    align-items: flex-start;
+  }
+
+  .student-monitor-heading p {
+    font-size: 12px;
+  }
+
+  .student-monitor-count {
+    padding: 7px 10px;
+  }
+
+  .student-monitor-filters,
+  .student-monitor-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .student-monitor-filters {
+    padding: 13px;
+  }
+
+  .student-monitor-summary {
+    gap: 7px;
+  }
+
+  .student-monitor-summary-item {
+    min-height: 54px;
+    padding-block: 10px;
+  }
+
+  .student-monitor-summary-item strong {
+    font-size: 22px;
+  }
+
+  .student-monitor-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .student-monitor-toolbar > div {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .student-monitor-toolbar button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .student-monitor-row {
+    gap: 9px;
+    padding: 12px;
+  }
+
+  .student-monitor-row small {
+    white-space: normal;
+  }
+
+  .student-monitor-message-modal > header,
+  .student-monitor-message-modal > footer,
+  .student-monitor-message-body {
+    padding: 15px;
+  }
+
+  .student-monitor-message-modal > footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .student-monitor-message-modal > footer button {
+    justify-content: center;
+  }
+}
