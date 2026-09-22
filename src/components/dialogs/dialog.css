@@ -25,6 +25,7 @@
 .student-monitor-message-modal,
 .worksheet-editor-modal,
 .worksheet-link-modal,
+.score-import-modal,
 .feature-dialog,
 .ai-page .ai-dialog {
   overflow: hidden;
@@ -364,6 +365,7 @@
 :root[data-theme="dark"] .student-monitor-message-modal,
 :root[data-theme="dark"] .worksheet-editor-modal,
 :root[data-theme="dark"] .worksheet-link-modal,
+:root[data-theme="dark"] .score-import-modal,
 :root[data-theme="dark"] .feature-dialog,
 :root[data-theme="dark"] .ai-page .ai-dialog {
   border-color: #3b4d43 !important;
@@ -400,6 +402,12 @@
   .student-monitor-message-modal,
   .worksheet-editor-modal,
   .worksheet-link-modal {
+    width: 100% !important;
+    max-height: calc(100dvh - 20px) !important;
+    border-radius: 24px 24px 18px 18px !important;
+  }
+
+  .score-import-modal {
     width: 100% !important;
     max-height: calc(100dvh - 20px) !important;
     border-radius: 24px 24px 18px 18px !important;
@@ -489,6 +497,7 @@
   .student-monitor-message-modal,
   .worksheet-editor-modal,
   .worksheet-link-modal,
+  .score-import-modal,
   .feature-dialog,
   .ai-page .ai-dialog {
     animation: none !important;

@@ -107,5 +107,8 @@ export function userFacingError(error: unknown, fallback: string) {
   if (/INVALID_SUBMISSION_WINDOW/i.test(message)) return "วันเวลาปิดรับงานต้องอยู่หลังเวลาเริ่มรับ";
   if (/STUDENT_NOT_FOUND_FOR_SCORE/i.test(message)) return "ไม่พบรายชื่อนักเรียนสำหรับบันทึกคะแนน กรุณาตรวจรายชื่อในห้องเรียน";
   if (/TEACHER_REQUIRED/i.test(message)) return "ต้องเข้าสู่ระบบด้วยบัญชีครูเพื่อบันทึกผลตรวจงาน";
+  if (/CLASSROOM_NOT_FOUND|SCORE_IMPORT_ASSIGNMENT_NOT_IN_CLASSROOM|SCORE_IMPORT_STUDENT_NOT_IN_CLASSROOM/i.test(message)) return "ข้อมูลห้องเรียน งาน หรือนักเรียนในไฟล์ไม่ตรงกับระบบ กรุณาดาวน์โหลดไฟล์ต้นแบบใหม่";
+  if (/SCORE_IMPORT_SCORE_OUT_OF_RANGE/i.test(message)) return "มีคะแนนอยู่นอกช่วงคะแนนเต็ม กรุณาตรวจไฟล์แล้วลองใหม่";
+  if (/INVALID_SCORE_IMPORT_ENTRY|DUPLICATE_SCORE_IMPORT_ENTRY|SCORE_IMPORT_ENTRIES_REQUIRED|SCORE_IMPORT_TOO_LARGE/i.test(message)) return "ข้อมูลนำเข้าคะแนนไม่ถูกต้อง กรุณาดาวน์โหลดไฟล์ต้นแบบใหม่แล้วลองอีกครั้ง";
   return message ? `${message}${debugCode}` : fallback;
 }

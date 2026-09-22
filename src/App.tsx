@@ -65,6 +65,8 @@ import SubmissionHistoryPanel from "./features/submission-history/SubmissionHist
 import { calculateStudentScoreSummary } from "./features/student-scores/summary";
 import StudentMonitoringPanel from "./features/student-monitoring/StudentMonitoringPanel";
 import type { StudentNotificationMessage } from "./features/student-monitoring/monitoring";
+import ScoreImportTools from "./features/score-import/ScoreImportTools";
+import type { ScoreImportChange } from "./features/score-import/scoreImport";
 import { fetchChatMessageRows, fetchCoreClassroomRows, fetchMaterialDownloadLogRows } from "./services/classroomDataService";
 import AiAssistant from "./features/assistant/AiAssistant";
 import { FeatureUpdateManager, FeatureUpdatePopup } from "./features/settings/FeatureUpdates";
@@ -170,6 +172,7 @@ type ScoresViewProps = {
   saveScoreSheet: (assignment: ScoreAssignment) => void;
   saveAllScoreSheets: () => void;
   applySameScoreSheet: (assignment: ScoreAssignment, value: string) => Promise<void>;
+  importScores: (classroomId: string, changes: ScoreImportChange[]) => Promise<boolean>;
   sendStudentNotifications: (messages: StudentNotificationMessage[]) => Promise<boolean>;
   flash: (message: string) => void;
 };
@@ -1583,6 +1586,42 @@ function App() {
     }
   }
 
+  async function importScoreEntriesBatch(classroomId: string, changes: ScoreImportChange[]) {
+    if (!changes.length) return false;
+    if (!isSupabaseConfigured) {
+      flash("ระบบยังไม่ได้เชื่อมต่อ Supabase");
+      return false;
+    }
+    const classroom = classroomItems.find((item) => item.id === classroomId);
+    if (!classroom) {
+      flash("ไม่พบห้องเรียนที่ต้องการนำเข้าคะแนน");
+      return false;
+    }
+    cancelScoreAutoSaves(new Set(changes.map((change) => scoreEntryKey(change.assignmentId, change.studentRecordId))));
+    setBusy(true);
+    try {
+      const payload = changes.map((change) => ({
+        assignment_id: change.assignmentId,
+        student_id: change.studentRecordId,
+        score_status: change.status,
+        raw_score: change.rawScore
+      }));
+      const result = await supabase!.rpc("import_score_entries", {
+        p_classroom_id: classroomId,
+        p_entries: payload
+      });
+      if (result.error) throw result.error;
+      await loadClassroomData();
+      flash(`นำเข้าคะแนน ${changes.length} ช่องของ ${classroom.displayName} แล้ว`);
+      return true;
+    } catch (error) {
+      flash(userFacingError(error, "นำเข้าคะแนนไม่สำเร็จ กรุณาตรวจไฟล์แล้วลองใหม่"));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveAllScoreSheets() {
     if (!activeStudents.length) return flash("ยังไม่มีรายชื่อนักเรียนในห้องนี้");
     if (!activeAssignments.length) return flash("ยังไม่มีงานคะแนนในห้องนี้");
@@ -1959,7 +1998,7 @@ function App() {
           {loadingData && <div className="toast">กำลังโหลดข้อมูล...</div>}
           {view === "home" && <HomeView session={session} setView={setView} materials={session.role === "teacher" ? materialItems : activeMaterials} classrooms={classroomItems} students={session.role === "teacher" ? students : activeStudents} submissions={session.role === "teacher" ? submissionItems : activeSubmissions} assignments={session.role === "teacher" ? assignments : activeAssignments} entries={scoreEntries} announcements={session.role === "teacher" ? announcementItems : activeAnnouncements} homeCards={activeStudentHomeCards} busy={busy} addAnnouncement={addAnnouncement} deleteAnnouncement={deleteAnnouncement} saveHomeCard={saveStudentHomeCard} toggleHomeCard={toggleStudentHomeCard} deleteHomeCard={deleteStudentHomeCard} moveHomeCard={moveStudentHomeCard} />}
           {view === "materials" && <MaterialsView role={session.role} session={session} currentStudent={currentStudent} materials={activeMaterials} logs={activeDownloadLogs} busy={busy} flash={flash} onOpen={openMaterial} onDownload={downloadMaterial} onUpload={uploadMaterial} onDelete={deleteMaterial} onDeleteLog={deleteMaterialDownloadLog} />}
-          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} submissions={activeSubmissions} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} deleteAssignmentGroup={deleteAssignments} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} flushScoreEntry={flushScoreEntry} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} sendStudentNotifications={sendStudentNotifications} flash={flash} />}
+          {view === "scores" && <ScoresView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} entries={scoreEntries} submissions={activeSubmissions} busy={busy} scoreAutoSaveStatus={scoreAutoSaveStatus} activeClassName={activeClassName} addAssignment={addAssignment} updateAssignment={updateAssignmentDetails} deleteAssignment={deleteAssignment} deleteAssignmentGroup={deleteAssignments} moveAssignment={moveAssignment} updateScoreDraft={updateScoreDraft} updateScoreStatus={updateScoreStatus} flushScoreEntry={flushScoreEntry} saveScoreSheet={saveScoreSheet} saveAllScoreSheets={saveAllScoreSheets} applySameScoreSheet={applySameScoreSheet} importScores={importScoreEntriesBatch} sendStudentNotifications={sendStudentNotifications} flash={flash} />}
           {view === "work" && <WorkView role={session.role} classrooms={classroomItems} students={session.role === "teacher" ? students : classroomPeers} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} assignments={activeAssignments} allAssignments={orderAssignments(assignments)} submissions={activeSubmissions} classmates={classroomPeers} currentStudent={currentStudent} busy={busy} activeClassName={activeClassName} submitWork={submitWork} updateSubmission={updateSubmissionDraft} saveSubmission={saveSubmissionReview} saveSubmissions={saveSubmissionReviews} deleteSubmission={deleteSubmissionRecord} openSubmission={openSubmissionFile} getSubmissionPreviewUrl={getSubmissionPreviewUrl} onScoresChanged={async () => { await loadClassroomData(); }} flash={flash} />}
           {view === "students" && <StudentsView classrooms={classroomItems} selectedClassroom={selectedClassroom} selectedClassroomId={effectiveSelectedClassroomId} students={activeStudents} assignments={activeAssignments} entries={scoreEntries} submissions={activeSubmissions} downloadLogs={activeDownloadLogs} busy={busy} flash={flash} addClassroom={addClassroom} deleteClassroom={deleteClassroom} selectClassroom={setSelectedClassroomId} addStudent={addStudent} deleteStudent={deleteStudent} deleteStudents={deleteStudentsBatch} uploadRosterFile={uploadRosterFile} createStudentAccount={createStudentAccount} />}
           {view === "chat" && <ChatView role={session.role} classrooms={classroomItems} selectedClassroomId={effectiveSelectedClassroomId} onClassroomChange={setSelectedClassroomId} students={activeStudents} currentStudent={currentStudent} messages={activeChatMessages} typingByStudent={chatTypingByStudent} busy={busy} sendMessage={sendChatMessage} sendTyping={sendChatTyping} markThreadRead={markChatThreadRead} />}
@@ -2414,7 +2453,7 @@ function MaterialsView({ role, session, currentStudent, materials: items, logs, 
   );
 }
 
-function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, submissions, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, deleteAssignmentGroup, moveAssignment, updateScoreDraft, updateScoreStatus, flushScoreEntry, saveScoreSheet, saveAllScoreSheets, applySameScoreSheet, sendStudentNotifications, flash }: ScoresViewProps) {
+function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, students, assignments, allAssignments, entries, submissions, busy, scoreAutoSaveStatus, activeClassName, addAssignment, updateAssignment, deleteAssignment, deleteAssignmentGroup, moveAssignment, updateScoreDraft, updateScoreStatus, flushScoreEntry, saveScoreSheet, saveAllScoreSheets, applySameScoreSheet, importScores, sendStudentNotifications, flash }: ScoresViewProps) {
   const [draft, setDraft] = useState<AssignmentDraft>({ title: "", assignmentType: "ทั่วไป", rawMax: "", finalMax: "", acceptingSubmissions: true, submissionOpenAt: "", submissionCloseAt: "", classroomIds: selectedClassroomId ? [selectedClassroomId] : [] });
   const [editingGroupKey, setEditingGroupKey] = useState("");
   const [editDraft, setEditDraft] = useState<AssignmentDraft | null>(null);
@@ -2583,6 +2622,7 @@ function ScoresView({ role, classrooms, selectedClassroomId, onClassroomChange, 
         <section className="score-manager score-workspace-panel">
           <SectionTitle title="ตารางกรอกคะแนนทั้งห้อง" note={assignments.length ? `${students.length} คน · ${assignments.length} งาน` : note} />
           <div className="panel-classroom-picker"><TeacherClassroomSelector classrooms={classrooms} selectedClassroomId={selectedClassroomId} onChange={onClassroomChange} /></div>
+          <ScoreImportTools classroom={classrooms.find((classroom) => classroom.id === selectedClassroomId)} students={students} assignments={assignments} entries={entries} busy={busy} flash={flash} onImport={importScores} />
           {assignments.length ? (
             <>
               {students.length ? <div className="desktop-score-matrix"><div className="score-matrix-scroll"><table className="score-matrix"><thead><tr><th className="matrix-no">เลขที่</th><th className="matrix-id">รหัสนักเรียน</th><th className="matrix-name">ชื่อ-นามสกุล</th>{assignments.map((assignment, index) => <th className="matrix-assignment" key={assignment.id}><div><span className="assignment-type-badge compact">{assignment.assignmentType}</span><strong>{assignment.title}</strong><span>ดิบ {formatScore(assignment.rawMax)} → เก็บ {formatScore(assignment.finalMax)}</span><div className="matrix-header-actions"><button type="button" disabled={busy || index === 0} onClick={() => moveAssignment(assignment, -1)} title={`ย้าย ${assignment.title} ไปก่อนหน้า`} aria-label={`ย้าย ${assignment.title} ไปก่อนหน้า`}><ArrowLeft aria-hidden /></button><button type="button" disabled={busy || index === assignments.length - 1} onClick={() => moveAssignment(assignment, 1)} title={`ย้าย ${assignment.title} ไปถัดไป`} aria-label={`ย้าย ${assignment.title} ไปถัดไป`}><ArrowRight aria-hidden /></button><button className="matrix-delete" type="button" disabled={busy} onClick={() => deleteAssignment(assignment)} title={`ลบ ${assignment.title}`} aria-label={`ลบ ${assignment.title}`}><Trash2 aria-hidden /></button></div></div></th>)}</tr></thead><tbody>{students.map((student) => <tr key={student.id}><td className="matrix-no">{student.no}</td><td className="matrix-id">{student.studentId}</td><th className="matrix-name" scope="row">{student.name}</th>{assignments.map((assignment) => {
