@@ -2559,7 +2559,7 @@ begin
     else v_raw_score := 0;
     end if;
     insert into public.score_entries (assignment_id, student_id, student_code, score_status, raw_score, raw_max, final_score, final_max, source_type, source_id, updated_at)
-    values (v_assignment.id, v_student.id, v_student.student_id, v_status, v_raw_score, v_assignment.raw_max,
+    values (v_assignment.id, v_student.id, v_student.student_code, v_status, v_raw_score, v_assignment.raw_max,
       case when v_status = 'scored' then greatest(0, least(v_assignment.final_max, round((v_raw_score / v_assignment.raw_max) * v_assignment.final_max))) else 0 end,
       v_assignment.final_max, 'manual', null, now())
     on conflict (assignment_id, student_id) do update set

@@ -25,7 +25,7 @@ async function setup() {
     $$;
     create table public.classrooms (id uuid primary key, display_name text);
     create table public.students (
-      id uuid primary key, student_id text not null, classroom_id uuid references public.classrooms(id)
+      id uuid primary key, student_code text not null, classroom_id uuid references public.classrooms(id)
     );
     create table public.score_assignments (
       id uuid primary key, classroom_id uuid references public.classrooms(id), raw_max numeric not null,
@@ -71,6 +71,8 @@ test("score import scales scores and stores statuses", async () => {
   assert.equal(result.rows[0].count, 1);
   let saved = await db.query("select score_status,raw_score,final_score,source_type from public.score_entries");
   assert.deepEqual(saved.rows[0], { score_status: "scored", raw_score: "8", final_score: "4", source_type: "manual" });
+  const importedCode = await db.query("select student_code from public.score_entries");
+  assert.equal(importedCode.rows[0].student_code, "12345");
   await db.query("select public.import_score_entries($1,$2::jsonb)", [classroomId, payload(9, { score_status: "leave" })]);
   saved = await db.query("select score_status,raw_score,final_score from public.score_entries");
   assert.deepEqual(saved.rows[0], { score_status: "leave", raw_score: "0", final_score: "0" });

@@ -1,7 +1,7 @@
--- Run this file in Supabase SQL Editor if migrations are not deployed by CLI.
--- It is safe to run again because the function is replaced in place.
 begin;
 
+-- Repair the initial import function: students stores the login identifier in
+-- student_code, while score_entries uses student_id for the student row UUID.
 create or replace function public.import_score_entries(
   p_classroom_id uuid,
   p_entries jsonb
